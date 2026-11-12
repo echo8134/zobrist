@@ -1,0 +1,16 @@
+name: Idea
+description: A wish or a thought. One line is enough. It becomes a Spec when its step is next.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: wish
+    attributes:
+      label: Wish
+      description: What should be possible, and for whom. One sentence.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Optional. The situation that made you want it.

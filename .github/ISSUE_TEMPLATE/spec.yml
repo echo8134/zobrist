@@ -1,0 +1,60 @@
+name: Spec
+description: Requirements, design, and tasks for one step. An agent drafts it, the maintainer approves it, a PR implements it and closes it.
+labels: ["spec"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What the maintainer can do after this step that is not possible today. Name where they notice it (CLI, app) and what changes for them. One paragraph.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is in, and what is out and deferred to a later issue.
+      value: |
+        In:
+        -
+
+        Out:
+        -
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      description: Checks the maintainer runs on the real program. Each is a command or a click with its exact expected result. These become the PR's evidence.
+      value: |
+        1.
+    validations:
+      required: true
+  - type: textarea
+    id: data-shape
+    attributes:
+      label: Data shape
+      description: The types or tables this step adds or changes, named before any logic. State which illegal states the shape rules out.
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: Design notes
+      description: Crates touched and the seam each change sits behind. Every new dependency gets a line; a new dependency of core needs an ADR. Alternatives rejected, one line each.
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Decisions
+      description: ADR needed, yes or no. If yes, name the decision and the options.
+      value: "ADR needed: no"
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      description: Ordered. Each ends in a check that can go red.
+      value: |
+        - [ ]
+    validations:
+      required: true

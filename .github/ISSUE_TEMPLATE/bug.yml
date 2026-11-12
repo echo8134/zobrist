@@ -1,0 +1,33 @@
+name: Bug
+description: The program does something wrong. The fix starts with a failing test.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Exact commands or clicks, the input (attach or inline a PGN or FEN), and the output seen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, commit or version, engine if involved.
+  - type: textarea
+    id: failing-test
+    attributes:
+      label: Failing test
+      description: Crate and test name of the regression test. The fixing PR fills this in before the fix.
