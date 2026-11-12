@@ -26,7 +26,7 @@ These are traps, not a map. The lints in `Cargo.toml` and `clippy.toml` own ever
 - Spec before code. A `feat` or `fix` PR implements one issue and closes it. A PR of another type needs an issue only when one defines its scope. The body of a PR uses the sections in `.github/pull_request_template.md`. Keep `Why`, `Scope`, and `Verification`, and delete any other section that has nothing to say. The body becomes the squash commit body, so keep it under about 40 lines. After merge the tests are the spec.
 - One branch. Branch from `main` and open the PR against it. Nothing reaches `main` except through a PR. When the checks are green and the Review section allows it, squash-merge the PR. Releases are tags on `main`.
 - Small PRs, one concern each, Conventional Commit titles. If review follow-ups grow the diff by more than half or add new state, stop and ask.
-- A decision that is hard to reverse gets an ADR per `docs/adr/README.md`. Update `ARCHITECTURE.md` when a crate or invariant changes. After a handful of feature PRs comes one that only simplifies.
+- A decision that is hard to reverse gets an entry in the Decisions section of `ARCHITECTURE.md`. Update `ARCHITECTURE.md` when a crate or invariant changes. After a handful of feature PRs comes one that only simplifies.
 
 ## Review
 
@@ -57,4 +57,4 @@ Propose a rule under a "Suggested AGENTS.md additions" heading in the PR body. N
 
 ## Boundaries
 
-Agents create issues, branches, commits, and PRs against `main`, and squash-merge a PR when the Review section allows it. Agents never push to `main` directly, never enable auto-merge, never merge with `--admin`, never force-push, never change repository settings or rules, never create remote repos, and never touch releases or secrets. A decision that needs an ADR gets a yes or no from the maintainer before the code. No attribution trailers.
+Agents create issues, branches, commits, and PRs against `main`, and squash-merge a PR when the Review section allows it. Agents never push to `main` directly, never enable auto-merge, never merge with `--admin`, never force-push, never change repository settings or rules, never create remote repos, and never touch releases or secrets. A decision that is hard to reverse gets a yes or no from the maintainer before the code. No attribution trailers.
