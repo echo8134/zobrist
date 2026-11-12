@@ -5,7 +5,7 @@ set -u -o pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
 failed=0
-for doc in README.md AGENTS.md ARCHITECTURE.md docs/adr/*.md; do
+for doc in README.md AGENTS.md ARCHITECTURE.md; do
   [ -f "$doc" ] || continue
   while IFS=: read -r lineno line; do
     # A path is either there or marked as planned, never both. Without the second half, the

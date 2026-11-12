@@ -61,7 +61,7 @@ while read -r crate dep; do
     case "$dep" in
       zobrist-*) ;;
       *) grep -qxF "$dep" <<<"$core_allowed" \
-           || fail "zobrist-core may not depend on $dep. Add it to core_allowed in scripts/check-deps.sh after an ADR or design note justifies it" ;;
+           || fail "zobrist-core may not depend on $dep. Add it to core_allowed in scripts/check-deps.sh after the maintainer approves it and the Decisions section of ARCHITECTURE.md records it" ;;
     esac
   fi
 done <<<"$edges"

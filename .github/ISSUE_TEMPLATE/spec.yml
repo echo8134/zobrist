@@ -42,13 +42,13 @@ body:
     id: design
     attributes:
       label: Design notes
-      description: Crates touched and the seam each change sits behind. Every new dependency gets a line; a new dependency of core needs an ADR. Alternatives rejected, one line each.
+      description: Crates touched and the seam each change sits behind. Every new dependency gets a line; a new dependency of core needs an entry in the Decisions section of ARCHITECTURE.md. Alternatives rejected, one line each.
   - type: textarea
     id: decisions
     attributes:
       label: Decisions
-      description: ADR needed, yes or no. If yes, name the decision and the options.
-      value: "ADR needed: no"
+      description: Hard to reverse, yes or no. If yes, name the decision and the options.
+      value: "Hard to reverse: no"
   - type: textarea
     id: tasks
     attributes:
