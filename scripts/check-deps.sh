@@ -24,7 +24,10 @@ zobrist-app zobrist-store
 zobrist-app zobrist-engine
 "
 # External crates that zobrist-core may depend on, one per line. Empty means none.
-core_allowed=""
+core_allowed="
+pgn-reader
+shakmaty
+"
 owner_of_rusqlite=zobrist-store
 owner_of_tauri=zobrist-app
 

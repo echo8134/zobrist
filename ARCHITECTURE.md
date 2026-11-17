@@ -63,7 +63,7 @@ Revisit if a team of human developers takes over and prefers another language.
 
 ### GPL-3.0-or-later
 
-`core` will link shakmaty, pgn-reader, and shakmaty-syzygy. All three are GPL-3.0-or-later without a linking exception, so a distributed binary must be GPL as a whole. The MIT chess crates cozy-chess and owlchess have no PGN reader. Rejected options: no license and the PolyForm licenses are not GPL-compatible, AGPL-3.0 adds a network clause that a desktop app does not need, and MIT with Apache-2.0 cannot cover a binary that links a GPL library.
+`core` links shakmaty and pgn-reader, and will link shakmaty-syzygy. All three are GPL-3.0-or-later without a linking exception, so a distributed binary must be GPL as a whole. The MIT chess crates cozy-chess and owlchess have no PGN reader. Rejected options: no license and the PolyForm licenses are not GPL-compatible, AGPL-3.0 adds a network clause that a desktop app does not need, and MIT with Apache-2.0 cannot cover a binary that links a GPL library.
 
 The license binds later work in two places. A piece set must have a GPL-compatible license. cburnett, merida, and chessnut qualify, and alpha and the CC BY-NC sets do not. A UCI engine such as Stockfish runs as a separate process, which the GPL treats as an aggregate. If a release ever bundles Stockfish, it must ship the GPL text and a pointer to the Stockfish source.
 
