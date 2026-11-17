@@ -680,6 +680,43 @@ fn reports_stray_text_between_games_and_after_the_last_game() {
 }
 
 #[test]
+fn keeps_text_without_tags_whose_first_move_is_illegal_as_a_game_with_its_problem() {
+    let entries = read(b"[White \"A\"]\n\n1. e4 *\n\n1. Ke3\n").unwrap();
+
+    assert_eq!(entries.len(), 2);
+    let (second, problem) = split(&entries[1]).unwrap();
+    assert_eq!(second.tags(), &[] as &[Tag]);
+    assert_eq!(notation(second), Vec::<String>::new());
+    assert_eq!(
+        problem,
+        Some(&Problem {
+            game_number: 2,
+            reason: Reason::IllegalMove(MoveText {
+                text: "Ke3".to_owned(),
+                number: NonZeroU32::new(1).unwrap(),
+                side: Color::White,
+            })
+        })
+    );
+}
+
+#[test]
+fn keeps_a_lone_tag_line_cut_off_at_the_end_of_the_source_as_a_game_with_its_problem() {
+    let entries = read(b"[White \"A\"]\n\n1. e4 *\n\n[Event \"cut off").unwrap();
+
+    assert_eq!(entries.len(), 2);
+    let (second, problem) = split(&entries[1]).unwrap();
+    assert_eq!(second.tags(), &[] as &[Tag]);
+    assert_eq!(
+        problem,
+        Some(&Problem {
+            game_number: 2,
+            reason: Reason::UnreadableTagLine
+        })
+    );
+}
+
+#[test]
 fn starts_a_new_game_at_the_name_of_the_first_tag_of_the_open_tag_section() {
     let entries = read(b"[White \"Alpha\"]\n\n[White \"Gamma\"]\n\n1. e4 e5 2. Ke3 1-0\n").unwrap();
 

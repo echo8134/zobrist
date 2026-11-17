@@ -258,9 +258,11 @@ impl<F: FnMut(Entry)> Collector<F> {
         let game = builder.finish(marker.unwrap_or(Outcome::Unknown));
         let problem = self.problem.take();
         self.comment.clear();
-        let holds_nothing =
-            matches!(game.main_line(), MainLine::Empty { comments } if comments.is_empty());
-        let entry = if marker.is_none() && game.tags().is_empty() && holds_nothing {
+        let holds_nothing = marker.is_none()
+            && problem.is_none()
+            && game.tags().is_empty()
+            && matches!(game.main_line(), MainLine::Empty { comments } if comments.is_empty());
+        let entry = if holds_nothing {
             Entry::StrayText {
                 after_game: self.games,
             }
