@@ -9,3 +9,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+pgn-reader = "0.29.1"
+shakmaty = "0.30.2"
