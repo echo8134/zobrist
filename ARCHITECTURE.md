@@ -22,7 +22,7 @@ SQLite persistence and search over games and positions.
 
 UCI engine process management.
 
-### `crates/cli` (zobrist-cli, planned)
+### `crates/cli` (zobrist-cli)
 
 The first user interface and the agents' test bed. Everything the app can do is reachable here first.
 
