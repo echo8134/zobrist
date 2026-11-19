@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::io::{self, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{self, ExitCode};
 
 use clap::{Parser, Subcommand};
 use zobrist_core::pgn::{self, Entry};
@@ -32,6 +32,11 @@ enum PgnCommand {
         /// The PGN file to read.
         file: PathBuf,
     },
+    /// Write the games as PGN and report problems on standard error.
+    Write {
+        /// The PGN file to read.
+        file: PathBuf,
+    },
 }
 
 const MAX_KEPT_PROBLEM_LINES: usize = 10_000;
@@ -48,21 +53,20 @@ struct Report {
 
 enum Failure {
     Read(io::Error),
-    Write,
+    Write(io::Error),
 }
 
 fn main() -> ExitCode {
     // clap exits with status 2 on a usage error, which matches "the command could not run".
-    let Arguments {
-        command: Command::Pgn {
-            command: PgnCommand::Check { file },
-        },
-    } = Arguments::parse();
-    check(&file)
+    let Command::Pgn { command } = Arguments::parse().command;
+    match command {
+        PgnCommand::Check { file } => exit_code(&file, report(&file)),
+        PgnCommand::Write { file } => exit_code(&file, write_games(&file)),
+    }
 }
 
-fn check(path: &Path) -> ExitCode {
-    match report(path) {
+fn exit_code(path: &Path, result: Result<usize, Failure>) -> ExitCode {
+    match result {
         Ok(0) => ExitCode::SUCCESS,
         Ok(_) => ExitCode::from(1),
         Err(Failure::Read(error)) => {
@@ -74,7 +78,10 @@ fn check(path: &Path) -> ExitCode {
             .ok();
             ExitCode::from(2)
         }
-        Err(Failure::Write) => ExitCode::from(2),
+        Err(Failure::Write(error)) => {
+            writeln!(io::stderr(), "zobrist: cannot write output: {error}").ok();
+            ExitCode::from(2)
+        }
     }
 }
 
@@ -82,10 +89,10 @@ fn report(path: &Path) -> Result<usize, Failure> {
     let mut file = File::open(path).map_err(Failure::Read)?;
     let report = count(&file).map_err(Failure::Read)?;
     let mut out = io::stdout().lock();
-    print_totals(&report, &mut out).map_err(|_| Failure::Write)?;
+    print_totals(&report, &mut out).map_err(Failure::Write)?;
     if report.problem_lines.len() == report.problems {
         for line in &report.problem_lines {
-            writeln!(out, "{line}").map_err(|_| Failure::Write)?;
+            writeln!(out, "{line}").map_err(Failure::Write)?;
         }
     } else {
         file.rewind().map_err(Failure::Read)?;
@@ -98,9 +105,44 @@ fn report(path: &Path) -> Result<usize, Failure> {
             }
         })
         .map_err(Failure::Read)?;
-        written.map_err(|_| Failure::Write)?;
+        written.map_err(Failure::Write)?;
     }
     Ok(report.problems)
+}
+
+fn write_games(path: &Path) -> Result<usize, Failure> {
+    let file = File::open(path).map_err(Failure::Read)?;
+    let mut output = io::stdout().lock();
+    let mut encoded = Vec::new();
+    let mut problems = 0;
+    let mut first_game = true;
+    let mut write_entry = |entry: Entry| -> io::Result<()> {
+        if let Some(line) = problem_line(&entry) {
+            writeln!(io::stderr().lock(), "{line}")?;
+            problems += 1;
+        }
+        if let Entry::Game { game, .. } = entry {
+            encoded.clear();
+            if !first_game {
+                encoded.push(b'\n');
+            }
+            pgn::write_game(&game, &mut encoded)?;
+            output.write_all(&encoded)?;
+            first_game = false;
+        }
+        Ok(())
+    };
+
+    let read = pgn::read_games(file, |entry| {
+        if let Err(error) = write_entry(entry) {
+            writeln!(io::stderr(), "zobrist: cannot write output: {error}").ok();
+            // The input may be a pipe that stays open after the output has failed.
+            process::exit(2);
+        }
+    });
+    output.flush().map_err(Failure::Write)?;
+    read.map_err(Failure::Read)?;
+    Ok(problems)
 }
 
 fn count(file: &File) -> io::Result<Report> {

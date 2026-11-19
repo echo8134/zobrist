@@ -1,10 +1,10 @@
-//! Reads PGN bytes into games. The boundary between PGN text and the game model.
+//! Reads and writes PGN at the boundary of the game model.
 //!
 //! No game is dropped. A game that cannot be read completely keeps every move before its first
 //! problem, and the [`Problem`] travels next to it in an [`Entry::Game`].
 
 use std::fmt;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::mem;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
@@ -15,7 +15,7 @@ use shakmaty::fen::Fen;
 use shakmaty::{CastlingMode, Chess, Color, Outcome, Position};
 
 use crate::game::{
-    AnnotationSymbol, Game, GameBuilder, MAX_VARIATION_DEPTH, MainLine, MoveError, Tag,
+    AnnotationSymbol, Game, GameBuilder, MAX_VARIATION_DEPTH, MainLine, MoveError, Steps, Tag,
     VariationError,
 };
 
@@ -47,6 +47,95 @@ pub fn read_games<R: Read>(source: R, each: impl FnMut(Entry)) -> io::Result<()>
             Err(error) => return Err(error),
         }
     }
+}
+
+/// Writes a single game as UTF-8 PGN, including a final newline.
+/// The caller separates consecutive games with a blank line. Returns an error if a UTF-8
+/// tag or comment exceeds the size the reader supports, or a tag value contains a newline.
+pub fn write_game(game: &Game, mut output: impl Write) -> io::Result<()> {
+    for tag in game.tags() {
+        if tag.value.contains('\n') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("PGN tag {} contains a line break", tag.name),
+            ));
+        }
+        let value = tag.value.replace('\\', "\\\\").replace('"', "\\\"");
+        // The reader needs the bytes from '[' through the closing quote in one buffer.
+        if tag.name.len() + value.len() + 4 > SUPPORTED_TAG_LINE_LENGTH {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "PGN tag {} exceeds the supported UTF-8 tag length",
+                    tag.name
+                ),
+            ));
+        }
+        writeln!(output, "[{} \"{value}\"]", tag.name)?;
+    }
+    if !game.tags().is_empty() {
+        writeln!(output)?;
+    }
+
+    match game.main_line() {
+        MainLine::Empty { comments } => {
+            write_comments(comments, &mut output, "", " ")?;
+        }
+        MainLine::Moves(_) => {
+            write_line(game.steps(), &mut output)?;
+            output.write_all(b" ")?;
+        }
+    }
+    writeln!(output, "{}", game.result())
+}
+
+fn write_line(steps: Steps<'_>, output: &mut impl Write) -> io::Result<()> {
+    let mut number_black = true;
+    for (index, step) in steps.enumerate() {
+        if index > 0 {
+            output.write_all(b" ")?;
+        }
+        let node = step.node();
+        write_comments(node.comments_before(), output, "", " ")?;
+        let position = step.position_before();
+        if position.turn() == Color::White {
+            write!(output, "{}. ", position.fullmoves())?;
+        } else if number_black {
+            write!(output, "{}... ", position.fullmoves())?;
+        }
+        write!(output, "{}", step.notation())?;
+        for AnnotationSymbol(number) in node.annotation_symbols() {
+            write!(output, " ${number}")?;
+        }
+        write_comments(node.comments_after(), output, " ", "")?;
+        for variation in step.variations() {
+            output.write_all(b" (")?;
+            write_line(variation, output)?;
+            output.write_all(b")")?;
+        }
+        number_black = !node.variations().is_empty()
+            || !node.comments_after().is_empty()
+            || !node.annotation_symbols().is_empty();
+    }
+    Ok(())
+}
+
+fn write_comments(
+    comments: &[String],
+    output: &mut impl Write,
+    before: &str,
+    after: &str,
+) -> io::Result<()> {
+    for comment in comments {
+        if comment.len() > MAX_COMMENT_LENGTH {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "PGN comment exceeds 1 MiB in UTF-8",
+            ));
+        }
+        write!(output, "{before}{{{comment}}}{after}")?;
+    }
+    Ok(())
 }
 
 /// One thing found in a PGN source.
