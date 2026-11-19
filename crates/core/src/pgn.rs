@@ -12,7 +12,7 @@ use std::str;
 
 use pgn_reader::{Nag as RawNag, RawComment, RawTag, Reader, SanPlus, Skip, Visitor};
 use shakmaty::fen::Fen;
-use shakmaty::{CastlingMode, Chess, Color, Outcome, Position};
+use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, Outcome, Position};
 
 use crate::game::{
     AnnotationSymbol, Game, GameBuilder, MAX_VARIATION_DEPTH, MainLine, MoveError, Steps, Tag,
@@ -50,10 +50,49 @@ pub fn read_games<R: Read>(source: R, each: impl FnMut(Entry)) -> io::Result<()>
 }
 
 /// Writes a single game as UTF-8 PGN, including a final newline.
-/// The caller separates consecutive games with a blank line. Returns an error if a UTF-8
-/// tag or comment exceeds the size the reader supports, or a tag value contains a newline.
+/// The caller separates consecutive games with a blank line. Returns an error if the tags
+/// cannot reproduce the starting position, or the reader cannot retain the tags or comments.
 pub fn write_game(game: &Game, mut output: impl Write) -> io::Result<()> {
-    for tag in game.tags() {
+    let start = match start_position(game.tags()) {
+        Some(start) => start,
+        // The reader retains an invalid FEN with its empty game and skips all move text.
+        None if matches!(game.main_line(), MainLine::Empty { comments } if comments.is_empty()) => {
+            Chess::default()
+        }
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid FEN would discard the move text",
+            ));
+        }
+    };
+    let actual = game.start_position();
+    if start.to_setup(EnPassantMode::Always) != actual.to_setup(EnPassantMode::Always)
+        || start.castles().mode() != actual.castles().mode()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PGN tags do not give the game's starting position",
+        ));
+    }
+
+    for (index, tag) in game.tags().iter().enumerate() {
+        if index > 0 && game.tags()[0].name == tag.name {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "repeated first PGN tag would start a new game",
+            ));
+        }
+        if tag.name.trim_ascii() != tag.name
+            || tag.name.contains(['"', ']', '\n'])
+            || tag.name.contains(MARKED_TAG_LINE)
+            || tag.value.contains(MARKED_TAG_LINE)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "PGN tag cannot be read back unchanged",
+            ));
+        }
         if tag.value.contains('\n') {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -127,6 +166,12 @@ fn write_comments(
     after: &str,
 ) -> io::Result<()> {
     for comment in comments {
+        if comment.contains('}') || comment.trim() != comment || comment.contains(MARKED_TAG_LINE) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "PGN comment cannot be read back unchanged",
+            ));
+        }
         if comment.len() > MAX_COMMENT_LENGTH {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -504,7 +549,7 @@ fn decode_utf8_or_latin1(bytes: &[u8]) -> String {
     }
 }
 
-const MARKED_TAG_LINE: &[u8] = b"\xEF\xBB\xBF[";
+const MARKED_TAG_LINE: &str = "\u{feff}[";
 
 /// Removes a UTF-8 byte order mark directly in front of `[`. At the start of a line, or of the
 /// source, the mark is dropped. Anywhere else it becomes a line break.
@@ -553,9 +598,10 @@ impl<R: Read> Read for WithoutByteOrderMarks<R> {
             return Ok(0);
         }
         loop {
+            let mark = MARKED_TAG_LINE.as_bytes();
             let window = &self.buffer[self.start..self.end];
-            let undecided = window.is_empty()
-                || (window[0] == MARKED_TAG_LINE[0] && window.len() < MARKED_TAG_LINE.len());
+            let undecided =
+                window.is_empty() || (window[0] == mark[0] && window.len() < mark.len());
             if undecided && !self.source_done {
                 self.refill()?;
                 continue;
@@ -563,7 +609,7 @@ impl<R: Read> Read for WithoutByteOrderMarks<R> {
             if window.is_empty() {
                 return Ok(0);
             }
-            if window.starts_with(MARKED_TAG_LINE) {
+            if window.starts_with(mark) {
                 self.start += 3;
                 if self.at_line_start {
                     continue;
@@ -573,7 +619,7 @@ impl<R: Read> Read for WithoutByteOrderMarks<R> {
                 return Ok(1);
             }
             let limit = window.len().min(out.len());
-            let next_possible_mark = (1..limit).find(|&index| window[index] == MARKED_TAG_LINE[0]);
+            let next_possible_mark = (1..limit).find(|&index| window[index] == mark[0]);
             let stop = next_possible_mark.unwrap_or(limit);
             out[..stop].copy_from_slice(&window[..stop]);
             self.at_line_start = window[stop - 1] == b'\n';
