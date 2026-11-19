@@ -28,7 +28,6 @@ core_allowed="
 pgn-reader
 shakmaty
 "
-owner_of_rusqlite=zobrist-store
 owner_of_tauri=zobrist-app
 
 # --no-deps limits the check to direct dependencies. A null kind is a normal dependency.
@@ -56,7 +55,7 @@ while read -r crate dep; do
       grep -qxF "$dep" <<<"$members" || fail "$crate depends on $dep, which is not a workspace crate"
       grep -qx "$crate $dep" <<<"$internal_edges" || fail "$crate may not depend on $dep" ;;
     rusqlite)
-      [ "$crate" = "$owner_of_rusqlite" ] || fail "only $owner_of_rusqlite may depend on $dep, not $crate" ;;
+      fail "$crate may not depend on $dep. Use the game store for persistence" ;;
     tauri | tauri-*)
       [ "$crate" = "$owner_of_tauri" ] || fail "only $owner_of_tauri may depend on $dep, not $crate" ;;
   esac
