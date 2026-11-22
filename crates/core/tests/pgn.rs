@@ -4,8 +4,8 @@ use std::io::{self, Read};
 use std::num::NonZeroU32;
 
 use shakmaty::fen::Fen;
-use shakmaty::{Color, EnPassantMode, KnownOutcome, Outcome, Position};
-use zobrist_core::game::{AnnotationSymbol, Counts, Game, MainLine, Tag};
+use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position};
+use zobrist_core::game::{AnnotationSymbol, Counts, Game, GameBuilder, MainLine, Tag};
 use zobrist_core::pgn::{self, Entry, MoveText, Problem, Reason};
 
 const CLEAN: &[u8] = include_bytes!("../../cli/tests/fixtures/clean.pgn");
@@ -954,4 +954,145 @@ fn reports_a_comment_open_at_the_end_of_the_source_and_keeps_its_text() {
         game.steps().nth(1).unwrap().node().comments_after(),
         ["never closed"]
     );
+}
+
+fn assert_written(input: &[u8], expected: &str) -> io::Result<()> {
+    let entries = read(input)?;
+    assert_eq!(entries.len(), 1);
+    let (game, _) = split(&entries[0]).ok_or_else(|| io::Error::other("expected a game"))?;
+    let mut bytes = Vec::new();
+    pgn::write_game(game, &mut bytes)?;
+    assert_eq!(bytes, expected.as_bytes());
+
+    let written = read(&bytes)?;
+    assert_eq!(written.len(), 1);
+    assert_eq!(split(&written[0]), Some((game, None)));
+    Ok(())
+}
+
+#[test]
+fn writes_ordered_tags_and_uses_the_position_and_movetext_result() {
+    let tags = "[FEN \"4k3/8/8/8/8/8/8/4K3 b - - 0 37\"]\n\
+                [Label \"a\\\"b\\\\c\"]\n[Label \"é\"]\n[Result \"*\"]\n\n";
+    assert_written(
+        format!("{tags}Kd7 Kd2 1/2-1/2").as_bytes(),
+        &format!("{tags}37... Kd7 38. Kd2 1/2-1/2\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn writes_comments_variations_and_glyphs_in_their_lines() {
+    assert_written(
+        b"{start} e4!? $42 {after} (d4 {side} (c4) d5) (Nf3) {before} Z0 *",
+        "{start} 1. e4 $5 $42 {after} (1. d4 {side} (1. c4) 1... d5) (1. Nf3) {before} 1... -- *\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn writes_games_without_moves_and_the_part_before_an_illegal_move() {
+    assert_written(b"*", "*\n").unwrap();
+    assert_written(b"{A} {B} 1-0", "{A} {B} 1-0\n").unwrap();
+    assert_written(b"e4 e5 Ke3 Nc6 0-1", "1. e4 e5 0-1\n").unwrap();
+    assert_written(b"e4 {Stra\xDFe} *", "1. e4 {Straße} *\n").unwrap();
+}
+
+#[test]
+fn writes_chess960_castling() {
+    let game = "[Variant \"Chess960\"]\n\
+                [FEN \"rbbqnknr/pppppppp/8/8/8/8/PPPPPPPP/RBBQNKNR w HAha - 0 1\"]\n\n\
+                1. Nh3 Nh6 2. O-O e6 *\n";
+    assert_written(game.as_bytes(), game).unwrap();
+}
+
+#[test]
+fn writes_every_variation_at_the_depth_limit() {
+    let game = format!(
+        "1. e4 {}{} *\n",
+        "(1. d4 ".repeat(254) + "(1. d4",
+        ")".repeat(255)
+    );
+    assert_written(game.as_bytes(), &game).unwrap();
+}
+
+#[test]
+fn writes_the_largest_supported_tag_and_comment_in_utf8() {
+    // The name and tag punctuation through the closing quote take five bytes. The
+    // escaped quote in the value takes two more.
+    let value = "a".repeat((1 << 16) - 7);
+    let text = "ü".repeat(1 << 19);
+    let game = format!("[X \"{value}\\\"\"]\n\n{{{text}}} *\n");
+    assert_written(game.as_bytes(), &game).unwrap();
+}
+
+#[test]
+fn refuses_start_positions_the_tags_cannot_reproduce() {
+    for (tags, fen) in [
+        (vec![], "4k3/8/8/8/8/8/8/4K3 b - - 0 37"),
+        (
+            vec![tag("FEN", "4k3/8/8/8/8/8/8/4K3 b - - 0 1")],
+            "4k3/8/8/8/8/8/8/4K3 b - - 0 37",
+        ),
+    ] {
+        let start = fen
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        let game = GameBuilder::new(tags, start).finish(Outcome::Unknown);
+        assert_eq!(
+            pgn::write_game(&game, io::sink()).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+}
+
+#[test]
+fn keeps_a_damaged_empty_game_but_refuses_moves_a_bad_fen_would_hide() {
+    let tags = vec![tag("FEN", "broken")];
+    let mut builder = GameBuilder::new(tags, Chess::default());
+    let mut output = Vec::new();
+    pgn::write_game(&builder.clone().finish(Outcome::Unknown), &mut output).unwrap();
+    assert_eq!(output, b"[FEN \"broken\"]\n\n*\n");
+    builder.play("e4".parse().unwrap()).unwrap();
+    let game = builder.finish(Outcome::Unknown);
+    assert_eq!(
+        pgn::write_game(&game, io::sink()).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+}
+
+#[test]
+fn refuses_comment_text_that_cannot_roundtrip() {
+    for text in [
+        "note} 0-1 {tail",
+        " leading space",
+        "trailing space ",
+        "mark\u{feff}[here",
+    ] {
+        let mut builder = GameBuilder::new(vec![], Chess::default());
+        builder.comment(text.to_owned());
+        let game = builder.finish(Outcome::Unknown);
+        assert_eq!(
+            pgn::write_game(&game, io::sink()).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+}
+
+#[test]
+fn refuses_tags_that_would_change_or_split_a_built_game() {
+    for tags in [
+        vec![tag("Event", "One"), tag("Event", "Two")],
+        vec![tag(" White ", "Alpha")],
+        vec![tag("Event]", "One")],
+        vec![tag("Event", "mark\u{feff}[here")],
+    ] {
+        let game = GameBuilder::new(tags, Chess::default()).finish(Outcome::Unknown);
+        assert_eq!(
+            pgn::write_game(&game, io::sink()).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
 }
