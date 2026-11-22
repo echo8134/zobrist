@@ -81,11 +81,11 @@ Revisit if the notation panel or the large game list cannot be made acceptable, 
 
 `store` keeps a database in one file of its own format. The file is a sequence of immutable segments with checksums. A segment holds its games by column: fixed-width fields for the game list, dictionaries for names, the main lines as one compact stream of moves, and everything else a game holds beside them. A change appends a segment, and compaction rewrites the file.
 
-The maintainer works with several databases of millions of games at once. A prototype of this layout answered position searches, sorted lists, and filters at that size by scanning, with no index and no stored sort order, so one format serves a hundred games and millions. Rejected options: SQLite, which this document named before anything was measured, and DuckDB with a chess extension, which En Croissant uses and which was slower in the tests that were run. The formats of SCID and ChessBase belong to their programs.
+A scan over this layout answers position searches, sorted lists, and filters fast enough at millions of games, with no index and no stored sort order, so one format serves every database size and a database engine such as SQLite or DuckDB is not needed.
 
 `store` owns the format and its version number, and a reader verifies the checksums before it trusts a segment. PGN stays the exchange format. After the first release, a change of the format needs a reader for the old version or a migration.
 
-Revisit if a kind of query cannot be answered fast enough by a scan at the sizes the maintainer uses. The first answer is then an index part inside this format, not another store.
+Revisit if a scan cannot answer a kind of query fast enough. The first answer is then an index part inside this format, not another store.
 
 ## Gate and CI
 
