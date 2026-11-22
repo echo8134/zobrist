@@ -33,10 +33,11 @@ These are traps, not a map. The lints in `Cargo.toml` and `clippy.toml` own ever
 
 Review exists to catch a defect before the merge. Zero comments is not the goal.
 
-- A `feat`, `fix`, `refactor`, or `perf` PR gets one Codex round. When the checks are green, comment `@codex review` once. A PR of any other type merges on green checks without a round.
+- A `feat`, `fix`, `refactor`, or `perf` PR gets one Codex round, and so does a PR of any type that touches the gate. When the checks are green, comment `@codex review` once. Any other PR merges on green checks without a round.
 - Sort every finding. Fix a defect that the diff introduced. Dismiss style, taste, and anything the gate already checks, with a one-line reason in the thread. File a defect that the diff did not introduce as a `bug` issue. Ask the maintainer about a security or data-loss finding that you cannot settle. Resolve every thread before the merge.
 - Request a second round only if the first round led to a code fix. Never request a third. If the second round finds another defect, stop and ask.
-- A PR that touches the gate waits for the maintainer to merge it. The gate is `scripts/`, `.github/`, `clippy.toml`, `deny.toml`, `rust-toolchain.toml`, `.config/nextest.toml`, the lints in `Cargo.toml`, and this file. A PR that deletes a test or weakens an assertion waits too.
+- The gate is `scripts/`, `.github/`, `clippy.toml`, `deny.toml`, `rust-toolchain.toml`, `.config/nextest.toml`, the lints in `Cargo.toml`, and this file. The gate checks the author's work, so the author never judges a change to it alone.
+- A PR waits for the maintainer's yes when it loosens the gate, deletes a test, weakens an assertion, or changes this file. A change loosens the gate when something passes afterwards that failed before. Say in the PR body what gets weaker and why. After the yes, merge it.
 
 ## Code Review Rules
 
