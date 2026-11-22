@@ -16,7 +16,7 @@ The chess domain model. Pure. No IO and no framework dependencies.
 
 ### `crates/store` (zobrist-store, planned)
 
-SQLite persistence and search over games and positions.
+A database in zobrist's own file format, with search over games and positions.
 
 ### `crates/engine` (zobrist-engine, planned)
 
@@ -40,14 +40,14 @@ The quality gate. `scripts/check.sh` is the entry point. Each script says in its
 core  <-  store, engine  <-  cli, app
 ```
 
-Read each arrow as "is depended on by". `store` and `engine` depend on `core`. `cli` and `app` depend on `core`, `store`, and `engine`. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. Only `store` may depend directly on `rusqlite`, and only `app` may depend directly on the `tauri` crates.
+Read each arrow as "is depended on by". `store` and `engine` depend on `core`. `cli` and `app` depend on `core`, `store`, and `engine`. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. No workspace crate may depend directly on `rusqlite`. Only `app` may depend directly on the `tauri` crates.
 
 `scripts/check-deps.sh` holds this rule as data and enforces it. The rule covers normal and build dependencies, not dev-dependencies.
 
 ## Invariants
 
 - Domain, persistence, engine, and application logic live only in Rust. The view renders state, forwards user intent, and keeps only UI-local state.
-- External data is parsed at the boundary (PGN, UCI, SQLite rows, IPC). Internal code trusts its types.
+- External data is parsed at the boundary (PGN, UCI, database segments, IPC). Internal code trusts its types.
 - Illegal states are unrepresentable. Prefer a type that cannot hold a bad value over a check that rejects one.
 - The view is a pure consumer of IPC types generated from Rust (planned, the generator is chosen in the app step).
 
@@ -76,6 +76,16 @@ The app needs a board, a notation panel with nested variations, and a large game
 The invariants limit the cost of the second language. The TypeScript toolchain is strict TypeScript, Biome, and Vitest, and Vitest tests only UI-local state. A board component such as chessground is allowed as a view-only dependency. The app step chooses the IPC type generator from tauri-specta and ts-rs.
 
 Revisit if the notation panel or the large game list cannot be made acceptable, or if the webview fails on Linux, the development platform. The fallback is egui in `app`, which leaves `core`, `store`, and `engine` unchanged.
+
+### An own file format for the game store
+
+`store` keeps a database in one file of its own format. The file is a sequence of immutable segments with checksums. A segment holds its games by column: fixed-width fields for the game list, dictionaries for names, the main lines as one compact stream of moves, and everything else a game holds beside them. A change appends a segment, and compaction rewrites the file.
+
+A scan over this layout answers position searches, sorted lists, and filters fast enough at millions of games, with no index and no stored sort order, so one format serves every database size and a database engine such as SQLite or DuckDB is not needed.
+
+`store` owns the format and its version number, and a reader verifies the checksums before it trusts a segment. PGN stays the exchange format. After the first release, a change of the format needs a reader for the old version or a migration.
+
+Revisit if a scan cannot answer a kind of query fast enough. The first answer is then an index part inside this format, not another store.
 
 ## Gate and CI
 
