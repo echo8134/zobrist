@@ -4,7 +4,7 @@ This document is the map a reader opens first. It names the parts of zobrist and
 
 ## Bird's eye view
 
-zobrist is a personal chess database desktop app, in the spirit of ChessBase, written in Rust. It is meant to store the maintainer's own games, search them, and run a UCI engine for analysis. It is developed on Linux and is meant to run on macOS and Windows as well.
+zobrist is a personal chess database desktop app written in Rust. It is meant to store the maintainer's own games, search them, and run a UCI engine for analysis. It is developed on Linux and is meant to run on macOS and Windows as well.
 
 The program is a set of Rust crates with one direction of dependency. A pure domain model sits at the bottom. Persistence and engine management sit on top of it. Two user interfaces, a CLI and a Tauri desktop shell with a React view, sit at the top and own no chess logic.
 
@@ -65,13 +65,13 @@ Revisit if a team of human developers takes over and prefers another language.
 
 `core` links shakmaty and pgn-reader, and will link shakmaty-syzygy. All three are GPL-3.0-or-later without a linking exception, so a distributed binary must be GPL as a whole. The MIT chess crates cozy-chess and owlchess have no PGN reader. Rejected options: no license and the PolyForm licenses are not GPL-compatible, AGPL-3.0 adds a network clause that a desktop app does not need, and MIT with Apache-2.0 cannot cover a binary that links a GPL library.
 
-The license binds later work in two places. A piece set must have a GPL-compatible license. cburnett, merida, and chessnut qualify, and alpha and the CC BY-NC sets do not. A UCI engine such as Stockfish runs as a separate process, which the GPL treats as an aggregate. If a release ever bundles Stockfish, it must ship the GPL text and a pointer to the Stockfish source.
+The license binds later work in two places. A piece set must have a GPL-compatible license. cburnett, merida, and chessnut qualify, and alpha and the CC BY-NC sets do not. A UCI engine runs as a separate process, which the GPL treats as an aggregate. If a release ever bundles a GPL engine, it must ship the GPL text and a pointer to the engine's source.
 
 `deny.toml` lists the allowed licenses. Revisit if `core` stops linking a GPL chess library.
 
 ### Tauri 2 with React for the desktop UI
 
-The app needs a board, a notation panel with nested variations, and a large game list, and it should have a modern web look. En Croissant shows that this stack carries a chess database with a large game list, and a trial build rendered correctly on Linux with Wayland. Rejected options: egui is pure Rust with headless tests but lost on look, the release notes of iced do not mention accessibility, Slint adds a third language, and the renderer of Dioxus native is in beta.
+The app needs a board, a notation panel with nested variations, and a large game list, and it should have a modern web look. A trial build rendered correctly on Linux with Wayland. Rejected options: egui is pure Rust with headless tests but lost on look, the release notes of iced do not mention accessibility, Slint adds a third language, and the renderer of Dioxus native is in beta.
 
 The invariants limit the cost of the second language. The TypeScript toolchain is strict TypeScript, Biome, and Vitest, and Vitest tests only UI-local state. A board component such as chessground is allowed as a view-only dependency. The app step chooses the IPC type generator from tauri-specta and ts-rs.
 
@@ -81,7 +81,7 @@ Revisit if the notation panel or the large game list cannot be made acceptable, 
 
 `store` keeps a database in one file of its own format. The file is a sequence of immutable segments with checksums. A segment holds its games by column: fixed-width fields for the game list, dictionaries for names, the main lines as one compact stream of moves, and everything else a game holds beside them. A change appends a segment, and compaction rewrites the file.
 
-A scan over this layout answers position searches, sorted lists, and filters fast enough at millions of games, with no index and no stored sort order, so one format serves every database size and a database engine such as SQLite or DuckDB is not needed.
+A scan over this layout answers position searches, sorted lists, and filters fast enough at millions of games, with no index and no stored sort order, so one format serves every database size and no database engine is needed.
 
 `store` owns the format and its version number, and a reader verifies the checksums before it trusts a segment. PGN stays the exchange format. After the first release, a change of the format needs a reader for the old version or a migration.
 
