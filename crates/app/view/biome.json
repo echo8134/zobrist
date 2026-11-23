@@ -5,5 +5,34 @@
   },
   "formatter": {
     "indentStyle": "space"
-  }
+  },
+  "linter": {
+    "rules": {
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": ["@tauri-apps/api", "@tauri-apps/api/*"],
+                "message": "Call Rust through src/ipc.ts. No other file of the view imports the Tauri API."
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/ipc.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ]
 }
