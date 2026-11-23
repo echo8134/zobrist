@@ -34,3 +34,8 @@ allow_attributes_without_reason = "warn"
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+
+# Dependencies build without debug information, which keeps the build folder several times
+# smaller. A backtrace still names their functions.
+[profile.dev.package."*"]
+debug = false
