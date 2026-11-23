@@ -34,7 +34,9 @@ allow = [
 confidence-threshold = 0.8
 
 [bans]
-multiple-versions = "warn"
+# Tauri's tree holds dozens of crates in two versions. A warning for each buried the gate's
+# output and never failed it.
+multiple-versions = "allow"
 wildcards = "deny"
 
 [sources]
