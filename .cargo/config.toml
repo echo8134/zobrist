@@ -1,0 +1,3 @@
+[env]
+# ts-rs writes the TypeScript types of the view into this folder when the tests of zobrist-app run.
+TS_RS_EXPORT_DIR = { value = "crates/app/view/src/generated", relative = true }

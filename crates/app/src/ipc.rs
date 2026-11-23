@@ -1,20 +1,24 @@
 //! Everything that crosses between the view and Rust.
 //!
-//! The view sends a [`Request`] and gets back the [`Response`] case with the same name.
+//! The view sends a [`Request`] and gets back the [`Response`] case with the same name. The
+//! TypeScript types of the view are generated from these two types.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// What the view can ask for.
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Deserialize, TS)]
 #[serde(tag = "type")]
+#[ts(export)]
 pub enum Request {
     /// The version of zobrist.
     Version,
 }
 
 /// What Rust answers. Each case has the name of its request.
-#[derive(Debug, PartialEq, Eq, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "type")]
+#[ts(export)]
 pub enum Response {
     /// The version of zobrist.
     Version {
