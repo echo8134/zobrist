@@ -77,8 +77,8 @@ run python3 scripts/test-release-notes.py
 run scripts/check-generated.sh
 # nextest fails a run that finds no tests unless --no-tests=pass is set.
 run cargo nextest run --workspace --all-features --locked --no-tests=pass
-# nextest does not run doc tests.
-run cargo test --workspace --doc --locked
+# nextest does not run doc tests. The same features as the run above let both share one build.
+run cargo test --workspace --doc --all-features --locked
 run cargo deny --locked --all-features check
 run scripts/check-e2e.sh
 
