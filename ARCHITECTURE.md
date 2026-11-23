@@ -26,9 +26,9 @@ UCI engine process management.
 
 The first user interface and the agents' test bed. Everything the app can do is reachable here first.
 
-### `crates/app` (zobrist-app, planned)
+### `crates/app` (zobrist-app)
 
-Tauri shell with a React view.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response.
 
 ### `scripts/`
 
@@ -49,7 +49,7 @@ Read each arrow as "is depended on by". `store` and `engine` depend on `core`. `
 - Domain, persistence, engine, and application logic live only in Rust. The view renders state, forwards user intent, and keeps only UI-local state.
 - External data is parsed at the boundary (PGN, UCI, database segments, IPC). Internal code trusts its types.
 - Illegal states are unrepresentable. Prefer a type that cannot hold a bad value over a check that rejects one.
-- The view is a pure consumer of IPC types generated from Rust (planned, the generator is chosen in the app step).
+- The view is a pure consumer of IPC types generated from Rust.
 
 ## Decisions
 
@@ -73,7 +73,9 @@ The license binds later work in two places. A piece set must have a GPL-compatib
 
 The app needs a board, a notation panel with nested variations, and a large game list, and it should have a modern web look. A trial build rendered correctly on Linux with Wayland. Rejected options: egui is pure Rust with headless tests but lost on look, the release notes of iced do not mention accessibility, Slint adds a third language, and the renderer of Dioxus native is in beta.
 
-The invariants limit the cost of the second language. The TypeScript toolchain is strict TypeScript, Biome, and Vitest, and Vitest tests only UI-local state. A board component such as chessground is allowed as a view-only dependency. The app step chooses the IPC type generator from tauri-specta and ts-rs.
+The invariants limit the cost of the second language. The TypeScript toolchain is strict TypeScript, Biome, and Vitest, and Vitest tests only UI-local state. A board component such as chessground is allowed as a view-only dependency.
+
+ts-rs generates the IPC types, and every call from the view goes through one command that takes a typed request and returns a typed response, so the TypeScript check rejects a call that Rust does not know. Rejected option: tauri-specta also writes one function per command and checks more by itself, but its version for Tauri 2 is a release candidate. A later switch touches the type module, the command, and the one file through which the view calls Rust.
 
 Revisit if the notation panel or the large game list cannot be made acceptable, or if the webview fails on Linux, the development platform. The fallback is egui in `app`, which leaves `core`, `store`, and `engine` unchanged.
 
@@ -91,7 +93,7 @@ Revisit if a scan cannot answer a kind of query fast enough. The first answer is
 
 There is one gate, `scripts/check.sh`, and CI runs the same script. The steps live in the script, the lint levels in `Cargo.toml`, and the workflows in `.github/workflows/`.
 
-The macOS and Windows jobs run only `cargo check`. They report a failure but do not block a merge. They become blocking once code touches the operating system.
+The macOS and Windows jobs only build the view and run `cargo check`. They report a failure but do not block a merge. They become blocking once code touches the operating system.
 
 ## Documents
 
