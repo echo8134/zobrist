@@ -33,7 +33,8 @@ These are traps, not a map. The lints in `Cargo.toml` and `clippy.toml` own ever
 
 Review exists to catch a defect before the merge. Zero comments is not the goal.
 
-- A `feat`, `fix`, `refactor`, or `perf` PR gets one Codex round, and so does a PR of any type that touches the gate. When the checks are green, comment `@codex review` once. Any other PR merges on green checks without a round.
+- A `feat`, `fix`, `refactor`, or `perf` PR gets one review round, and so does a PR of any type that touches the gate. The agent that did not write the PR reviews it, because an author does not see the gaps in their own reasoning. Any other PR merges on green checks without a round.
+- The branch name says who wrote the PR. It starts with `claude` or `codex`, then a slash and the topic. When the checks of a `claude` PR are green, comment `@codex review` once. When the checks of a `codex` PR are green, a Claude session reviews the diff against the Code Review Rules and posts each finding as a review comment.
 - Sort every finding. Fix a defect that the diff introduced. Dismiss style, taste, and anything the gate already checks, with a one-line reason in the thread. File a defect that the diff did not introduce as a `bug` issue. Ask the maintainer about a security or data-loss finding that you cannot settle. Resolve every thread before the merge.
 - Request a second round only if the first round led to a code fix. Never request a third. If the second round finds another defect, stop and ask.
 - The gate is `scripts/`, `.github/`, `clippy.toml`, `deny.toml`, `rust-toolchain.toml`, `.config/nextest.toml`, the lints in `Cargo.toml`, and this file. The gate checks the author's work, so the author never judges a change to it alone.
