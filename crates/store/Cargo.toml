@@ -1,0 +1,16 @@
+[package]
+name = "zobrist-store"
+description = "Reads and writes the zobrist game database format."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+crc32fast = "1.5"
+shakmaty = "0.30.2"
+zobrist-core = { path = "../core", version = "0.0.0" }

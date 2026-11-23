@@ -14,9 +14,9 @@ The program is a set of Rust crates with one direction of dependency. A pure dom
 
 The chess domain model. Pure. No IO and no framework dependencies.
 
-### `crates/store` (zobrist-store, planned)
+### `crates/store` (zobrist-store)
 
-A database in zobrist's own file format, with search over games and positions.
+Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. Search over games and positions is planned.
 
 ### `crates/engine` (zobrist-engine, planned)
 

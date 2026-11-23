@@ -2,7 +2,7 @@
 
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
-use shakmaty::{Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position};
+use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position};
 use zobrist_core::game::{
     AnnotationSymbol, Counts, Game, GameBuilder, MainLine, Move, MoveError, NoMove, Tag,
     VariationError,
@@ -126,6 +126,46 @@ fn refuses_an_illegal_move_and_plays_the_next_legal_one() {
         notation(&builder.finish(Outcome::Unknown)),
         ["e4", "e5", "Nf3"]
     );
+}
+
+#[test]
+fn playing_by_squares_builds_the_same_promotion_castling_and_null_moves() {
+    for (fen, mode, squares, notation) in [
+        (
+            "7k/P7/8/8/8/8/8/7K w - - 0 1",
+            CastlingMode::Standard,
+            "a7a8n",
+            "a8=N",
+        ),
+        (
+            "k7/8/8/8/8/8/8/5K1R w H - 0 1",
+            CastlingMode::Chess960,
+            "f1h1",
+            "O-O",
+        ),
+    ] {
+        let start = fen.parse::<Fen>().unwrap().into_position(mode).unwrap();
+        let mut by_name = GameBuilder::new(Vec::new(), start);
+        let mut by_square = by_name.clone();
+        play(&mut by_name, &[notation, "--"]).unwrap();
+        by_square.play_uci(squares.parse().unwrap()).unwrap();
+        by_square.play_uci("0000".parse().unwrap()).unwrap();
+        assert_eq!(
+            by_square.finish(Outcome::Unknown),
+            by_name.finish(Outcome::Unknown)
+        );
+    }
+}
+
+#[test]
+fn an_illegal_coordinate_move_leaves_the_builder_ready_to_play() {
+    let mut builder = GameBuilder::new(Vec::new(), Chess::default());
+    assert_eq!(
+        builder.play_uci("e2e5".parse().unwrap()),
+        Err(MoveError::IllegalMove)
+    );
+    builder.play_uci("e2e4".parse().unwrap()).unwrap();
+    assert_eq!(notation(&builder.finish(Outcome::Unknown)), ["e4"]);
 }
 
 #[test]
