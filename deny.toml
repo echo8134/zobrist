@@ -3,6 +3,11 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # The GTK 3 bindings under Tauri 2 (glib-macros and gtk3-macros 0.18) use this crate, and no
+    # Tauri 2 release is free of them. It runs at compile time only and is not part of the app.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained, and Tauri 2 on Linux cannot build without it" },
+]
 
 [licenses]
 unused-allowed-license = "allow"
@@ -22,6 +27,9 @@ allow = [
     "Unlicense",
     "0BSD",
     "BSL-1.0",
+    # Tauri's tree needs it for cssparser, selectors, dtoa-short, and option-ext. Section 3.3 of
+    # the license lets a larger work that contains such files be distributed under the GPL.
+    "MPL-2.0",
 ]
 confidence-threshold = 0.8
 

@@ -1,0 +1,17 @@
+[package]
+name = "zobrist-app"
+description = "The zobrist desktop app. A Tauri shell with a React view. Owns no chess logic."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tauri = "2.12.7"
+
+[build-dependencies]
+tauri-build = "2.7.6"

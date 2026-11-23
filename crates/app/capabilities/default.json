@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The window may call the command of the app and nothing of the Tauri API. The folder must exist, because the build script of Tauri watches it, and cargo rebuilds the app on every run while it is missing.",
+  "windows": ["main"],
+  "permissions": []
+}

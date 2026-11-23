@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "io.github.echo8134.zobrist",
+  "build": {
+    "frontendDist": "view/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "zobrist"
+      }
+    ]
+  }
+}
