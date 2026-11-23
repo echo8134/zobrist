@@ -48,6 +48,11 @@ need cargo-deny "Install with: cargo install --locked cargo-deny"
 need jq "Install it with the system package manager"
 need node "Install Node.js $(jq --raw-output .engines.node "$view/package.json")"
 need pnpm "Install with: npm install --global $(jq --raw-output .packageManager "$view/package.json")"
+need docker "Install Docker. The end-to-end test runs its display in a container"
+if ! docker info >/dev/null 2>&1; then
+  echo "check.sh: Docker is not running. Start it. The end-to-end test runs its display in a container" >&2
+  exit 2
+fi
 
 # Record a failure and keep going, so that one run reports every red step.
 failed=0
@@ -75,6 +80,7 @@ run cargo nextest run --workspace --all-features --locked --no-tests=pass
 # nextest does not run doc tests.
 run cargo test --workspace --doc --locked
 run cargo deny --locked --all-features check
+run scripts/check-e2e.sh
 
 if [ "$failed" -ne 0 ]; then
   echo "check.sh: failed, fix the cause before finishing" >&2

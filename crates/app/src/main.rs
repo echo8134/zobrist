@@ -8,7 +8,8 @@ fn answer(request: Request) -> Response {
 }
 
 fn main() -> tauri::Result<()> {
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![answer])
-        .run(tauri::generate_context!())
+    let builder = tauri::Builder::default().invoke_handler(tauri::generate_handler![answer]);
+    #[cfg(feature = "webdriver")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    builder.run(tauri::generate_context!())
 }
