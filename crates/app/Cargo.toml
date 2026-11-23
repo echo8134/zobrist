@@ -11,6 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
 tauri = "2.12.7"
 
 [build-dependencies]
