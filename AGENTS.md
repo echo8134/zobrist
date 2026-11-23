@@ -1,10 +1,16 @@
 # zobrist
 
-Personal, ChessBase-like chess database in Rust. One maintainer, no other users, public only so CI is free. `ARCHITECTURE.md` is the map and its invariants are binding. The gate enforces the dependency direction and document paths. Review checks the invariants. Everything in the repository is in English, whatever language the conversation uses.
+Personal, ChessBase-like chess database in Rust. `ARCHITECTURE.md` is the map and its invariants are binding. The gate enforces the dependency direction and document paths. Review checks the invariants. Everything in the repository is in English, whatever language the conversation uses.
 
 ## Gate
 
 `scripts/check.sh --all` is the whole gate, the same locally and in CI. Run it before you report any work as done and quote its last lines as evidence. Fix the cause, never the gate.
+
+## Release notes
+
+End each PR description with `## Release notes`. Write one `- ` bullet per change a chess player will notice, or use `- N/A` for an internal change. The squash commit keeps this text.
+
+For the first release, run `scripts/release-notes.py TAG`. For later releases, run `scripts/release-notes.py PREVIOUS_TAG TAG`. Copy the Markdown from standard output into the GitHub release. Review any commits listed on standard error for changes that need a handwritten entry.
 
 ## Rules the gate cannot check
 
