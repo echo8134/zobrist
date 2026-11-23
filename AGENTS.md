@@ -1,6 +1,6 @@
 # zobrist
 
-Personal, ChessBase-like chess database in Rust. `ARCHITECTURE.md` is the map and its invariants are binding. The gate enforces the dependency direction and document paths. Review checks the invariants. Everything in the repository is in English, whatever language the conversation uses.
+Personal chess database in Rust. `ARCHITECTURE.md` is the map and its invariants are binding. The gate enforces the dependency direction and document paths. Review checks the invariants. Everything in the repository is in English, whatever language the conversation uses.
 
 ## Gate
 
