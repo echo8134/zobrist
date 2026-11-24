@@ -27,7 +27,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 
 # Without --all, skip the run when no file that the gate checks differs from HEAD. That keeps
 # the Stop hook cheap. It also means that the hook never checks a commit, so CI runs --all.
-paths=('*.rs' '*.toml' '*.md' 'Cargo.lock' 'scripts/*')
+paths=('*.rs' '*.toml' '*.md' 'Cargo.lock' 'scripts/*' 'crates/app/*')
 if [ "${1:-}" != "--all" ]; then
   if git rev-parse --verify --quiet HEAD >/dev/null \
     && git diff --quiet HEAD -- "${paths[@]}" \
@@ -36,12 +36,23 @@ if [ "${1:-}" != "--all" ]; then
   fi
 fi
 
-for tool in cargo-nextest cargo-deny jq; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "check.sh: $tool is missing. Install with: cargo install --locked cargo-nextest cargo-deny (jq from the system package manager)" >&2
-    exit 2
-  fi
-done
+view=crates/app/view
+
+need() {
+  command -v "$1" >/dev/null 2>&1 && return
+  echo "check.sh: $1 is missing. $2" >&2
+  exit 2
+}
+need cargo-nextest "Install with: cargo install --locked cargo-nextest"
+need cargo-deny "Install with: cargo install --locked cargo-deny"
+need jq "Install it with the system package manager"
+need node "Install Node.js $(jq --raw-output .engines.node "$view/package.json")"
+need pnpm "Install with: npm install --global $(jq --raw-output .packageManager "$view/package.json")"
+need docker "Install Docker. The end-to-end test runs its display in a container"
+if ! docker info >/dev/null 2>&1; then
+  echo "check.sh: Docker is not running. Start it. The end-to-end test runs its display in a container" >&2
+  exit 2
+fi
 
 # Record a failure and keep going, so that one run reports every red step.
 failed=0
@@ -51,15 +62,25 @@ run() {
 }
 
 run cargo fmt --all --check
+# zobrist-app embeds the built view when it compiles, so the view comes before every cargo
+# step that compiles the workspace.
+run pnpm --dir "$view" install --frozen-lockfile
+run pnpm --dir "$view" run build
+run pnpm --dir "$view" run lint
+run pnpm --dir "$view" run typecheck
+run pnpm --dir "$view" run test
 run cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 run scripts/check-deps.sh
 run scripts/check-docs.sh
 run python3 scripts/test-release-notes.py
+# The test run below rewrites the generated types, so only a check before it can find them stale.
+run scripts/check-generated.sh
 # nextest fails a run that finds no tests unless --no-tests=pass is set.
 run cargo nextest run --workspace --all-features --locked --no-tests=pass
-# nextest does not run doc tests.
-run cargo test --workspace --doc --locked
+# nextest does not run doc tests. The same features as the run above let both share one build.
+run cargo test --workspace --doc --all-features --locked
 run cargo deny --locked --all-features check
+run scripts/check-e2e.sh
 
 if [ "$failed" -ne 0 ]; then
   echo "check.sh: failed, fix the cause before finishing" >&2
