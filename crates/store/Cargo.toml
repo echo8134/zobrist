@@ -13,4 +13,4 @@ workspace = true
 [dependencies]
 crc32fast = "1.5"
 shakmaty = "0.30.2"
-zobrist-core = { path = "../core", version = "0.0.0" }
+zobrist-core = { path = "../core", version = "0.1.0" }
