@@ -1,0 +1,123 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  # Proves the build of the release files before a tag exists. Only the release PR changes
+  # CHANGELOG.md.
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - release-plz.toml
+      - crates/app/tauri.conf.json
+      - CHANGELOG.md
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-pr:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The token in RELEASE_PLZ_TOKEN writes the branch and the PR, so that the checks run on the
+    # release PR. GitHub starts no workflow for a PR that the default token opened.
+    permissions:
+      contents: read
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+      - uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
+        with:
+          command: release-pr
+          version: 0.4.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  # Creates the tag and the draft release when the pushed commit is the merge of a release PR.
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+      # Every crate shares the tag name, so the first entry carries the tag of the release.
+      tag: ${{ fromJSON(steps.release-plz.outputs.releases)[0].tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+      - id: release-plz
+        uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
+        with:
+          command: release
+          version: 0.4.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # On a release, builds the two files from the tag, attaches them to the draft, and publishes
+  # it. On a pull request, builds the two files and publishes nothing.
+  build:
+    needs: release
+    # The release job is skipped on a pull request. Without !cancelled() a skipped need would
+    # skip this job as well.
+    if: >-
+      !cancelled()
+      && (github.event_name == 'pull_request'
+        || (needs.release.result == 'success' && needs.release.outputs.releases_created == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Empty on a pull request, which checks out the pull request.
+          ref: ${{ needs.release.outputs.tag }}
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: crates/app/view/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: crates/app/view/package.json
+      - name: Install the libraries that Tauri links on Linux
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev libdbus-1-dev
+      - run: pnpm --dir crates/app/view install --frozen-lockfile
+      - run: pnpm --dir crates/app/view build
+      - run: cargo build --release --locked -p zobrist-cli
+      # Without a tag name the action builds the AppImage and uploads nothing. With one, it finds
+      # the draft release of that tag in the list of releases, because releaseDraft is true, and
+      # attaches the AppImage to it.
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/app
+          tauriScript: ${{ github.workspace }}/crates/app/view/node_modules/.bin/tauri
+          tagName: ${{ needs.release.outputs.tag }}
+          releaseDraft: true
+          uploadUpdaterJson: false
+      - name: Attach the command line program and publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          gh release upload "$TAG" target/release/zobrist
+          gh release edit "$TAG" --draft=false
