@@ -28,7 +28,3 @@ List a check that did not run as a gap. If a part works and you do not know why,
 ## Suggested AGENTS.md additions
 
 A trap met in this PR that meets the three criteria in AGENTS.md, with the proposed wording.
-
-## Release notes
-
-Replace this line with a bullet for each change a chess player will notice, or `- N/A` for an internal change.
