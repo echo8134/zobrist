@@ -6,6 +6,10 @@ Personal chess database in Rust. `ARCHITECTURE.md` is the map and its invariants
 
 `scripts/check.sh --all` is the whole gate, the same locally and in CI. Run it before you report any work as done and quote its last lines as evidence. Fix the cause, never the gate.
 
+## Releases
+
+release-plz keeps one release PR open on a branch that starts with `release-plz-`. Only the maintainer merges it, because the merge publishes a release. It gets no review round. The title of each `feat`, `fix`, and `perf` PR becomes a line of the changelog, so write that title for a chess player.
+
 ## Rules the gate cannot check
 
 These are traps, not a map. The lints in `Cargo.toml` and `clippy.toml` own everything a lint can own. Do not repeat them here.

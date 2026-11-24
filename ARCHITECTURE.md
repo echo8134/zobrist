@@ -89,9 +89,17 @@ A scan over this layout answers position searches, sorted lists, and filters fas
 
 Revisit if a scan cannot answer a kind of query fast enough. The first answer is then an index part inside this format, not another store.
 
+### Releases from release-plz
+
+release-plz turns the PR titles into releases. It keeps one release PR open that raises the version in `[workspace.package]` and adds a section to the changelog. The merge of that PR creates the tag `vX.Y.Z` and a draft GitHub release, and `.github/workflows/release.yml` attaches the command line program and the AppImage for Linux and publishes the draft. release-plz was chosen because it reads the last version from the git tags and raises a version that every crate inherits from the workspace. Rejected options: release-please cannot raise a version that crates inherit from the workspace, which is its open issue 2111. A workflow of our own around a release notes script kept hand-written notes, but zobrist would own and test a release tool.
+
+The choice binds later work in three places. A `feat`, `fix`, or `perf` PR title is a line of the changelog, and every other type asks for no release. Tags keep the form `vX.Y.Z`, because a release tool finds the last release by its tag, so a later switch of the tool must keep that form. A release PR changes only the version fields, `Cargo.lock`, and the changelog, so a test that needs the version reads it from the root manifest.
+
+`release-plz.toml` holds the settings. Revisit if release-plz stops raising a version that the crates inherit from the workspace.
+
 ## Gate and CI
 
-There is one gate, `scripts/check.sh`, and CI runs the same script. The steps live in the script, the lint levels in `Cargo.toml`, and the workflows in `.github/workflows/`.
+There is one gate, `scripts/check.sh`, and CI runs the same script. The steps live in the script, the lint levels in `Cargo.toml`, and the workflows in `.github/workflows/`. Beside the gate, the workflow `release` makes the releases that the Decisions entry describes. On a pull request that changes the release files, it builds them and publishes nothing.
 
 The macOS and Windows jobs only build the view and run `cargo check`. They report a failure but do not block a merge. They become blocking once code touches the operating system.
 
