@@ -1,0 +1,37 @@
+[workspace]
+git_only = true
+git_tag_name = "v{{ version }}"
+git_tag_enable = false
+git_release_enable = false
+release_always = false
+semver_check = false
+features_always_increment_minor = true
+release_commits = "^(feat|fix|perf)[(:!]"
+changelog_update = false
+# The body becomes the body of the squash commit on main, so it holds the changelog section of
+# the release and nothing else.
+pr_body = """
+{%- for release in releases %}{% if release.package == "zobrist-cli" -%}
+## {% if release.title %}{{ release.title }}{% else %}{{ release.next_version }}{% endif %}
+{% if release.changelog %}
+{{ release.changelog }}
+{% endif %}{% endif %}{% endfor -%}
+"""
+
+[[package]]
+name = "zobrist-cli"
+changelog_update = true
+changelog_path = "./CHANGELOG.md"
+changelog_include = ["zobrist-core", "zobrist-store", "zobrist-app"]
+git_tag_enable = true
+git_release_enable = true
+git_release_name = "v{{ version }}"
+git_release_draft = true
+
+[changelog]
+commit_parsers = [
+  { message = "^feat", group = "added" },
+  { message = "^fix", group = "fixed" },
+  { message = "^perf", group = "performance" },
+  { message = ".*", skip = true },
+]
