@@ -101,7 +101,7 @@ The choice binds later work in three places. A `feat`, `fix`, or `perf` PR title
 
 There is one gate, `scripts/check.sh`, and CI runs the same script. The steps live in the script, the lint levels in `Cargo.toml`, and the workflows in `.github/workflows/`. Beside the gate, the workflow `release` makes the releases that the Decisions entry describes. On a pull request that changes the release files, it builds them and publishes nothing.
 
-The macOS and Windows jobs only build the view and run `cargo check`. They report a failure but do not block a merge. They become blocking once code touches the operating system.
+The macOS and Windows jobs only build the view and run `cargo check`. zobrist ships no build for these systems yet, and the jobs keep the code portable until it does. A failure blocks a merge, because code now touches the operating system.
 
 ## Documents
 
