@@ -26,6 +26,14 @@ jobs:
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest,cargo-deny
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: crates/app/view/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: crates/app/view/package.json
+      - name: Install the libraries that Tauri links on Linux
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev libdbus-1-dev
       - run: scripts/check.sh --all
 
   cross-check:
@@ -39,4 +47,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: crates/app/view/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: crates/app/view/package.json
+      # zobrist-app embeds the built view when it compiles.
+      - run: pnpm --dir crates/app/view install --frozen-lockfile
+      - run: pnpm --dir crates/app/view build
       - run: cargo check --workspace --all-targets --locked

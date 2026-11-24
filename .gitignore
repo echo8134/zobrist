@@ -1,5 +1,7 @@
 /target
 **/node_modules
+/crates/app/gen/
+/crates/app/view/dist/
 /.claude/
 *.log
 .env
