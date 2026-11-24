@@ -6,11 +6,9 @@ Personal chess database in Rust. `ARCHITECTURE.md` is the map and its invariants
 
 `scripts/check.sh --all` is the whole gate, the same locally and in CI. Run it before you report any work as done and quote its last lines as evidence. Fix the cause, never the gate.
 
-## Release notes
+## Releases
 
-End each PR description with `## Release notes`. Write one `- ` bullet per change a chess player will notice, or use `- N/A` for an internal change. The squash commit keeps this text.
-
-For the first release, run `scripts/release-notes.py TAG`. For later releases, run `scripts/release-notes.py PREVIOUS_TAG TAG`. Copy the Markdown from standard output into the GitHub release. Review any commits listed on standard error for changes that need a handwritten entry.
+release-plz keeps one release PR open on a branch that starts with `release-plz-`. Only the maintainer merges it, because the merge publishes a release. It gets no review round. The title of each `feat`, `fix`, and `perf` PR becomes a line of the changelog, so write that title for a chess player.
 
 ## Rules the gate cannot check
 

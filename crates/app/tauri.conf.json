@@ -1,5 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "productName": "zobrist",
   "identifier": "io.github.echo8134.zobrist",
   "build": {
     "frontendDist": "view/dist"
@@ -10,5 +11,10 @@
         "title": "zobrist"
       }
     ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage"],
+    "icon": ["icons/icon.png"]
   }
 }

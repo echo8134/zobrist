@@ -72,7 +72,6 @@ run pnpm --dir "$view" run test
 run cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 run scripts/check-deps.sh
 run scripts/check-docs.sh
-run python3 scripts/test-release-notes.py
 # The test run below rewrites the generated types, so only a check before it can find them stale.
 run scripts/check-generated.sh
 # nextest fails a run that finds no tests unless --no-tests=pass is set.
