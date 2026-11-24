@@ -22,7 +22,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # The token in RELEASE_PLZ_TOKEN writes the branch and the PR, so that the checks run on the
+    # A token of the release app writes the branch and the PR, so that the checks run on the
     # release PR. GitHub starts no workflow for a PR that the default token opened.
     permissions:
       contents: read
@@ -35,12 +35,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+      # The token is valid for one hour, for this repository alone, and with only the two
+      # permissions that release-plz needs.
+      - id: app-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
         with:
           command: release-pr
           version: 0.4.3
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
   # Creates the tag and the draft release when the pushed commit is the merge of a release PR.
   release:
