@@ -8,6 +8,7 @@
 use std::{iter, mem, slice};
 
 use shakmaty::san::{San, SanError, SanPlus, Suffix};
+use shakmaty::uci::UciMove;
 use shakmaty::{Chess, Color, EnPassantMode, FromSetup, Outcome, Position};
 
 /// One tag pair, like `[White "Alpha"]`, decoded to text.
@@ -349,29 +350,29 @@ impl GameBuilder {
 
     /// Plays a move at the end of the innermost open line. `San::Null` plays a null move.
     pub fn play(&mut self, san: San) -> Result<(), MoveError> {
-        let line = self.innermost();
-        let (played, after) = match san {
-            San::Null => {
-                let after = play_null(&line.position).ok_or(MoveError::IllegalMove)?;
-                (
-                    Played::Null {
-                        after: Box::new(after.clone()),
-                    },
-                    after,
-                )
-            }
-            San::Normal { .. } | San::Castle(_) | San::Put { .. } => {
-                let chess_move = san.to_move(&line.position).map_err(|error| match error {
-                    SanError::IllegalSan => MoveError::IllegalMove,
-                    SanError::AmbiguousSan => MoveError::AmbiguousMove,
-                })?;
-                let mut after = line.position.clone();
-                after.play_unchecked(chess_move);
-                (Played::Legal(chess_move), after)
-            }
+        let chess_move = if san == San::Null {
+            Move::Null
+        } else {
+            Move::Legal(san.to_move(self.position()).map_err(|error| match error {
+                SanError::IllegalSan => MoveError::IllegalMove,
+                SanError::AmbiguousSan => MoveError::AmbiguousMove,
+            })?)
         };
-        line.push(played, after);
-        Ok(())
+        self.append_move(chess_move)
+    }
+
+    /// Plays a move by its squares, including castling to the rook's square and a null move.
+    pub fn play_uci(&mut self, coordinates: UciMove) -> Result<(), MoveError> {
+        let chess_move = if coordinates == UciMove::Null {
+            Move::Null
+        } else {
+            Move::Legal(
+                coordinates
+                    .to_move(self.position())
+                    .map_err(|_| MoveError::IllegalMove)?,
+            )
+        };
+        self.append_move(chess_move)
     }
 
     /// Adds an annotation symbol to the last move of the innermost open line.
@@ -450,6 +451,28 @@ impl GameBuilder {
 
     fn innermost(&mut self) -> &mut OpenLine {
         self.variations.last_mut().unwrap_or(&mut self.main)
+    }
+
+    fn append_move(&mut self, chess_move: Move) -> Result<(), MoveError> {
+        let line = self.innermost();
+        let (played, after) = match chess_move {
+            Move::Legal(legal) => {
+                let mut after = line.position.clone();
+                after.play_unchecked(legal);
+                (Played::Legal(legal), after)
+            }
+            Move::Null => {
+                let after = play_null(&line.position).ok_or(MoveError::IllegalMove)?;
+                (
+                    Played::Null {
+                        after: Box::new(after.clone()),
+                    },
+                    after,
+                )
+            }
+        };
+        line.push(played, after);
+        Ok(())
     }
 }
 

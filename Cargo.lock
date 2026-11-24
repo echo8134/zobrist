@@ -5142,6 +5142,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "zobrist-core",
+ "zobrist-store",
 ]
 
 [[package]]
@@ -5150,4 +5151,13 @@ version = "0.0.0"
 dependencies = [
  "pgn-reader",
  "shakmaty",
+]
+
+[[package]]
+name = "zobrist-store"
+version = "0.0.0"
+dependencies = [
+ "crc32fast",
+ "shakmaty",
+ "zobrist-core",
 ]
