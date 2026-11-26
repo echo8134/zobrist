@@ -116,11 +116,16 @@ function Field({ name, value, onSend }: FieldProps) {
   // The text that Rust refused. The field keeps it and marks itself, and this is the one
   // text of the form that the picture does not have.
   const [refusedTyped, setRefusedTyped] = useState<string>();
+  const [sent, setSent] = useState<string>();
   const [valueSeen, setValueSeen] = useState(value);
   if (valueSeen !== value) {
-    // The field starts again from the picture when its tag changes there.
+    // The field starts again from the picture when its tag changes there. A text that the
+    // player typed on while Rust answered the text before stays, because no picture has it.
     setValueSeen(value);
-    setTyped(value);
+    const text = typed.trim();
+    if (text === valueSeen || text === sent) {
+      setTyped(value);
+    }
     setRefusedTyped(undefined);
   }
 
@@ -131,6 +136,7 @@ function Field({ name, value, onSend }: FieldProps) {
       setTyped(value);
       setRefusedTyped(undefined);
     } else if (text !== refusedTyped) {
+      setSent(text);
       const taken = await onSend(text);
       setRefusedTyped(taken ? undefined : text);
     }

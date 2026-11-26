@@ -102,12 +102,15 @@ describe("the data of a game", () => {
         .map((name) => name.getText()),
     ).toEqual(["White", "Black", "Event", "Site", "Date", "Round", "Result"]);
 
-    // The notation area is 320 px wide with a line of 1 px at its left, and the top bar is
-    // 40 px high.
-    expect(await form().getLocation()).toEqual({ x: 1280 - 319, y: 40 });
+    // The notation area is 320 px wide with a line of 1 px at its left. The form stands
+    // under the top bar and the row of buttons, which are 40 px high each.
+    expect(await form().getLocation()).toEqual({ x: 1280 - 319, y: 40 + 40 });
     expect(await form().getSize("width")).toBe(319);
     const whiteName = form().$("label=White");
-    expect(await whiteName.getLocation()).toEqual({ x: 961 + 16, y: 40 + 12 });
+    expect(await whiteName.getLocation()).toEqual({
+      x: 961 + 16,
+      y: 40 + 40 + 12,
+    });
     expect((await whiteName.getCSSProperty("font-size")).value).toBe("11px");
     expect((await whiteName.getCSSProperty("color")).parsed.hex).toBe(
       "#6b6b6b",
@@ -187,7 +190,7 @@ describe("the data of a game", () => {
     });
   });
 
-  it("sets the result of the game with the choice and keeps it over a move", async () => {
+  it("sets the result of the game with the choice, and an undo takes it back", async () => {
     await choose("1-0");
     await browser.waitUntil(async () => (await chosenResult()) === "1-0");
 
@@ -206,6 +209,18 @@ describe("the data of a game", () => {
       width: picture.readUInt32BE(16),
       height: picture.readUInt32BE(20),
     }).toEqual({ width: 1280, height: 800 });
+
+    await clickOnTheBoard();
+    await browser.keys(["Control", "z"]);
+    await expect(browser.$$("main aside li")).toBeElementsArrayOfSize(0);
+    expect(await chosenResult()).toBe("1-0");
+    await browser.keys(["Control", "z"]);
+    await browser.waitUntil(async () => (await chosenResult()) === "*");
+
+    await browser.keys(["Control", "y"]);
+    await browser.waitUntil(async () => (await chosenResult()) === "1-0");
+    await browser.keys(["Control", "y"]);
+    await expect(browser.$$("main aside li")).toBeElementsArrayOfSize(1);
   });
 
   it("keeps a key from the game while a field of the form has the focus", async () => {
@@ -221,6 +236,32 @@ describe("the data of a game", () => {
     await expect(currentMoves()).toBeElementsArrayOfSize(0);
     await browser.keys("ArrowRight");
     await expect(currentMoves()).toBeElementsArrayOfSize(1);
+  });
+
+  it("keeps what the player types on while Rust answers the text before", async () => {
+    // The driver of the test is too slow to type between a text and its answer. So the
+    // script sends a text with Enter and types on in the same moment, before Rust can answer.
+    await browser.execute(`
+      const white = document.querySelector("main aside form input");
+      const type = (text) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(white, text);
+        white.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      };
+      white.focus();
+      type("Gamma");
+      white.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      type("Gammas");
+    `);
+
+    // The name of the tab shows that the answer for the first text came.
+    await expect(tab(1)).toHaveText("Gamma - Beta");
+    await expect(field("White")).toHaveValue("Gammas");
+
+    await clickOnTheBoard();
+    await expect(tab(1)).toHaveText("Gammas - Beta");
+
+    await typeAndPressEnter("White", "Alpha");
+    await expect(tab(1)).toHaveText("Alpha - Beta");
   });
 
   it("gives each tab a form of its own", async () => {
