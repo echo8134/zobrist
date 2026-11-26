@@ -9,7 +9,7 @@ use std::process::{self, ExitCode};
 use clap::{Parser, Subcommand};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{Database, DatabaseWriter};
+use zobrist_store::{Database, DatabaseWriter, add_pgn_games};
 
 /// A personal chess database.
 #[derive(Parser)]
@@ -45,6 +45,18 @@ enum PgnCommand {
         /// The PGN file to read.
         file: PathBuf,
     },
+    /// List the games in file order.
+    List {
+        /// The PGN file to read.
+        file: PathBuf,
+    },
+    /// Add the games from a source PGN file to the end of a target PGN file.
+    Add {
+        /// The PGN file to extend or create.
+        target: PathBuf,
+        /// The PGN file to read.
+        source: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -77,7 +89,15 @@ struct Report {
 enum Failure {
     Read(io::Error),
     Create(PathBuf, io::Error),
+    Add(PathBuf, io::Error),
+    Diagnostic(io::Error),
     Write(io::Error),
+}
+
+impl From<io::Error> for Failure {
+    fn from(error: io::Error) -> Self {
+        Self::Write(error)
+    }
 }
 
 fn main() -> ExitCode {
@@ -86,6 +106,8 @@ fn main() -> ExitCode {
         Command::Pgn { command } => match command {
             PgnCommand::Check { file } => exit_code(&file, report(&file)),
             PgnCommand::Write { file } => exit_code(&file, write_games(&file)),
+            PgnCommand::List { file } => exit_code(&file, list_games(&file)),
+            PgnCommand::Add { target, source } => exit_code(&source, add_games(&target, &source)),
         },
         Command::Database { command } => match command {
             DatabaseCommand::Create { pgn, database } => exit_code(&pgn, create(&pgn, &database)),
@@ -116,8 +138,17 @@ fn exit_code(path: &Path, result: Result<usize, Failure>) -> ExitCode {
             .ok();
             ExitCode::from(2)
         }
-        Err(Failure::Write(error)) => {
+        Err(Failure::Write(error) | Failure::Diagnostic(error)) => {
             writeln!(io::stderr(), "zobrist: cannot write output: {error}").ok();
+            ExitCode::from(2)
+        }
+        Err(Failure::Add(target, error)) => {
+            writeln!(
+                io::stderr(),
+                "zobrist: cannot add games to {}: {error}",
+                target.display()
+            )
+            .ok();
             ExitCode::from(2)
         }
     }
@@ -230,22 +261,73 @@ impl<W: Write> PgnOutput<W> {
     }
 }
 
-fn write_games(path: &Path) -> Result<usize, Failure> {
-    let file = File::open(path).map_err(Failure::Read)?;
-    let mut output = PgnOutput::new(io::stdout().lock());
+fn for_each_game(
+    file: File,
+    mut each: impl FnMut(&Game) -> io::Result<()>,
+) -> Result<usize, Failure> {
     let mut problems = 0;
-    let read = PgnInput::for_each(file, |entry| {
+    PgnInput::for_each(file, |entry| {
         if let Some(line) = problem_line(&entry) {
-            writeln!(io::stderr().lock(), "{line}").map_err(Failure::Write)?;
+            writeln!(io::stderr().lock(), "{line}").map_err(Failure::Diagnostic)?;
             problems += 1;
         }
         if let Entry::Game { game, .. } = entry {
-            output.write(&game).map_err(Failure::Write)?;
+            each(&game)?;
         }
         Ok(())
-    });
+    })?;
+    Ok(problems)
+}
+
+fn write_games(path: &Path) -> Result<usize, Failure> {
+    let file = File::open(path).map_err(Failure::Read)?;
+    let mut output = PgnOutput::new(io::stdout().lock());
+    let read = for_each_game(file, |game| output.write(game));
     output.output.flush().map_err(Failure::Write)?;
-    read?;
+    read
+}
+
+fn list_games(path: &Path) -> Result<usize, Failure> {
+    let file = File::open(path).map_err(Failure::Read)?;
+    let mut output = io::stdout().lock();
+    let mut number = 0_u64;
+    let read = for_each_game(file, |game| {
+        number += 1;
+        let tag = |name| {
+            game.tag(name)
+                .unwrap_or("?")
+                .replace("\r\n", " ")
+                .replace(['\r', '\n', '\t'], " ")
+        };
+        writeln!(
+            output,
+            "{number}\t{}\t{}\t{}\t{}\t{}",
+            tag("White"),
+            tag("Black"),
+            game.result(),
+            tag("Date"),
+            tag("Event")
+        )
+    });
+    output.flush().map_err(Failure::Write)?;
+    read
+}
+
+fn add_games(target: &Path, source: &Path) -> Result<usize, Failure> {
+    let file = File::open(source).map_err(Failure::Read)?;
+    let mut problems = 0;
+    let added = add_pgn_games(target, |append| {
+        problems = for_each_game(file, append)?;
+        Ok(())
+    })
+    .map_err(|failure| {
+        if let Failure::Write(error) = failure {
+            Failure::Add(target.to_owned(), error)
+        } else {
+            failure
+        }
+    })?;
+    writeln!(io::stdout().lock(), "games added: {added}").map_err(Failure::Write)?;
     Ok(problems)
 }
 
