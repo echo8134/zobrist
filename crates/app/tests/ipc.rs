@@ -7,14 +7,17 @@ fn ask(games: &mut Games, request: Value) -> serde_json::Result<Value> {
     let request = serde_json::from_value(request)?;
     let mut response = serde_json::to_value(games.answer(request))?;
     // The board offers these moves as a set. Compare every entry, including duplicates.
-    if let Some(moves) = response
-        .pointer_mut("/picture/legalMoves")
-        .and_then(Value::as_array_mut)
-    {
-        moves.sort_by(|left, right| {
-            (left["from"].as_str(), left["to"].as_str())
-                .cmp(&(right["from"].as_str(), right["to"].as_str()))
-        });
+    for path in [
+        "/picture/legalMoves",
+        "/change/picture/legalMoves",
+        "/opened/picture/legalMoves",
+    ] {
+        if let Some(moves) = response.pointer_mut(path).and_then(Value::as_array_mut) {
+            moves.sort_by(|left, right| {
+                (left["from"].as_str(), left["to"].as_str())
+                    .cmp(&(right["from"].as_str(), right["to"].as_str()))
+            });
+        }
     }
     Ok(response)
 }
@@ -212,6 +215,8 @@ fn rejects_malformed_requests_at_the_wire() {
         json!({"type": "PlayMove", "game": 1, "from": "h7", "to": "g8", "promotion": "king"}),
         json!({"type": "PlayMove", "game": 1, "from": "h7", "to": "g8", "promotion": "pawn"}),
         json!({"type": "GoTo", "game": 1, "place": [-1]}),
+        json!({"type": "SetStartPosition", "game": 1}),
+        json!({"type": "SetStartPosition", "game": 1, "fen": null}),
         json!({"type": "SetTag", "game": 1, "tag": "Result", "text": "1-0"}),
         json!({"type": "SetTag", "game": 1, "tag": "FEN", "text": "position"}),
         json!({"type": "SetResult", "game": 1, "result": "other"}),
@@ -651,5 +656,161 @@ fn variation_edits_return_the_new_notation_and_place() -> serde_json::Result<()>
     for kind in ["DeleteRest", "DeleteVariation"] {
         assert_picture(&mut games, json!({"type": kind, "game": 1}), &after_e4())?;
     }
+    Ok(())
+}
+
+#[test]
+fn setting_a_start_position_reports_the_board_or_the_refusal() -> serde_json::Result<()> {
+    let mut games = Games::default();
+    play_line(&mut games, "e2e4")?;
+    let fen = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1";
+    let mut setup = start_picture();
+    setup["fen"] = json!(fen);
+    setup["legalMoves"] = json!(legal_moves("e1d1 e1d2 e1f1 e1f2 e2e3 e2e4"));
+    setup["canUndo"] = json!(true);
+    setup["tags"] = json!([{"name": "SetUp", "value": "1"}, {"name": "FEN", "value": fen}]);
+    assert_eq!(
+        ask(
+            &mut games,
+            json!({"type": "SetStartPosition", "game": 1, "fen": fen})
+        )?,
+        json!({"type": "SetStartPosition", "change": {"picture": setup, "refused": false}})
+    );
+
+    for invalid in [
+        "4k3/8/8/8/8/8/4P3/8 w - - 0 1",
+        "4k3/8/8/8/8/8/4P3/3KK3 w - - 0 1",
+        "4k3/8/8/8/8/8/4R3/4K3 w - - 0 1",
+        "4k3/8/8/8/8/8/8/P3K3 w - - 0 1",
+        "this is not FEN",
+        "rbbqnknr/pppppppp/8/8/8/8/PPPPPPPP/RBBQNKNR w HAha - 0 1",
+    ] {
+        assert_eq!(
+            ask(
+                &mut games,
+                json!({"type": "SetStartPosition", "game": 1, "fen": invalid})
+            )?,
+            json!({"type": "SetStartPosition", "change": {"picture": setup, "refused": true}}),
+            "{invalid}"
+        );
+    }
+    let mut restored = after_e4();
+    restored["canRedo"] = json!(true);
+    assert_picture(&mut games, json!({"type": "Undo", "game": 1}), &restored)
+}
+
+#[test]
+fn opening_pgn_text_gives_the_first_game_and_export_keeps_its_variation() -> serde_json::Result<()>
+{
+    let mut games = Games::default();
+    ask(&mut games, json!({"type": "NewGame"}))?;
+    assert_eq!(
+        ask(&mut games, json!({"type": "OpenPgnText", "text": ""}))?,
+        json!({"type": "OpenPgnText", "opened": null})
+    );
+    let first = "[White \"Alpha\"]\n\n1. e4 e5 (1... c5) 2. Nf3 *\n";
+    let source = format!("{first}\n[White \"Beta\"]\n\n1. d4 *");
+    let mut imported = start_picture();
+    imported["hasNextMove"] = json!(true);
+    imported["tags"] = json!([{"name": "White", "value": "Alpha"}]);
+    imported["notation"] = json!(main_line("e4 e5 Nf3"));
+    imported["notation"][1]["variations"] = json!([[{
+        "place": [0, 1], "number": 1, "side": "black", "text": "c5",
+        "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": []
+    }]]);
+    assert_eq!(
+        ask(&mut games, json!({"type": "OpenPgnText", "text": source}))?,
+        json!({"type": "OpenPgnText", "opened": {"game": 2, "picture": imported, "problem": null}})
+    );
+    assert_eq!(
+        ask(&mut games, json!({"type": "GamePgn", "game": 2}))?,
+        json!({"type": "GamePgn", "text": first})
+    );
+    assert_eq!(
+        ask(&mut games, json!({"type": "NewGame"}))?,
+        json!({"type": "NewGame", "game": 3, "picture": start_picture()})
+    );
+
+    ask(&mut games, json!({"type": "CloseGame", "game": 2}))?;
+    assert_eq!(
+        ask(
+            &mut games,
+            json!({"type": "SetStartPosition", "game": 2, "fen": "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"})
+        )?,
+        json!({"type": "SetStartPosition", "change": null})
+    );
+    assert_eq!(
+        ask(&mut games, json!({"type": "GamePgn", "game": 2}))?,
+        json!({"type": "GamePgn", "text": null})
+    );
+    Ok(())
+}
+
+#[test]
+fn opening_pgn_text_reports_the_first_problem_and_keeps_the_moves_before_it()
+-> serde_json::Result<()> {
+    for (source, moves, problem) in [
+        (
+            "1. e4 e5 2. Ke3 Nc6 *",
+            "e4 e5",
+            "illegal move \"Ke3\" at White's move 2, 2 moves kept",
+        ),
+        (
+            "1. e4 Ke6 *",
+            "e4",
+            "illegal move \"Ke6\" at Black's move 1, 1 move kept",
+        ),
+    ] {
+        let mut picture = start_picture();
+        picture["hasNextMove"] = json!(true);
+        picture["notation"] = json!(main_line(moves));
+        assert_eq!(
+            ask(
+                &mut Games::default(),
+                json!({"type": "OpenPgnText", "text": source})
+            )?,
+            json!({"type": "OpenPgnText", "opened": {"game": 1, "picture": picture, "problem": problem}})
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn exporting_an_open_game_reports_a_writer_error() -> serde_json::Result<()> {
+    let mut games = Games::default();
+    let tags = json!([{"name": "FEN", "value": "broken"}]);
+    let mut picture = start_picture();
+    picture["tags"] = tags.clone();
+    assert_eq!(
+        ask(
+            &mut games,
+            json!({"type": "OpenPgnText", "text": "[FEN \"broken\"]\n\n*"})
+        )?,
+        json!({"type": "OpenPgnText", "opened": {
+            "game": 1, "picture": picture, "problem": "FEN tag is not a legal position, 0 moves kept"
+        }})
+    );
+    let mut played = after_e4();
+    played["tags"] = tags;
+    assert_eq!(
+        play(&mut games, "e2e4", None)?,
+        json!({"type": "PlayMove", "picture": played})
+    );
+    assert_eq!(
+        ask(&mut games, json!({"type": "GamePgn", "game": 1}))?,
+        json!({"type": "GamePgn", "error": "invalid FEN would discard the move text"})
+    );
+    Ok(())
+}
+
+#[test]
+fn opening_pgn_text_keeps_castling_from_a_nonstandard_start() -> serde_json::Result<()> {
+    let pgn = "[FEN \"rbbqnknr/pppppppp/8/8/8/8/PPPPPPPP/RBBQNKNR w HAha - 0 1\"]\n\n1. Nh3 Nh6 2. O-O e6 *\n";
+    let mut games = Games::default();
+    ask(&mut games, json!({"type": "OpenPgnText", "text": pgn}))?;
+    assert_eq!(
+        ask(&mut games, json!({"type": "GamePgn", "game": 1}))?,
+        json!({"type": "GamePgn", "text": pgn})
+    );
     Ok(())
 }

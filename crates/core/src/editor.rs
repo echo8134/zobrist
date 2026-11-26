@@ -2,10 +2,11 @@
 
 use std::{mem, ops::Deref};
 
-use shakmaty::{Chess, Color, Outcome, Position, Role, Square};
+use shakmaty::{Chess, Color, EnPassantMode, Outcome, Position, Role, Square, fen::Fen};
 
 use crate::game::{
-    AnnotationSymbol, Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps, Tag,
+    AnnotationSymbol, Game, GameBuilder, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step,
+    Steps, Tag,
 };
 use crate::pgn::{escaped_tag_value, validate_comment};
 use crate::shapes::{self, Shapes};
@@ -228,6 +229,15 @@ pub enum TagError {
     RepeatedFirstTag,
 }
 
+fn check_first_tag<'a>(mut tags: impl Iterator<Item = &'a Tag>) -> Result<(), TagError> {
+    if let Some(first) = tags.next()
+        && tags.any(|tag| tag.name == first.name)
+    {
+        return Err(TagError::RepeatedFirstTag);
+    }
+    Ok(())
+}
+
 fn date_part(part: Option<&str>, unknown: &str, minimum: &str, maximum: &str) -> bool {
     part.is_some_and(|part| {
         part == unknown
@@ -280,11 +290,7 @@ impl GameEditor {
     #[must_use]
     pub fn new(game: Game) -> Self {
         Self {
-            current: EditorState {
-                position: game.start_position().clone(),
-                game,
-                place: Place::default(),
-            },
+            current: EditorState::at_start(game),
             previous: Vec::new(),
             undone: Vec::new(),
         }
@@ -405,6 +411,36 @@ impl GameEditor {
         self.change(|state| state.play(from, to, promotion))
     }
 
+    /// Starts a new line from a legal position with standard castling rules. Clears the moves
+    /// and annotations and resets the result. Undo restores the game and its previous place.
+    pub fn set_start_position(&mut self, position: Chess) -> Result<(), TagError> {
+        let mut tags: Vec<_> = self
+            .game()
+            .tags()
+            .iter()
+            .filter(|tag| !matches!(tag.name.as_str(), "SetUp" | "FEN"))
+            .cloned()
+            .collect();
+        if self.game().tag("Result").is_some() {
+            replace_tag(&mut tags, "Result", "*", &[]);
+        }
+        check_first_tag(tags.iter())?;
+        let fen = Fen::from_position(&position, EnPassantMode::Always);
+        if fen != Fen::default() {
+            tags.push(Tag {
+                name: "SetUp".to_owned(),
+                value: "1".to_owned(),
+            });
+            tags.push(Tag {
+                name: "FEN".to_owned(),
+                value: fen.to_string(),
+            });
+        }
+        let game = GameBuilder::new(tags, position).finish(Outcome::Unknown);
+        self.change(|state| *state = EditorState::at_start(game));
+        Ok(())
+    }
+
     /// The text and distinct shapes in the comments at the current place.
     #[must_use]
     pub fn comment(&self) -> (String, Shapes) {
@@ -445,12 +481,7 @@ impl GameEditor {
         if text.is_empty() {
             let tags = self.game().tags();
             if tags.first().is_some_and(|first| first.name == name) {
-                let mut remaining = tags.iter().filter(|tag| tag.name != name);
-                if let Some(first) = remaining.next()
-                    && remaining.any(|tag| tag.name == first.name)
-                {
-                    return Err(TagError::RepeatedFirstTag);
-                }
+                check_first_tag(tags.iter().filter(|tag| tag.name != name))?;
             }
             self.change(|state| state.game.tags.retain(|tag| tag.name != name));
             return Ok(());
@@ -529,6 +560,14 @@ impl GameEditor {
 }
 
 impl EditorState {
+    fn at_start(game: Game) -> Self {
+        Self {
+            position: game.start_position().clone(),
+            game,
+            place: Place::default(),
+        }
+    }
+
     fn play(&mut self, from: Square, to: Square, promotion: Option<Role>) -> Result<(), PlayError> {
         let chess_move = self
             .position
