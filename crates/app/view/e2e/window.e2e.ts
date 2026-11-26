@@ -889,13 +889,22 @@ describe("the window", () => {
     });
     expect(
       await browser.execute(`
-        const notationPart = document.querySelector("main aside ol").parentElement;
+        const scrolled = document.querySelector("main aside ol").parentElement;
+        const row = document.querySelector("main aside > div");
+        scrolled.scrollTop = scrolled.scrollHeight;
         return {
           heightOfThePage: document.documentElement.scrollHeight,
-          notationCanScroll: notationPart.scrollHeight > notationPart.clientHeight,
+          notationScrolledDown: scrolled.scrollTop > 0,
+          topOfTheRowOfButtons: row.getBoundingClientRect().y,
+          heightOfTheRowOfButtons: row.getBoundingClientRect().height,
         };
       `),
-    ).toEqual({ heightOfThePage: 40 + 268, notationCanScroll: true });
+    ).toEqual({
+      heightOfThePage: 40 + 268,
+      notationScrolledDown: true,
+      topOfTheRowOfButtons: 40,
+      heightOfTheRowOfButtons: 40,
+    });
 
     await browser.setWindowSize(1280, 800);
 

@@ -1,0 +1,14 @@
+.notationTools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--notation-tools-group-gap);
+  height: var(--notation-tools-height);
+  padding: 0 var(--notation-tools-padding);
+  border-bottom: 1px solid var(--notation-tools-line-color);
+}
+
+.group {
+  display: flex;
+  gap: var(--notation-tools-gap);
+}

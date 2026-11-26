@@ -42,9 +42,7 @@
   background-color: var(--notation-area-background-color);
 }
 
-/* The notation takes the room that the parts above it leave, and a long notation scrolls
-   inside that room. */
-.notationPart {
+.notationScroller {
   flex: 1;
   min-height: 0;
   padding: var(--notation-area-padding);

@@ -19,6 +19,7 @@
   --icon-button-color: #555555;
   --icon-button-icon-size: 16px;
   --icon-button-icon-stroke: 1.6;
+  --dim-icon-button-color: #bbbbbb;
 
   --tab-strip-padding: 8px;
   --tab-strip-gap: 4px;
@@ -79,6 +80,12 @@
   --notation-area-line-color: #e6e6e6;
   --notation-area-background-color: #ffffff;
   --notation-area-padding: 20px 16px 16px;
+
+  --notation-tools-height: 40px;
+  --notation-tools-padding: 8px;
+  --notation-tools-gap: 2px;
+  --notation-tools-group-gap: 12px;
+  --notation-tools-line-color: #e6e6e6;
 
   --move-gap: 2px;
   --move-line-height: 24px;

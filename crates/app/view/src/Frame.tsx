@@ -6,6 +6,7 @@ import { TabArea } from "./TabArea";
 import { TopBar } from "./TopBar";
 import {
   apply,
+  askForTool,
   closeTab,
   goTo,
   openTab,
@@ -54,6 +55,7 @@ export function Frame() {
           onTurnBoard={() => change({ type: "turnBoard", game: tab.game })}
           onMove={(move) => playMove(tab.game, move, change)}
           onGoTo={(place) => goTo(tab.game, place, change)}
+          onTool={(tool) => askForTool(tab.game, tool, change)}
           onShapes={(shapes) => setShapes(tab.game, shapes, change)}
           onSetTag={(tag, text) => setTag(tab, tag, text, change)}
           onSetResult={(result) => setResult(tab.game, result, change)}

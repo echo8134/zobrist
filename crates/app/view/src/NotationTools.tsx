@@ -1,0 +1,76 @@
+import {
+  ArrowUp,
+  type LucideIcon,
+  Redo,
+  Scissors,
+  Trash2,
+  Undo,
+} from "lucide-react";
+import type { GamePicture } from "./generated/GamePicture";
+import { IconButton } from "./IconButton";
+import styles from "./NotationTools.module.css";
+import type { NotationTool } from "./tabs";
+
+const { notationTools, group } = styles;
+
+type Button = {
+  tool: NotationTool;
+  name: string;
+  icon: LucideIcon;
+  hasWork: keyof Pick<
+    GamePicture,
+    "canUndo" | "canRedo" | "inVariation" | "hasNextMove"
+  >;
+};
+
+const groups: readonly (readonly Button[])[] = [
+  [
+    { tool: "Undo", name: "Undo", icon: Undo, hasWork: "canUndo" },
+    { tool: "Redo", name: "Redo", icon: Redo, hasWork: "canRedo" },
+  ],
+  [
+    {
+      tool: "PromoteVariation",
+      name: "Promote variation",
+      icon: ArrowUp,
+      hasWork: "inVariation",
+    },
+    {
+      tool: "DeleteVariation",
+      name: "Delete variation",
+      icon: Trash2,
+      hasWork: "inVariation",
+    },
+    {
+      tool: "DeleteRest",
+      name: "Delete the rest",
+      icon: Scissors,
+      hasWork: "hasNextMove",
+    },
+  ],
+];
+
+type Props = {
+  picture: GamePicture;
+  onUse: (tool: NotationTool) => void;
+};
+
+export function NotationTools({ picture, onUse }: Props) {
+  return (
+    <div className={notationTools}>
+      {groups.map((buttons) => (
+        <div key={buttons[0]?.tool} className={group}>
+          {buttons.map(({ tool, name, icon, hasWork }) => (
+            <IconButton
+              key={tool}
+              name={name}
+              icon={icon}
+              disabled={!picture[hasWork]}
+              onClick={() => onUse(tool)}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}

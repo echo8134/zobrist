@@ -128,6 +128,35 @@ export function goTo(
   return drawAnswer(game, ask({ type: "GoTo", game, place }), change);
 }
 
+export type NotationTool =
+  | "Undo"
+  | "Redo"
+  | "PromoteVariation"
+  | "DeleteVariation"
+  | "DeleteRest";
+
+export function askForTool(
+  game: number,
+  tool: NotationTool,
+  change: (change: Change) => void,
+) {
+  return drawAnswer(game, ask({ type: tool, game }), change);
+}
+
+export function toolForKey({
+  key,
+  ctrlKey,
+  shiftKey,
+}: Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey">):
+  | NotationTool
+  | undefined {
+  const letter = ctrlKey ? key.toLowerCase() : undefined;
+  if (letter === "z") {
+    return shiftKey ? "Redo" : "Undo";
+  }
+  return letter === "y" && !shiftKey ? "Redo" : undefined;
+}
+
 function lineThatHolds(
   place: readonly number[],
   line: readonly NotationMove[],
