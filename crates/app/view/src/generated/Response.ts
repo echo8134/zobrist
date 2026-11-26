@@ -36,4 +36,24 @@ picture: GamePicture | null, } | { "type": "SetPositionSymbol",
 /**
  * Absent when the game is no longer open.
  */
+picture: GamePicture | null, } | { "type": "Undo", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "Redo", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "PromoteVariation", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "DeleteVariation", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "DeleteRest", 
+/**
+ * Absent when the game is no longer open.
+ */
 picture: GamePicture | null, } | { "type": "CloseGame" };

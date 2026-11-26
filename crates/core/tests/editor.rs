@@ -576,3 +576,179 @@ fn refused_annotations_preserve_the_place_and_the_game() -> io::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn undo_and_redo_restore_moves_variations_and_places() -> io::Result<()> {
+    let mut editor = open("*")?;
+    let first = "1. e4 *\n";
+    let main = "1. e4 e5 *\n";
+    let variation = "1. e4 e5 (1... c5) *\n";
+    editor.play(E2, E4, None).unwrap();
+    assert_state(&editor, &[0], first)?;
+    editor.play(E7, E5, None).unwrap();
+    assert_state(&editor, &[0, 0], main)?;
+
+    assert!(editor.undo());
+    assert_state(&editor, &[0], first)?;
+    assert!(editor.undo());
+    assert_state(&editor, &[], "*\n")?;
+    assert!(!editor.undo());
+    assert_state(&editor, &[], "*\n")?;
+
+    assert!(editor.redo());
+    assert_state(&editor, &[0], first)?;
+    assert!(editor.redo());
+    assert_state(&editor, &[0, 0], main)?;
+    assert!(!editor.redo());
+    assert_state(&editor, &[0, 0], main)?;
+
+    assert!(editor.back());
+    assert_state(&editor, &[0], main)?;
+    editor.play(C7, C5, None).unwrap();
+    assert_state(&editor, &[0, 1], variation)?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], main)?;
+    editor.play(E7, E5, None).unwrap();
+    assert_state(&editor, &[0, 0], main)?;
+    assert!(editor.can_redo());
+    assert!(editor.redo());
+    assert_state(&editor, &[0, 1], variation)
+}
+
+#[test]
+fn undo_after_walking_restores_the_place_from_before_the_edit() -> io::Result<()> {
+    let mut editor = open("*")?;
+    editor.play(E2, E4, None).unwrap();
+    editor.play(E7, E5, None).unwrap();
+    assert!(editor.back());
+    assert!(editor.back());
+    assert!(editor.undo());
+    assert_state(&editor, &[0], "1. e4 *\n")?;
+
+    assert!(editor.redo());
+    assert_state(&editor, &[], "1. e4 e5 *\n")?;
+    editor.play(E2, E4, None).unwrap();
+    assert!(editor.undo());
+    assert_state(&editor, &[0], "1. e4 *\n")?;
+    editor.play(C7, C5, None).unwrap();
+    assert!(!editor.can_redo());
+    assert!(!editor.redo());
+    assert_state(&editor, &[0, 0], "1. e4 c5 *\n")
+}
+
+#[test]
+fn refused_and_unchanged_edits_leave_history_alone() -> io::Result<()> {
+    let mut editor = open("*")?;
+    editor.play(E2, E4, None).unwrap();
+    assert_eq!(editor.play(E2, E5, None), Err(PlayError::IllegalMove));
+    assert!(editor.undo());
+    assert_state(&editor, &[], "*\n")?;
+
+    let annotated = "1. e4 $1 $14 {test} *\n";
+    let mut editor = open(annotated)?;
+    assert!(editor.forward());
+    editor.play(E7, E5, None).unwrap();
+    assert!(editor.undo());
+    editor.set_comment(" test ").unwrap();
+    editor.set_move_symbol(Some(MoveSymbol::Good)).unwrap();
+    editor
+        .set_position_symbol(Some(PositionSymbol::WhiteSlight))
+        .unwrap();
+    editor.delete_rest();
+    assert_eq!(
+        editor.delete_variation(),
+        Err(EditVariationError::NoVariation)
+    );
+    assert!(!editor.can_undo());
+    assert!(editor.can_redo());
+    assert_state(&editor, &[0], annotated)?;
+    assert!(editor.redo());
+    assert_state(&editor, &[0, 0], "1. e4 $1 $14 {test} 1... e5 *\n")
+}
+
+fn assert_edit_round_trip(
+    before: &[usize],
+    edit: impl FnOnce(&mut GameEditor),
+    after: &[usize],
+    expected: &str,
+) -> io::Result<()> {
+    let mut editor = open(ANNOTATION_GAME)?;
+    assert_eq!(editor.go_to(Place(before.to_vec())), Ok(()));
+    let before_position = editor.position().clone();
+    edit(&mut editor);
+    assert_state(&editor, after, expected)?;
+    let after_position = editor.position().clone();
+    assert!(editor.undo());
+    assert_state(&editor, before, ANNOTATION_GAME)?;
+    assert_eq!(editor.position(), &before_position);
+    assert!(editor.redo());
+    assert_state(&editor, after, expected)?;
+    assert_eq!(editor.position(), &after_position);
+    Ok(())
+}
+
+#[test]
+fn undo_and_redo_restore_an_edited_variation_and_its_place() -> io::Result<()> {
+    assert_edit_round_trip(
+        &[0, 1],
+        |editor| editor.promote().unwrap(),
+        &[0, 0],
+        "1. e4 c5 (1... e5 2. Nf3) *\n",
+    )?;
+    assert_edit_round_trip(
+        &[0, 1],
+        |editor| editor.delete_variation().unwrap(),
+        &[0],
+        "1. e4 e5 2. Nf3 *\n",
+    )?;
+    assert_edit_round_trip(&[0], GameEditor::delete_rest, &[0], "1. e4 *\n")
+}
+
+#[test]
+fn undo_and_redo_restore_comments_and_both_kinds_of_symbol() -> io::Result<()> {
+    let place = &[0, 1];
+    assert_edit_round_trip(
+        place,
+        |editor| editor.set_comment("Sharp").unwrap(),
+        place,
+        "1. e4 e5 (1... c5 {Sharp}) 2. Nf3 *\n",
+    )?;
+    assert_edit_round_trip(
+        place,
+        |editor| editor.set_move_symbol(Some(MoveSymbol::Good)).unwrap(),
+        place,
+        "1. e4 e5 (1... c5 $1) 2. Nf3 *\n",
+    )?;
+    assert_edit_round_trip(
+        place,
+        |editor| {
+            editor
+                .set_position_symbol(Some(PositionSymbol::Equal))
+                .unwrap();
+        },
+        place,
+        "1. e4 e5 (1... c5 $10) 2. Nf3 *\n",
+    )
+}
+
+#[test]
+fn the_current_line_determines_whether_a_move_follows_the_place() -> io::Result<()> {
+    let mut editor =
+        open("1. e4 (1. d4 (1. c4 e5)) 1... e5 (1... c5 2. Nf3 (2. Nc3)) 2. Nf3 Nc6 *")?;
+    for (place, in_variation, has_next) in [
+        (&[][..], false, true),
+        (&[1], true, false),
+        (&[2], true, true),
+        (&[2, 0], true, false),
+        (&[0, 0], false, true),
+        (&[0, 1], true, true),
+        (&[0, 1, 0], true, false),
+        (&[0, 1, 1], true, false),
+        (&[0, 0, 0, 0], false, false),
+    ] {
+        editor.go_to(Place(place.to_vec())).unwrap();
+        assert_eq!(editor.in_variation(), in_variation);
+        assert_eq!(editor.has_next_move(), has_next);
+    }
+    Ok(())
+}

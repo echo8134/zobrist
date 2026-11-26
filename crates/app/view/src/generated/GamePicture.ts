@@ -9,4 +9,4 @@ import type { Side } from "./Side";
 /**
  * Everything the view draws for one game, taken from the same editor position.
  */
-export type GamePicture = { fen: string, turn: Side, inCheck: boolean, legalMoves: Array<LegalMove>, startComments: Array<string>, place: Array<number>, notation: Array<NotationMove>, lastMove: MoveSquares | null, moveSymbol: MoveSymbol | null, positionSymbol: PositionSymbol | null, };
+export type GamePicture = { fen: string, turn: Side, inCheck: boolean, legalMoves: Array<LegalMove>, canUndo: boolean, canRedo: boolean, startComments: Array<string>, place: Array<number>, notation: Array<NotationMove>, inVariation: boolean, hasNextMove: boolean, lastMove: MoveSquares | null, moveSymbol: MoveSymbol | null, positionSymbol: PositionSymbol | null, };
