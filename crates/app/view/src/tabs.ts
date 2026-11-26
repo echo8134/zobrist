@@ -1,5 +1,7 @@
 import type { GamePicture } from "./generated/GamePicture";
+import type { MoveSymbol } from "./generated/MoveSymbol";
 import type { NotationMove } from "./generated/NotationMove";
+import type { PositionSymbol } from "./generated/PositionSymbol";
 import type { Promotion } from "./generated/Promotion";
 import type { Side } from "./generated/Side";
 import { ask } from "./ipc";
@@ -182,6 +184,33 @@ export function placeToAskFor(
     default:
       return undefined;
   }
+}
+
+export type Annotation =
+  | { type: "SetComment"; text: string }
+  | { type: "SetMoveSymbol"; symbol: MoveSymbol | null }
+  | { type: "SetPositionSymbol"; symbol: PositionSymbol | null };
+
+export function annotate(
+  game: number,
+  annotation: Annotation,
+  change: (change: Change) => void,
+) {
+  return drawAnswer(game, ask({ ...annotation, game }), change);
+}
+
+export function commentOfCurrentPlace({
+  place,
+  notation,
+  startComments,
+}: Pick<GamePicture, "place" | "notation" | "startComments">): string {
+  const commentOfStart = notation[0]?.commentsBefore ?? startComments;
+  const currentMove = lineThatHolds(place, notation)?.find(
+    (move) => move.place.join() === place.join(),
+  );
+  const parts =
+    place.length === 0 ? commentOfStart : (currentMove?.commentsAfter ?? []);
+  return parts.join(" ");
 }
 
 /** Sends all shapes that the board shows at the current place and draws the answer. */
