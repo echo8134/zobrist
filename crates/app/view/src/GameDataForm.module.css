@@ -20,23 +20,24 @@
   font-size: var(--game-data-name-size);
 }
 
+/* A field of the form looks like the field of the page Files, so it takes its values. */
 .control {
   width: 100%;
-  height: var(--game-data-field-height);
-  padding: var(--game-data-field-padding);
-  border: 1px solid var(--game-data-field-line-color);
-  border-radius: var(--game-data-field-corner-radius);
+  height: var(--field-height);
+  padding: var(--field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
   background-color: var(--background-color);
   color: inherit;
   font: inherit;
 }
 
 .refused {
-  border-color: var(--game-data-refused-color);
+  border-color: var(--refusal-color);
 }
 
 .hint {
-  color: var(--game-data-refused-color);
+  color: var(--refusal-color);
   font-size: var(--game-data-name-size);
 }
 

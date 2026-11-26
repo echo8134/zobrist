@@ -1,7 +1,6 @@
 import { PanelLeft, Plus, X } from "lucide-react";
 import { IconButton } from "./IconButton";
 import styles from "./TopBar.module.css";
-import { tabName } from "./tabs";
 
 const {
   topBar,
@@ -18,7 +17,7 @@ const {
 type Props = {
   iconBarOpen: boolean;
   onToggleIconBar: () => void;
-  tabs: readonly number[];
+  tabs: readonly { game: number; name: string }[];
   shownTab: number | undefined;
   onOpenTab: () => void;
   onShowTab: (tab: number) => void;
@@ -47,14 +46,14 @@ export function TopBar({
       <div className={tabStrip}>
         {tabs.length > 0 && (
           <div className={tabList} role="tablist">
-            {tabs.map((tab) => (
-              <div key={tab} className={closableTab}>
+            {tabs.map(({ game, name: tabName }) => (
+              <div key={game} className={closableTab}>
                 <button
                   type="button"
                   role="tab"
                   className={tabButton}
-                  aria-selected={tab === shownTab}
-                  onClick={() => onShowTab(tab)}
+                  aria-selected={game === shownTab}
+                  onClick={() => onShowTab(game)}
                 >
                   {tabName}
                 </button>
@@ -62,7 +61,7 @@ export function TopBar({
                   type="button"
                   className={closeButton}
                   aria-label={`Close ${tabName}`}
-                  onClick={() => onCloseTab(tab)}
+                  onClick={() => onCloseTab(game)}
                 >
                   <X />
                 </button>

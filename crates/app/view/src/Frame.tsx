@@ -4,7 +4,16 @@ import { IconBar } from "./IconBar";
 import { PageArea } from "./PageArea";
 import { TabArea } from "./TabArea";
 import { TopBar } from "./TopBar";
-import { apply, closeTab, openTab, playMove, setShapes } from "./tabs";
+import {
+  apply,
+  closeTab,
+  openTab,
+  playMove,
+  setResult,
+  setShapes,
+  setTag,
+  tabName,
+} from "./tabs";
 
 const { frame } = styles;
 
@@ -21,7 +30,10 @@ export function Frame() {
       <TopBar
         iconBarOpen={iconBarOpen}
         onToggleIconBar={() => setIconBarOpen(!iconBarOpen)}
-        tabs={tabs.map(({ game }) => game)}
+        tabs={tabs.map(({ game, picture }) => ({
+          game,
+          name: tabName(picture),
+        }))}
         shownTab={shownTab}
         onOpenTab={() => openTab(change)}
         onShowTab={(game) => change({ type: "showTab", game })}
@@ -41,6 +53,8 @@ export function Frame() {
           onTurnBoard={() => change({ type: "turnBoard", game: tab.game })}
           onMove={(move) => playMove(tab.game, move, change)}
           onShapes={(shapes) => setShapes(tab.game, shapes, change)}
+          onSetTag={(tag, text) => setTag(tab, tag, text, change)}
+          onSetResult={(result) => setResult(tab.game, result, change)}
         />
       )}
     </div>

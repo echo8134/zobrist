@@ -31,10 +31,19 @@
 }
 
 .notationArea {
+  display: flex;
   flex: none;
+  flex-direction: column;
   width: var(--notation-area-width);
   border-left: 1px solid var(--notation-area-line-color);
+  background-color: var(--notation-area-background-color);
+}
+
+/* The notation takes the room that the parts above it leave, and a long notation scrolls
+   inside that room. */
+.notationPart {
+  flex: 1;
+  min-height: 0;
   padding: var(--notation-area-padding);
   overflow-y: auto;
-  background-color: var(--notation-area-background-color);
 }

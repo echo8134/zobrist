@@ -404,7 +404,7 @@ describe("the window", () => {
     const notationArea = browser.$("main aside");
     expect(await notationArea.getSize("width")).toBe(320);
     expect(await notationArea.getLocation("x")).toBe(1280 - 320);
-    expect(await notationArea.getText()).toBe("");
+    expect(await notationArea.$("ol").getText()).toBe("");
 
     const board = browser.$("main cg-board");
     expect(await board.getSize()).toEqual({ width: 672, height: 672 });
@@ -871,10 +871,10 @@ describe("the window", () => {
     });
     expect(
       await browser.execute(`
-        const notationArea = document.querySelector("main aside");
+        const notationPart = document.querySelector("main aside ol").parentElement;
         return {
           heightOfThePage: document.documentElement.scrollHeight,
-          notationCanScroll: notationArea.scrollHeight > notationArea.clientHeight,
+          notationCanScroll: notationPart.scrollHeight > notationPart.clientHeight,
         };
       `),
     ).toEqual({ heightOfThePage: 40 + 268, notationCanScroll: true });
