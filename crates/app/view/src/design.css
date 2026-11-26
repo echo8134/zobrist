@@ -13,12 +13,31 @@
   --top-bar-gap: 8px;
   --top-bar-name-weight: 600;
 
-  --toggle-width: 32px;
-  --toggle-height: 28px;
-  --toggle-corner-radius: 4px;
-  --toggle-color: #555555;
-  --toggle-icon-size: 16px;
-  --toggle-icon-stroke: 1.6;
+  --icon-button-width: 32px;
+  --icon-button-height: 28px;
+  --icon-button-corner-radius: 4px;
+  --icon-button-color: #555555;
+  --icon-button-icon-size: 16px;
+  --icon-button-icon-stroke: 1.6;
+
+  --tab-strip-padding: 8px;
+  --tab-strip-gap: 4px;
+
+  --tab-width: 160px;
+  --tab-height: 28px;
+  --tab-padding-left: 10px;
+  --tab-padding-right: 4px;
+  --tab-corner-radius: 5px;
+  --tab-color: #444444;
+  --current-tab-background-color: #ffffff;
+  --current-tab-line-color: #e2e2e2;
+  --current-tab-color: #222222;
+
+  --close-button-size: 20px;
+  --close-button-corner-radius: 4px;
+  --close-button-color: #555555;
+  --close-button-icon-size: 14px;
+  --close-button-icon-stroke: 1.6;
 
   --icon-bar-width: 208px;
   --icon-bar-padding: 10px 8px;
