@@ -5,7 +5,7 @@
 
 mod pgn_file;
 
-pub use pgn_file::{FileRequest, GameRow, PgnFileAnswer, RefusalReason};
+pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
 
 use std::collections::HashMap;
 use std::io;
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use shakmaty::{
     Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role, Square, fen::Fen,
 };
+use tauri::async_runtime::{Mutex, spawn_blocking};
 use ts_rs::TS;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
 use zobrist_core::game::{Game, GameBuilder, MainLine, Move};
@@ -759,10 +760,21 @@ impl Games {
         Some(GamePicture::from_editor(editor))
     }
 
-    /// Applies the view's request and builds its answer before another request can edit the game.
+    /// Answers a request one step after the other. The app does not call this, because it
+    /// would hold the lock on its games while a file is read. It calls
+    /// [`SharedGames::answer`].
     #[must_use]
     pub fn answer(&mut self, request: Request) -> Response {
-        match request {
+        match self.begin(request) {
+            FirstStep::Answer(response) => *response,
+            FirstStep::FileWork(work) => work()(self),
+        }
+    }
+
+    /// Applies the view's request and builds its answer before another request can edit the
+    /// game. A request that works on a file only starts here.
+    fn begin(&mut self, request: Request) -> FirstStep {
+        let response = match request {
             Request::Version => Response::Version {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             },
@@ -841,8 +853,49 @@ impl Games {
                 self.editors.remove(&game);
                 Response::CloseGame
             }
-            Request::OpenPgnFile { path } => FileRequest::Open(path).answer(),
-            Request::CreatePgnFile { path } => FileRequest::Create(path).answer(),
+            Request::OpenPgnFile { path } => return pgn_file::open(path),
+            Request::CreatePgnFile { path } => return pgn_file::create(path),
+        };
+        FirstStep::Answer(Box::new(response))
+    }
+}
+
+/// How far a request got in its first step, which has the games.
+enum FirstStep {
+    Answer(Box<Response>),
+    /// Work on a file. It needs no game and can take long, so it runs without the lock on the
+    /// games. What it returns is the last step, which has the games again.
+    FileWork(Box<dyn FnOnce() -> LastStep + Send>),
+}
+
+type LastStep = Box<dyn FnOnce(&mut Games) -> Response + Send>;
+
+impl FirstStep {
+    fn file_work<Last>(work: impl FnOnce() -> Last + Send + 'static) -> Self
+    where
+        Last: FnOnce(&mut Games) -> Response + Send + 'static,
+    {
+        Self::FileWork(Box::new(move || Box::new(work())))
+    }
+}
+
+/// The open games behind their lock, as the requests of the view share them.
+#[derive(Default)]
+pub struct SharedGames {
+    games: Mutex<Games>,
+}
+
+impl SharedGames {
+    /// Answers a request. It holds the lock on the games only for the steps that touch them.
+    /// Work on a file runs between those steps, on a thread that may wait.
+    pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
+        let first = self.games.lock().await.begin(request);
+        match first {
+            FirstStep::Answer(response) => Ok(*response),
+            FirstStep::FileWork(work) => {
+                let last = spawn_blocking(work).await?;
+                Ok(last(&mut *self.games.lock().await))
+            }
         }
     }
 }
