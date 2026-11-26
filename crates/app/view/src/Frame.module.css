@@ -1,0 +1,18 @@
+.frame {
+  display: grid;
+  grid-template:
+    "top-bar top-bar" var(--top-bar-height)
+    "icon-bar area" 1fr
+    / var(--icon-bar-width) 1fr;
+  height: 100vh;
+}
+
+.topBar {
+  grid-area: top-bar;
+  display: flex;
+  align-items: center;
+  padding-left: var(--top-bar-name-offset);
+  border-bottom: 1px solid var(--top-bar-line-color);
+  background-color: var(--top-bar-background-color);
+  font-weight: var(--top-bar-name-weight);
+}

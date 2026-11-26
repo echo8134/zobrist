@@ -1,0 +1,51 @@
+/* The design values of the view. Every other stylesheet takes its colors and sizes from here. */
+:root {
+  --text-font: "Inter Variable", sans-serif;
+  --text-size: 13px;
+  --text-line-height: 1.45;
+  --text-color: #222222;
+  --background-color: #ffffff;
+
+  --top-bar-height: 40px;
+  --top-bar-background-color: #f6f6f6;
+  --top-bar-line-color: #e2e2e2;
+  --top-bar-name-weight: 600;
+  --top-bar-name-offset: 17px;
+
+  --icon-bar-width: 208px;
+  --icon-bar-padding: 10px 8px;
+  --icon-bar-gap: 2px;
+  --icon-bar-line-color: #e6e6e6;
+
+  --entry-height: 34px;
+  --entry-padding: 0 9px;
+  --entry-gap: 11px;
+  --entry-corner-radius: 5px;
+  --entry-color: #444444;
+  --entry-icon-size: 17px;
+  --entry-icon-stroke: 1.6;
+  --current-entry-background-color: #efefef;
+  --current-entry-color: #222222;
+
+  --area-padding: 26px 40px 32px 32px;
+  --heading-size: 18px;
+  --heading-weight: 500;
+  --version-line-gap: 8px;
+  --version-line-color: #6b6b6b;
+}
+
+/* A size in this file is the outer size of its part, with the line at its edge. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--text-font);
+  font-size: var(--text-size);
+  line-height: var(--text-line-height);
+  color: var(--text-color);
+  background-color: var(--background-color);
+}

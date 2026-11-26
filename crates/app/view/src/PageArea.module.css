@@ -1,0 +1,15 @@
+.area {
+  grid-area: area;
+  padding: var(--area-padding);
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--heading-size);
+  font-weight: var(--heading-weight);
+}
+
+.versionLine {
+  margin: var(--version-line-gap) 0 0;
+  color: var(--version-line-color);
+}
