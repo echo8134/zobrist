@@ -28,3 +28,4 @@
 pub mod editor;
 pub mod game;
 pub mod pgn;
+pub mod shapes;

@@ -25,7 +25,7 @@ const icons: Record<Page, LucideIcon> = {
 
 type Props = {
   open: boolean;
-  currentPage: Page;
+  currentPage: Page | undefined;
   onChoose: (page: Page) => void;
 };
 

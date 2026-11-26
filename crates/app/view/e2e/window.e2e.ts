@@ -31,6 +31,25 @@ const currentEntries = () =>
     .map((button) => button.getComputedLabel());
 const heading = () => browser.$("main").$("h1");
 
+const tabs = () => browser.$$('header [role="tablist"] [role="tab"]');
+const tab = (positionFromLeft: number) =>
+  browser.$(
+    `header [role="tablist"] > :nth-child(${positionFromLeft}) [role="tab"]`,
+  );
+const closeButton = (positionFromLeft: number) =>
+  browser
+    .$(`header [role="tablist"] > :nth-child(${positionFromLeft})`)
+    .$("aria/Close New game");
+const plusButton = () => browser.$("header").$("aria/New board");
+
+const shown = async () => ({
+  heading: await heading().getText(),
+  currentEntries: await currentEntries(),
+  tabsAreSelected: await tabs().map(
+    async (tab) => (await tab.getAttribute("aria-selected")) === "true",
+  ),
+});
+
 /** Saves a picture of the window and returns its size in pixels. */
 async function screenshot(name: string) {
   const picture = await browser.saveScreenshot(`${screenshots}/${name}.png`);
@@ -70,6 +89,8 @@ describe("the window", () => {
       true,
     ]);
     expect(await currentEntries()).toEqual(["Home"]);
+    expect(await tabs().length).toBe(0);
+    expect(await plusButton().getLocation("x")).toBe(208 + 8);
 
     expect(await screenshot("home")).toEqual({ width: 1280, height: 800 });
   });
@@ -180,5 +201,153 @@ describe("the window", () => {
     ]);
     expect(await browser.$("nav").getSize("width")).toBe(208);
     expect(await currentEntries()).toEqual(["Events"]);
+  });
+
+  it("opens a tab after each click on the plus button", async () => {
+    await plusButton().click();
+
+    expect(await shown()).toEqual({
+      heading: "New game",
+      currentEntries: [],
+      tabsAreSelected: [true],
+    });
+    await expect(browser.$("main")).toHaveText("New game");
+    expect(await browser.$$("main > *").length).toBe(1);
+
+    await plusButton().click();
+
+    expect(await shown()).toEqual({
+      heading: "New game",
+      currentEntries: [],
+      tabsAreSelected: [false, true],
+    });
+    expect(await tabs().map((tab) => tab.getComputedLabel())).toEqual([
+      "New game",
+      "New game",
+    ]);
+    expect(await tab(1).getSize()).toEqual({ width: 160, height: 28 });
+    expect(await tab(1).getLocation("x")).toBe(208 + 8);
+    expect(await tab(2).getLocation("x")).toBe(208 + 8 + 160 + 4);
+    expect(await plusButton().getLocation("x")).toBe(208 + 8 + 2 * (160 + 4));
+
+    expect(await screenshot("tabs")).toEqual({ width: 1280, height: 800 });
+  });
+
+  it("shows a page again after a click on its entry and keeps the tabs", async () => {
+    await entry("Files").click();
+
+    expect(await shown()).toEqual({
+      heading: "Files",
+      currentEntries: ["Files"],
+      tabsAreSelected: [false, false],
+    });
+  });
+
+  it("shows a tab again after a click on it", async () => {
+    await tab(1).click();
+
+    expect(await shown()).toEqual({
+      heading: "New game",
+      currentEntries: [],
+      tabsAreSelected: [true, false],
+    });
+  });
+
+  it("closes the shown tab and shows the next tab, and the page after the last tab", async () => {
+    await closeButton(1).click();
+
+    expect(await shown()).toEqual({
+      heading: "New game",
+      currentEntries: [],
+      tabsAreSelected: [true],
+    });
+
+    await closeButton(1).click();
+
+    expect(await shown()).toEqual({
+      heading: "Files",
+      currentEntries: ["Files"],
+      tabsAreSelected: [],
+    });
+  });
+
+  it("keeps the page shown when a tab closes", async () => {
+    await plusButton().click();
+    await entry("Home").click();
+    await closeButton(1).click();
+
+    expect(await shown()).toEqual({
+      heading: "Home",
+      currentEntries: ["Home"],
+      tabsAreSelected: [],
+    });
+  });
+
+  it("keeps the shown tab when another tab closes", async () => {
+    await plusButton().click();
+    await plusButton().click();
+    await plusButton().click();
+    await closeButton(1).click();
+
+    expect((await shown()).tabsAreSelected).toEqual([false, true]);
+  });
+
+  it("shows the tab at the right of a closed tab, and without one the tab at its left", async () => {
+    await plusButton().click();
+    await tab(2).click();
+    expect((await shown()).tabsAreSelected).toEqual([false, true, false]);
+
+    await closeButton(2).click();
+
+    expect((await shown()).tabsAreSelected).toEqual([false, true]);
+
+    await closeButton(2).click();
+
+    expect(await shown()).toEqual({
+      heading: "New game",
+      currentEntries: [],
+      tabsAreSelected: [true],
+    });
+  });
+
+  it("keeps the tabs over the area when the icon bar collapses", async () => {
+    await toggle("Collapse the icon bar").click();
+
+    expect(await tab(1).getLocation("x")).toBe(48 + 8);
+    expect(await shown()).toEqual({
+      heading: "New game",
+      currentEntries: [],
+      tabsAreSelected: [true],
+    });
+  });
+
+  it("opens, shows, and closes tabs while the icon bar is collapsed", async () => {
+    await plusButton().click();
+    expect((await shown()).tabsAreSelected).toEqual([false, true]);
+
+    await entry("Files").click();
+    expect(await shown()).toEqual({
+      heading: "Files",
+      currentEntries: ["Files"],
+      tabsAreSelected: [false, false],
+    });
+
+    await tab(1).click();
+    expect(await shown()).toEqual({
+      heading: "New game",
+      currentEntries: [],
+      tabsAreSelected: [true, false],
+    });
+
+    await closeButton(1).click();
+    expect((await shown()).tabsAreSelected).toEqual([true]);
+
+    await closeButton(1).click();
+    expect(await shown()).toEqual({
+      heading: "Files",
+      currentEntries: ["Files"],
+      tabsAreSelected: [],
+    });
+    expect(await plusButton().getLocation("x")).toBe(48 + 8);
   });
 });

@@ -1,0 +1,105 @@
+.topBar {
+  grid-area: top-bar;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--top-bar-line-color);
+  background-color: var(--top-bar-background-color);
+}
+
+.leftPart {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--top-bar-gap);
+  width: var(--icon-bar-width);
+  padding-left: var(--top-bar-padding);
+}
+
+.collapsed {
+  width: var(--collapsed-icon-bar-width);
+}
+
+.name {
+  font-weight: var(--top-bar-name-weight);
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: var(--icon-button-width);
+  height: var(--icon-button-height);
+  padding: 0;
+  border: none;
+  border-radius: var(--icon-button-corner-radius);
+  background: none;
+  color: var(--icon-button-color);
+}
+
+.iconButton svg {
+  width: var(--icon-button-icon-size);
+  height: var(--icon-button-icon-size);
+  stroke-width: var(--icon-button-icon-stroke);
+}
+
+.tabStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--tab-strip-gap);
+  padding-left: var(--tab-strip-padding);
+}
+
+.tabList {
+  display: flex;
+  gap: var(--tab-strip-gap);
+}
+
+.closableTab {
+  position: relative;
+}
+
+.tabButton {
+  display: block;
+  width: var(--tab-width);
+  height: var(--tab-height);
+  padding: 0 calc(var(--tab-padding-right) + var(--close-button-size)) 0
+    var(--tab-padding-left);
+  overflow: hidden;
+  border: none;
+  border-radius: var(--tab-corner-radius);
+  background: none;
+  color: var(--tab-color);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The line is a shadow, so it takes no room and the name does not move when the tab is selected. */
+.tabButton[aria-selected="true"] {
+  background-color: var(--current-tab-background-color);
+  box-shadow: inset 0 0 0 1px var(--current-tab-line-color);
+  color: var(--current-tab-color);
+}
+
+.closeButton {
+  position: absolute;
+  top: 0;
+  right: var(--tab-padding-right);
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: var(--close-button-size);
+  height: var(--close-button-size);
+  margin: auto 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--close-button-corner-radius);
+  background: none;
+  color: var(--close-button-color);
+}
+
+.closeButton svg {
+  width: var(--close-button-icon-size);
+  height: var(--close-button-icon-size);
+  stroke-width: var(--close-button-icon-stroke);
+}
