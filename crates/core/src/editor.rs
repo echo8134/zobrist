@@ -2,12 +2,12 @@
 
 use std::{mem, ops::Deref};
 
-use shakmaty::{Chess, Color, Position, Role, Square};
+use shakmaty::{Chess, Color, Outcome, Position, Role, Square};
 
 use crate::game::{
-    AnnotationSymbol, Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps,
+    AnnotationSymbol, Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps, Tag,
 };
-use crate::pgn::validate_comment;
+use crate::pgn::{escaped_tag_value, validate_comment};
 
 /// Each choice plays one move from the start of the game. An empty place is the start.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -193,6 +193,72 @@ pub enum AnnotationError {
     InvalidComment,
 }
 
+/// A game tag that can be edited independently of the position and result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditableTag {
+    /// The event name.
+    Event,
+    /// The playing site.
+    Site,
+    /// The PGN date.
+    Date,
+    /// The round of the event.
+    Round,
+    /// The player with the white pieces.
+    White,
+    /// The player with the black pieces.
+    Black,
+}
+
+impl EditableTag {
+    const NAMES: [&str; 6] = ["Event", "Site", "Date", "Round", "White", "Black"];
+}
+
+/// Why the editor refused a tag change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagError {
+    /// The trimmed value contains a line break.
+    LineBreak,
+    /// The value is not a PGN date.
+    InvalidDate,
+    /// The PGN writer cannot represent the value in a tag line.
+    UnwritableValue,
+    /// The new first tag would occur twice, splitting the game on import.
+    RepeatedFirstTag,
+}
+
+fn date_part(part: Option<&str>, unknown: &str, minimum: &str, maximum: &str) -> bool {
+    part.is_some_and(|part| {
+        part == unknown
+            || (part.len() == unknown.len()
+                && part.bytes().all(|byte| byte.is_ascii_digit())
+                && (minimum..=maximum).contains(&part))
+    })
+}
+
+fn replace_tag(tags: &mut Vec<Tag>, name: &str, value: &str, later_names: &[&str]) {
+    let index = tags
+        .iter()
+        .position(|tag| tag.name == name)
+        .or_else(|| {
+            tags.iter()
+                .position(|tag| later_names.contains(&tag.name.as_str()))
+        })
+        .unwrap_or_else(|| {
+            tags.iter()
+                .rposition(|tag| EditableTag::NAMES.contains(&tag.name.as_str()))
+                .map_or(0, |last| last + 1)
+        });
+    tags.retain(|tag| tag.name != name);
+    tags.insert(
+        index,
+        Tag {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        },
+    );
+}
+
 #[derive(Clone, Debug)]
 struct EditorState {
     game: Game,
@@ -341,6 +407,58 @@ impl GameEditor {
     /// Replaces the comments at the current place with the trimmed text. Empty text clears them.
     pub fn set_comment(&mut self, text: &str) -> Result<(), AnnotationError> {
         self.change(|state| state.set_comment(text))
+    }
+
+    /// Sets a game tag at its existing line or inserts it in PGN roster order.
+    /// Empty text removes every copy. A refusal leaves the game and its history unchanged.
+    pub fn set_tag(&mut self, tag: EditableTag, text: &str) -> Result<(), TagError> {
+        let text = text.trim();
+        let order = tag as usize;
+        let name = EditableTag::NAMES[order];
+        if text.is_empty() {
+            let tags = self.game().tags();
+            if tags.first().is_some_and(|first| first.name == name) {
+                let mut remaining = tags.iter().filter(|tag| tag.name != name);
+                if let Some(first) = remaining.next()
+                    && remaining.any(|tag| tag.name == first.name)
+                {
+                    return Err(TagError::RepeatedFirstTag);
+                }
+            }
+            self.change(|state| state.game.tags.retain(|tag| tag.name != name));
+            return Ok(());
+        }
+        if text.contains(['\n', '\r']) {
+            return Err(TagError::LineBreak);
+        }
+        if tag == EditableTag::Date {
+            let mut parts = text.split('.');
+            if !date_part(parts.next(), "????", "0000", "9999")
+                || !date_part(parts.next(), "??", "01", "12")
+                || !date_part(parts.next(), "??", "01", "31")
+                || parts.next().is_some()
+            {
+                return Err(TagError::InvalidDate);
+            }
+        }
+        escaped_tag_value(name, text).map_err(|_| TagError::UnwritableValue)?;
+        self.change(|state| {
+            replace_tag(
+                &mut state.game.tags,
+                name,
+                text,
+                &EditableTag::NAMES[order + 1..],
+            );
+        });
+        Ok(())
+    }
+
+    /// Sets the result tag and the marker ending the move text in a single edit.
+    pub fn set_result(&mut self, result: Outcome) {
+        self.change(|state| {
+            replace_tag(&mut state.game.tags, "Result", &result.to_string(), &[]);
+            state.game.result = result;
+        });
     }
 
     /// Replaces all move judgements at the current move, keeping the other glyphs in order.

@@ -10,7 +10,9 @@ pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use shakmaty::{Chess, Color, EnPassantMode, Outcome, Position, Role, Square, fen::Fen};
+use shakmaty::{
+    Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role, Square, fen::Fen,
+};
 use ts_rs::TS;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
 use zobrist_core::game::{GameBuilder, MainLine, Move};
@@ -24,6 +26,22 @@ pub enum Request {
     Version,
     /// Open a game at the starting position.
     NewGame,
+    /// Set or clear one field of the game data.
+    SetTag {
+        /// The number from the new-game answer.
+        game: usize,
+        /// The field to edit.
+        tag: EditableTag,
+        /// The field's value. Empty text removes the tag.
+        text: String,
+    },
+    /// Set the game's result tag and move-text marker together.
+    SetResult {
+        /// The number from the new-game answer.
+        game: usize,
+        /// The result to record.
+        result: GameResult,
+    },
     /// Play a board move in an open game.
     PlayMove {
         /// The number from the new-game answer.
@@ -147,6 +165,80 @@ impl From<Promotion> for Role {
     }
 }
 
+/// A PGN tag the view can edit directly.
+#[derive(Clone, Copy, Deserialize, TS)]
+pub enum EditableTag {
+    /// Name of the event.
+    Event,
+    /// Place where the game was played.
+    Site,
+    /// Date of play.
+    Date,
+    /// Round of the event.
+    Round,
+    /// Player of the white pieces.
+    White,
+    /// Player of the black pieces.
+    Black,
+}
+
+impl From<EditableTag> for editor::EditableTag {
+    fn from(tag: EditableTag) -> Self {
+        match tag {
+            EditableTag::Event => Self::Event,
+            EditableTag::Site => Self::Site,
+            EditableTag::Date => Self::Date,
+            EditableTag::Round => Self::Round,
+            EditableTag::White => Self::White,
+            EditableTag::Black => Self::Black,
+        }
+    }
+}
+
+/// The recorded outcome of the game.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum GameResult {
+    /// White won.
+    WhiteWin,
+    /// Black won.
+    BlackWin,
+    /// The game was drawn.
+    Draw,
+    /// The outcome is unknown.
+    Unknown,
+}
+
+impl From<GameResult> for Outcome {
+    fn from(result: GameResult) -> Self {
+        match result {
+            GameResult::WhiteWin => Self::Known(KnownOutcome::Decisive {
+                winner: Color::White,
+            }),
+            GameResult::BlackWin => Self::Known(KnownOutcome::Decisive {
+                winner: Color::Black,
+            }),
+            GameResult::Draw => Self::Known(KnownOutcome::Draw),
+            GameResult::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl From<Outcome> for GameResult {
+    fn from(result: Outcome) -> Self {
+        match result {
+            Outcome::Known(KnownOutcome::Decisive {
+                winner: Color::White,
+            }) => Self::WhiteWin,
+            Outcome::Known(KnownOutcome::Decisive {
+                winner: Color::Black,
+            }) => Self::BlackWin,
+            Outcome::Known(KnownOutcome::Draw) => Self::Draw,
+            Outcome::Unknown => Self::Unknown,
+        }
+    }
+}
+
 // The same spelling crosses the wire in a request, the current selection, and the notation.
 macro_rules! wire_symbols {
     ($(#[$doc:meta])* $name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
@@ -212,6 +304,16 @@ pub enum Response {
         game: usize,
         /// The picture at the starting position.
         picture: GamePicture,
+    },
+    /// The game after the editor accepts or refuses the tag edit.
+    SetTag {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
+    },
+    /// The game after setting the result.
+    SetResult {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
     },
     /// The game after the editor accepts or refuses the move.
     PlayMove {
@@ -281,6 +383,8 @@ pub enum Response {
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GamePicture {
+    tags: Vec<Tag>,
+    result: GameResult,
     fen: String,
     turn: Side,
     in_check: bool,
@@ -292,6 +396,12 @@ pub struct GamePicture {
     start_comments: Vec<String>,
     place: Vec<usize>,
     notation: Vec<NotationMove>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+struct Tag {
+    name: String,
+    value: String,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize, TS)]
@@ -438,6 +548,16 @@ impl GamePicture {
             })
             .collect();
         Self {
+            tags: editor
+                .game()
+                .tags()
+                .iter()
+                .map(|tag| Tag {
+                    name: tag.name.clone(),
+                    value: tag.value.clone(),
+                })
+                .collect(),
+            result: editor.game().result().into(),
             fen: Fen::from_position(position, EnPassantMode::Legal).to_string(),
             turn: position.turn().into(),
             in_check: position.is_check(),
@@ -499,6 +619,12 @@ impl Games {
                 self.editors.insert(game, editor);
                 Response::NewGame { game, picture }
             }
+            Request::SetTag { game, tag, text } => Response::SetTag {
+                picture: self.edit(game, |editor| editor.set_tag(tag.into(), &text)),
+            },
+            Request::SetResult { game, result } => Response::SetResult {
+                picture: self.edit(game, |editor| editor.set_result(result.into())),
+            },
             Request::PlayMove {
                 game,
                 from,
@@ -562,6 +688,28 @@ mod tests {
     use zobrist_core::pgn::{self, Entry};
 
     use super::*;
+
+    #[test]
+    fn pictures_keep_imported_tag_order_and_read_the_result_from_the_marker() -> io::Result<()> {
+        let source = b"[Annotator \"N\"]\n[BlackElo \"2100\"]\n[Result \"*\"]\n\n1. e4 0-1";
+        let mut imported = None;
+        pgn::read_games(source.as_slice(), |entry| {
+            if let Entry::Game { game, .. } = entry {
+                imported = Some(GameEditor::new(*game));
+            }
+        })?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap()))?;
+        assert_eq!(
+            picture["tags"],
+            json!([
+                { "name": "Annotator", "value": "N" },
+                { "name": "BlackElo", "value": "2100" },
+                { "name": "Result", "value": "*" }
+            ])
+        );
+        assert_eq!(picture["result"], "blackWin");
+        Ok(())
+    }
 
     #[test]
     fn pictures_group_imported_glyphs_and_select_the_first_of_each_kind() -> io::Result<()> {
