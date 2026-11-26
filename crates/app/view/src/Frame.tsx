@@ -11,7 +11,10 @@ import {
   goTo,
   openTab,
   playMove,
+  setResult,
   setShapes,
+  setTag,
+  tabName,
 } from "./tabs";
 
 const { frame } = styles;
@@ -29,7 +32,10 @@ export function Frame() {
       <TopBar
         iconBarOpen={iconBarOpen}
         onToggleIconBar={() => setIconBarOpen(!iconBarOpen)}
-        tabs={tabs.map(({ game }) => game)}
+        tabs={tabs.map(({ game, picture }) => ({
+          game,
+          name: tabName(picture),
+        }))}
         shownTab={shownTab}
         onOpenTab={() => openTab(change)}
         onShowTab={(game) => change({ type: "showTab", game })}
@@ -51,6 +57,8 @@ export function Frame() {
           onGoTo={(place) => goTo(tab.game, place, change)}
           onTool={(tool) => askForTool(tab.game, tool, change)}
           onShapes={(shapes) => setShapes(tab.game, shapes, change)}
+          onSetTag={(tag, text) => setTag(tab, tag, text, change)}
+          onSetResult={(result) => setResult(tab.game, result, change)}
         />
       )}
     </div>

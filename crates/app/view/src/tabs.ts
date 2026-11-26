@@ -1,11 +1,23 @@
+import type { EditableTag } from "./generated/EditableTag";
 import type { GamePicture } from "./generated/GamePicture";
+import type { GameResult } from "./generated/GameResult";
 import type { NotationMove } from "./generated/NotationMove";
 import type { Promotion } from "./generated/Promotion";
 import type { Side } from "./generated/Side";
 import { ask } from "./ipc";
 import type { Page } from "./PageArea";
 
-export const tabName = "New game";
+/** The value of a tag of the game, or the empty text when the game has no such tag. */
+export function tagValue(picture: GamePicture, name: EditableTag) {
+  return picture.tags.find((tag) => tag.name === name)?.value ?? "";
+}
+
+/** The names of the two players as soon as the game has both. */
+export function tabName(picture: GamePicture) {
+  const white = tagValue(picture, "White");
+  const black = tagValue(picture, "Black");
+  return white !== "" && black !== "" ? `${white} - ${black}` : "New game";
+}
 
 export type Tab = {
   game: number;
@@ -191,6 +203,36 @@ export async function setShapes(
   change: (change: Change) => void,
 ) {
   const { picture } = await ask({ type: "SetShapes", game, ...shapes });
+  if (picture !== null) {
+    change({ type: "drawPicture", game, picture });
+  }
+}
+
+/**
+ * Sends the text of one field of the game data and draws the answer. Tells whether Rust took
+ * the text. A text that Rust refused leaves the tag of the picture as it was.
+ */
+export async function setTag(
+  tab: Tab,
+  tag: EditableTag,
+  text: string,
+  change: (change: Change) => void,
+) {
+  const { game } = tab;
+  const { picture } = await ask({ type: "SetTag", game, tag, text });
+  if (picture === null) {
+    return true;
+  }
+  change({ type: "drawPicture", game, picture });
+  return tagValue(picture, tag) !== tagValue(tab.picture, tag);
+}
+
+export async function setResult(
+  game: number,
+  result: GameResult,
+  change: (change: Change) => void,
+) {
+  const { picture } = await ask({ type: "SetResult", game, result });
   if (picture !== null) {
     change({ type: "drawPicture", game, picture });
   }

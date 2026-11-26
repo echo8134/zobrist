@@ -12,7 +12,10 @@ import {
   placeToAskFor,
   playMove,
   type Shown,
+  setResult,
   setShapes,
+  setTag,
+  tabName,
   toolForKey,
 } from "./tabs";
 
@@ -199,6 +202,66 @@ test("End leads from the start to the last move of the main line", () => {
 
 test("another key leads nowhere", () => {
   expect(placeToAskFor("a", { place: [0], notation })).toBeUndefined();
+});
+
+const withPlayers = (white: string | undefined, black: string | undefined) =>
+  ({
+    tags: [
+      { name: "Event", value: "Example" },
+      ...(white === undefined ? [] : [{ name: "White", value: white }]),
+      ...(black === undefined ? [] : [{ name: "Black", value: black }]),
+    ],
+  }) as GamePicture;
+
+test("a tab has the names of both players, and the name New game until both are set", () => {
+  expect(tabName(withPlayers("Alpha", "Beta"))).toBe("Alpha - Beta");
+  expect(tabName(withPlayers("Alpha", undefined))).toBe("New game");
+  expect(tabName(withPlayers(undefined, "Beta"))).toBe("New game");
+  expect(tabName(withPlayers(undefined, undefined))).toBe("New game");
+});
+
+test("a text of the game data goes to Rust, and the answer says whether Rust took it", async () => {
+  const atStart = withPlayers("Alpha", undefined);
+  const tab = { game: 7, picture: atStart, bottomSide: "white" } as const;
+  const { change, shown } = tabState({
+    tabs: [tab],
+    page: "Home",
+    shownTab: 7,
+  });
+  const taken = withPlayers("Alpha", "Beta");
+  vi.mocked(ask).mockResolvedValueOnce({ type: "SetTag", picture: taken });
+
+  expect(await setTag(tab, "Black", "Beta", change)).toBe(true);
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "SetTag", game: 7, tag: "Black", text: "Beta" }],
+  ]);
+  expect(shown().tabs[0]?.picture).toBe(taken);
+
+  // Rust answers a text that it refused with the tag as it was.
+  vi.mocked(ask).mockResolvedValueOnce({ type: "SetTag", picture: atStart });
+  expect(await setTag(tab, "Date", "26.11.2026", change)).toBe(false);
+  expect(shown().tabs[0]?.picture).toBe(atStart);
+
+  vi.mocked(ask).mockResolvedValueOnce({ type: "SetTag", picture: null });
+  expect(await setTag(tab, "Date", "2026.11.26", change)).toBe(true);
+  expect(shown().tabs[0]?.picture).toBe(atStart);
+});
+
+test("a result goes to Rust, and the tab takes the picture of the answer", async () => {
+  const { change, shown } = tabState({
+    tabs: [{ game: 7, picture, bottomSide: "white" }],
+    page: "Home",
+    shownTab: 7,
+  });
+  const won = { ...picture, result: "whiteWin" } as GamePicture;
+  vi.mocked(ask).mockResolvedValueOnce({ type: "SetResult", picture: won });
+
+  await setResult(7, "whiteWin", change);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "SetResult", game: 7, result: "whiteWin" }],
+  ]);
+  expect(shown().tabs[0]?.picture).toBe(won);
 });
 
 test("all shapes of the board go to Rust, and the tab takes the picture of the answer", async () => {
