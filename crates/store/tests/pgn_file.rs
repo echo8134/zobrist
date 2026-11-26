@@ -67,3 +67,28 @@ fn a_game_that_cannot_be_written_leaves_the_target_intact() -> io::Result<()> {
     assert_eq!(fs::read(&path)?, b"1. e4 *");
     fs::remove_file(path)
 }
+
+#[cfg(unix)]
+#[test]
+fn adding_through_a_symbolic_link_preserves_it_and_updates_its_destination() -> io::Result<()> {
+    let directory = target("symbolic-link");
+    let archive = directory.join("archive");
+    fs::create_dir(&directory)?;
+    fs::create_dir(&archive)?;
+    let destination = archive.join("mine.pgn");
+    let link = directory.join("favorite.pgn");
+    let relative = std::path::Path::new("archive/mine.pgn");
+    std::os::unix::fs::symlink(relative, &link)?;
+    let game = GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown);
+
+    fs::write(&destination, "1. e4 *")?;
+    add_pgn_games(&link, |add| add(&game))?;
+    assert_eq!(fs::read_to_string(&destination)?, "1. e4 *\n\n*\n");
+    assert_eq!(fs::read_link(&link)?, relative);
+
+    fs::remove_file(&destination)?;
+    add_pgn_games(&link, |add| add(&game))?;
+    assert_eq!(fs::read_to_string(&destination)?, "*\n");
+    assert_eq!(fs::read_link(&link)?, relative);
+    fs::remove_dir_all(directory)
+}

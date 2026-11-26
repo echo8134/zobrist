@@ -8,6 +8,7 @@ use zobrist_core::pgn;
 use crate::StagingDirectory;
 
 /// Adds the supplied games to a PGN file, creating the target if necessary.
+/// Follows symbolic links and stages the new file beside the destination.
 /// Calls `supply` with a function that writes one game at a time. An error from
 /// either function discards the staged file and leaves the target as it was.
 /// Returns the number of games added after syncing and publishing the file.
@@ -15,7 +16,20 @@ pub fn add_pgn_games<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<u64, E> {
-    let target = std::path::absolute(target)?;
+    let mut target = std::path::absolute(target)?;
+    let target = loop {
+        match target.canonicalize() {
+            Ok(destination) => break destination,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        // A link can point to a file that this add will create.
+        match target.read_link() {
+            Ok(destination) => target.set_file_name(destination),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => break target,
+            Err(error) => return Err(error.into()),
+        }
+    };
     let staging = StagingDirectory::beside(&target)?;
     let path = staging.0.join("games.pgn");
     let mut file = File::create_new(&path)?;
