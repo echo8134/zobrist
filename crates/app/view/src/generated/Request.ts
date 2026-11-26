@@ -4,6 +4,7 @@ import type { GameResult } from "./GameResult";
 import type { MoveSymbol } from "./MoveSymbol";
 import type { PositionSymbol } from "./PositionSymbol";
 import type { Promotion } from "./Promotion";
+import type { ShapeEdit } from "./ShapeEdit";
 
 /**
  * What the view can ask for.
@@ -58,9 +59,9 @@ place: Array<number>, } | { "type": "SetComment",
  */
 game: number, 
 /**
- * The comment text. Empty text removes it.
+ * The new text. Empty text leaves just the shapes.
  */
-text: string, } | { "type": "SetMoveSymbol", 
+text: string, } | { "type": "SetShapes" } & ShapeEdit | { "type": "SetMoveSymbol", 
 /**
  * The number from the new-game answer.
  */
