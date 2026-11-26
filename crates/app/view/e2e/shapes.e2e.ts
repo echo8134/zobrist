@@ -200,4 +200,27 @@ describe("the shapes on the board", () => {
     await expectShapes([]);
     expect(await writtenMoves()).toEqual(["1.e4", "e5"]);
   });
+
+  it("shows the shapes of a place again when the game goes back to it", async () => {
+    await browser.$("header").$("aria/New board").click();
+    await expect(tab(3)).toHaveAttribute("aria-selected", "true");
+    await playMove("e2", "e4");
+    await drawWithRightButton("g1", "f3");
+    await expectShapes(["green g1-f3"]);
+    await playMove("e7", "e5");
+    await expectShapes([]);
+
+    await browser.keys("ArrowLeft");
+
+    await expectShapes(["green g1-f3"]);
+  });
+
+  it("brings the shapes back with Ctrl+Z after a click took them away", async () => {
+    await clickSquare("e5");
+    await expectShapes([]);
+
+    await browser.keys(["Control", "z"]);
+
+    await expectShapes(["green g1-f3"]);
+  });
 });

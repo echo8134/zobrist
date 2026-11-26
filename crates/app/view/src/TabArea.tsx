@@ -3,39 +3,69 @@ import { useLayoutEffect } from "react";
 import { Board } from "./Board";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
+import { NotationTools } from "./NotationTools";
 import styles from "./TabArea.module.css";
-import { type Move, placeToAskFor, type Shapes, type Tab } from "./tabs";
+import {
+  type Move,
+  type NotationTool,
+  placeToAskFor,
+  type Shapes,
+  type Tab,
+  toolForKey,
+} from "./tabs";
 
-const { area, boardPart, boardColumn, buttonRow, notationArea } = styles;
+const {
+  area,
+  boardPart,
+  boardColumn,
+  buttonRow,
+  notationArea,
+  notationScroller,
+} = styles;
 
 type Props = {
   tab: Tab;
   onTurnBoard: () => void;
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
+  onTool: (tool: NotationTool) => void;
   onShapes: (shapes: Shapes) => void;
 };
 
-export function TabArea({ tab, onTurnBoard, onMove, onGoTo, onShapes }: Props) {
+export function TabArea({
+  tab,
+  onTurnBoard,
+  onMove,
+  onGoTo,
+  onTool,
+  onShapes,
+}: Props) {
   const { picture } = tab;
   // A layout effect, so that a key right after a new picture is drawn starts from that picture.
   // A plain effect runs later, and until then the key would start from the picture before.
   useLayoutEffect(() => {
-    const walk = (event: KeyboardEvent) => {
+    const act = (event: KeyboardEvent) => {
       const { target } = event;
-      const takesText =
+      if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable);
-      const place = takesText ? undefined : placeToAskFor(event.key, picture);
-      if (place !== undefined) {
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      const tool = toolForKey(event);
+      const place = placeToAskFor(event.key, picture);
+      if (tool !== undefined) {
+        event.preventDefault();
+        onTool(tool);
+      } else if (place !== undefined) {
         event.preventDefault();
         onGoTo(place);
       }
     };
-    document.addEventListener("keydown", walk);
-    return () => document.removeEventListener("keydown", walk);
-  }, [picture, onGoTo]);
+    document.addEventListener("keydown", act);
+    return () => document.removeEventListener("keydown", act);
+  }, [picture, onGoTo, onTool]);
 
   return (
     <main className={area}>
@@ -57,11 +87,14 @@ export function TabArea({ tab, onTurnBoard, onMove, onGoTo, onShapes }: Props) {
         </div>
       </div>
       <aside className={notationArea}>
-        <Notation
-          mainLine={picture.notation}
-          currentPlace={picture.place}
-          onGoTo={onGoTo}
-        />
+        <NotationTools picture={picture} onUse={onTool} />
+        <div className={notationScroller}>
+          <Notation
+            mainLine={picture.notation}
+            currentPlace={picture.place}
+            onGoTo={onGoTo}
+          />
+        </div>
       </aside>
     </main>
   );
