@@ -42,13 +42,67 @@ const closeButton = (positionFromLeft: number) =>
     .$("aria/Close New game");
 const plusButton = () => browser.$("header").$("aria/New board");
 
+const turnButton = () => browser.$("main").$("aria/Turn the board");
+
+async function openTabAndWait() {
+  const tabsBefore = await tabs().length;
+  await plusButton().click();
+  await expect(tabs()).toBeElementsArrayOfSize(tabsBefore + 1);
+}
+
 const shown = async () => ({
-  heading: await heading().getText(),
+  headings: await browser.$$("main h1").map((heading) => heading.getText()),
+  boards: await browser.$$("main cg-board").length,
   currentEntries: await currentEntries(),
   tabsAreSelected: await tabs().map(
     async (tab) => (await tab.getAttribute("aria-selected")) === "true",
   ),
 });
+
+const drawnBoard = () =>
+  browser.execute(`
+    const board = document.querySelector("main cg-board").getBoundingClientRect();
+    const letters = { pawn: "p", knight: "n", bishop: "b", rook: "r", queen: "q", king: "k" };
+    const rows = Array.from({ length: 8 }, () => Array(8).fill("."));
+    for (const piece of document.querySelectorAll("main cg-board piece")) {
+      const { x, y } = piece.getBoundingClientRect();
+      const letter = letters[piece.classList[1]];
+      const row = Math.round((y - board.y) / (board.height / 8));
+      const column = Math.round((x - board.x) / (board.width / 8));
+      rows[row][column] = piece.classList[0] === "white" ? letter.toUpperCase() : letter;
+    }
+    return rows.map((row) => row.join(""));
+  `);
+const startPositionWithWhiteAtBottom = [
+  "rnbqkbnr",
+  "pppppppp",
+  "........",
+  "........",
+  "........",
+  "........",
+  "PPPPPPPP",
+  "RNBQKBNR",
+];
+const startPositionWithBlackAtBottom = [
+  "RNBKQBNR",
+  "PPPPPPPP",
+  "........",
+  "........",
+  "........",
+  "........",
+  "pppppppp",
+  "rnbkqbnr",
+];
+
+const drawnCoordinates = () =>
+  browser.execute(`
+    const inDrawnOrder = (kind, axis) =>
+      [...document.querySelectorAll("main coords." + kind + " coord")]
+        .sort((one, other) => one.getBoundingClientRect()[axis] - other.getBoundingClientRect()[axis])
+        .map((coordinate) => coordinate.textContent)
+        .join("");
+    return { fromLeft: inDrawnOrder("files", "x"), fromTop: inDrawnOrder("ranks", "y") };
+  `);
 
 /** Saves a picture of the window and returns its size in pixels. */
 async function screenshot(name: string) {
@@ -204,20 +258,20 @@ describe("the window", () => {
   });
 
   it("opens a tab after each click on the plus button", async () => {
-    await plusButton().click();
+    await openTabAndWait();
 
     expect(await shown()).toEqual({
-      heading: "New game",
+      headings: [],
+      boards: 1,
       currentEntries: [],
       tabsAreSelected: [true],
     });
-    await expect(browser.$("main")).toHaveText("New game");
-    expect(await browser.$$("main > *").length).toBe(1);
 
-    await plusButton().click();
+    await openTabAndWait();
 
     expect(await shown()).toEqual({
-      heading: "New game",
+      headings: [],
+      boards: 1,
       currentEntries: [],
       tabsAreSelected: [false, true],
     });
@@ -233,11 +287,90 @@ describe("the window", () => {
     expect(await screenshot("tabs")).toEqual({ width: 1280, height: 800 });
   });
 
+  it("shows a board in the start position in a tab", async () => {
+    expect(await browser.$$("main cg-board piece").length).toBe(32);
+    expect(await drawnBoard()).toEqual(startPositionWithWhiteAtBottom);
+    expect(await drawnCoordinates()).toEqual({
+      fromLeft: "abcdefgh",
+      fromTop: "87654321",
+    });
+  });
+
+  it("lays out the board, the button under it, and the empty notation area", async () => {
+    const notationArea = browser.$("main aside");
+    expect(await notationArea.getSize("width")).toBe(320);
+    expect(await notationArea.getLocation("x")).toBe(1280 - 320);
+    expect(await notationArea.getText()).toBe("");
+
+    const board = browser.$("main cg-board");
+    expect(await board.getSize()).toEqual({ width: 672, height: 672 });
+    expect(await board.getLocation()).toEqual({
+      x: 208 + 24 + (1280 - 208 - 320 - 2 * 24 - 672) / 2,
+      y: 40 + 24,
+    });
+    expect(await turnButton().getSize()).toEqual({ width: 32, height: 28 });
+    expect(await turnButton().getLocation()).toEqual({
+      x: 208 + 24 + (1280 - 208 - 320 - 2 * 24 - 672) / 2,
+      y: 40 + 24 + 672 + 12,
+    });
+
+    expect(await screenshot("board")).toEqual({ width: 1280, height: 800 });
+  });
+
+  it("turns the board of the shown tab and of no other tab", async () => {
+    await turnButton().click();
+
+    expect(await drawnBoard()).toEqual(startPositionWithBlackAtBottom);
+    expect(await drawnCoordinates()).toEqual({
+      fromLeft: "hgfedcba",
+      fromTop: "12345678",
+    });
+
+    await tab(1).click();
+
+    expect(await drawnBoard()).toEqual(startPositionWithWhiteAtBottom);
+
+    await tab(2).click();
+
+    expect(await drawnBoard()).toEqual(startPositionWithBlackAtBottom);
+
+    await turnButton().click();
+
+    expect(await drawnBoard()).toEqual(startPositionWithWhiteAtBottom);
+    expect(await drawnCoordinates()).toEqual({
+      fromLeft: "abcdefgh",
+      fromTop: "87654321",
+    });
+  });
+
+  it("leaves a dragged piece on its square", async () => {
+    await browser
+      .$("main cg-board piece.white.king")
+      .dragAndDrop({ x: 0, y: -2 * (672 / 8) });
+
+    expect(await drawnBoard()).toEqual(startPositionWithWhiteAtBottom);
+  });
+
+  it("fits the board to the size of the window", async () => {
+    await browser.setWindowSize(900, 600);
+
+    const board = browser.$("main cg-board");
+    await expect(board).toHaveSize({ width: 320, height: 320 });
+    expect(await browser.$("main aside").getSize("width")).toBe(320);
+    expect(await drawnBoard()).toEqual(startPositionWithWhiteAtBottom);
+
+    await browser.setWindowSize(1280, 800);
+
+    await expect(board).toHaveSize({ width: 672, height: 672 });
+    expect(await browser.$("main aside").getSize("width")).toBe(320);
+  });
+
   it("shows a page again after a click on its entry and keeps the tabs", async () => {
     await entry("Files").click();
 
     expect(await shown()).toEqual({
-      heading: "Files",
+      headings: ["Files"],
+      boards: 0,
       currentEntries: ["Files"],
       tabsAreSelected: [false, false],
     });
@@ -247,7 +380,8 @@ describe("the window", () => {
     await tab(1).click();
 
     expect(await shown()).toEqual({
-      heading: "New game",
+      headings: [],
+      boards: 1,
       currentEntries: [],
       tabsAreSelected: [true, false],
     });
@@ -257,7 +391,8 @@ describe("the window", () => {
     await closeButton(1).click();
 
     expect(await shown()).toEqual({
-      heading: "New game",
+      headings: [],
+      boards: 1,
       currentEntries: [],
       tabsAreSelected: [true],
     });
@@ -265,35 +400,37 @@ describe("the window", () => {
     await closeButton(1).click();
 
     expect(await shown()).toEqual({
-      heading: "Files",
+      headings: ["Files"],
+      boards: 0,
       currentEntries: ["Files"],
       tabsAreSelected: [],
     });
   });
 
   it("keeps the page shown when a tab closes", async () => {
-    await plusButton().click();
+    await openTabAndWait();
     await entry("Home").click();
     await closeButton(1).click();
 
     expect(await shown()).toEqual({
-      heading: "Home",
+      headings: ["Home"],
+      boards: 0,
       currentEntries: ["Home"],
       tabsAreSelected: [],
     });
   });
 
   it("keeps the shown tab when another tab closes", async () => {
-    await plusButton().click();
-    await plusButton().click();
-    await plusButton().click();
+    await openTabAndWait();
+    await openTabAndWait();
+    await openTabAndWait();
     await closeButton(1).click();
 
     expect((await shown()).tabsAreSelected).toEqual([false, true]);
   });
 
   it("shows the tab at the right of a closed tab, and without one the tab at its left", async () => {
-    await plusButton().click();
+    await openTabAndWait();
     await tab(2).click();
     expect((await shown()).tabsAreSelected).toEqual([false, true, false]);
 
@@ -304,7 +441,8 @@ describe("the window", () => {
     await closeButton(2).click();
 
     expect(await shown()).toEqual({
-      heading: "New game",
+      headings: [],
+      boards: 1,
       currentEntries: [],
       tabsAreSelected: [true],
     });
@@ -315,26 +453,29 @@ describe("the window", () => {
 
     expect(await tab(1).getLocation("x")).toBe(48 + 8);
     expect(await shown()).toEqual({
-      heading: "New game",
+      headings: [],
+      boards: 1,
       currentEntries: [],
       tabsAreSelected: [true],
     });
   });
 
   it("opens, shows, and closes tabs while the icon bar is collapsed", async () => {
-    await plusButton().click();
+    await openTabAndWait();
     expect((await shown()).tabsAreSelected).toEqual([false, true]);
 
     await entry("Files").click();
     expect(await shown()).toEqual({
-      heading: "Files",
+      headings: ["Files"],
+      boards: 0,
       currentEntries: ["Files"],
       tabsAreSelected: [false, false],
     });
 
     await tab(1).click();
     expect(await shown()).toEqual({
-      heading: "New game",
+      headings: [],
+      boards: 1,
       currentEntries: [],
       tabsAreSelected: [true, false],
     });
@@ -344,7 +485,8 @@ describe("the window", () => {
 
     await closeButton(1).click();
     expect(await shown()).toEqual({
-      heading: "Files",
+      headings: ["Files"],
+      boards: 0,
       currentEntries: ["Files"],
       tabsAreSelected: [],
     });

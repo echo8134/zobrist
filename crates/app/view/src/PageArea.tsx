@@ -45,13 +45,3 @@ export function PageArea({ page }: { page: Page }) {
     </main>
   );
 }
-
-export const tabName = "New game";
-
-export function TabArea() {
-  return (
-    <main className={area}>
-      <h1 className={heading}>{tabName}</h1>
-    </main>
-  );
-}
