@@ -539,7 +539,7 @@ mod tests {
             b"{Start} 1. e4 $7 $10 $1 $16 $3 $13 $2 $14 $4 $15 $5 $17 $6 $18 $19 $36 {one} {two} *";
         let mut imported = None;
         pgn::read_games(source.as_slice(), |entry| {
-            if let Entry::Game { game, problem } = entry {
+            if let Entry::Game { game, problem, .. } = entry {
                 assert_eq!(problem, None);
                 imported = Some(*game);
             }

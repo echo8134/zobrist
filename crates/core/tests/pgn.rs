@@ -2,6 +2,7 @@
 
 use std::io::{self, Read};
 use std::num::NonZeroU32;
+use std::ops::Range;
 
 use shakmaty::fen::Fen;
 use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position};
@@ -24,9 +25,17 @@ fn read(bytes: &[u8]) -> io::Result<Vec<Entry>> {
 
 fn split(entry: &Entry) -> Option<(&Game, Option<&Problem>)> {
     match entry {
-        Entry::Game { game, problem } => Some((game.as_ref(), problem.as_ref())),
+        Entry::Game { game, problem, .. } => Some((game.as_ref(), problem.as_ref())),
         Entry::StrayText { .. } => None,
     }
+}
+
+fn ranges(source: &[u8]) -> io::Result<Vec<Option<Range<u64>>>> {
+    let range = |entry| match entry {
+        Entry::Game { range, .. } => range,
+        Entry::StrayText { range, .. } => Some(range),
+    };
+    Ok(read(source)?.into_iter().map(range).collect())
 }
 
 fn notation(game: &Game) -> Vec<String> {
@@ -672,11 +681,23 @@ fn reports_stray_text_between_games_and_after_the_last_game() {
     .unwrap();
 
     assert_eq!(entries.len(), 4);
-    assert_eq!(entries[1], Entry::StrayText { after_game: 1 });
+    assert_eq!(
+        entries[1],
+        Entry::StrayText {
+            after_game: 1,
+            range: 22..40
+        }
+    );
     let (second, problem) = split(&entries[2]).unwrap();
     assert_eq!(second.tag("White"), Some("B"));
     assert_eq!(problem.map(|problem| problem.game_number), Some(2));
-    assert_eq!(entries[3], Entry::StrayText { after_game: 2 });
+    assert_eq!(
+        entries[3],
+        Entry::StrayText {
+            after_game: 2,
+            range: 74..88
+        }
+    );
 }
 
 #[test]
@@ -954,6 +975,144 @@ fn reports_a_comment_open_at_the_end_of_the_source_and_keeps_its_text() {
         game.steps().nth(1).unwrap().node().comments_after(),
         ["never closed"]
     );
+}
+
+#[test]
+fn gives_each_entry_of_the_fixtures_the_range_from_its_first_token_to_its_last() {
+    assert_eq!(ranges(CLEAN).unwrap(), [Some(0..192), Some(194..326)]);
+    assert_eq!(
+        ranges(DAMAGED).unwrap(),
+        [Some(0..108), Some(110..195), Some(197..287)]
+    );
+    let texts: [(&[u8], &str); 5] = [
+        (&CLEAN[0..192], "Qxf7# 1-0"),
+        (&CLEAN[194..326], "Qh4# 0-1"),
+        (&DAMAGED[0..108], "Qxf7# 1-0"),
+        (&DAMAGED[110..195], "Nc6 *"),
+        (&DAMAGED[197..287], "Qh4# 0-1"),
+    ];
+    for (text, last_tokens) in texts {
+        assert!(text.starts_with(b"[Event \"Example\"]\n"));
+        assert!(text.ends_with(last_tokens.as_bytes()));
+    }
+}
+
+const MARKS_BLANK_LINES_AND_STRAY_TEXT: &[u8] =
+    b"\xEF\xBB\xBF[White \"A\"]\n\n1. e4 *\n\n\n\nnot a game\n\n\
+      \xEF\xBB\xBF[White \"B\"]\r\n\r\n1. d4 d5 1/2-1/2  \r\n\r\n\
+      1. c4 *\xEF\xBB\xBF[White \"C\"]\n\n1. Nf3 *\n";
+
+#[test]
+fn counts_ranges_in_the_bytes_of_the_source_around_marks_blank_lines_and_stray_text() {
+    let entries = read(MARKS_BLANK_LINES_AND_STRAY_TEXT).unwrap();
+
+    assert_eq!(
+        ranges(MARKS_BLANK_LINES_AND_STRAY_TEXT).unwrap(),
+        [
+            Some(3..23),
+            Some(27..37),
+            Some(42..73),
+            Some(79..86),
+            Some(89..110)
+        ]
+    );
+    assert_eq!(
+        entries[1],
+        Entry::StrayText {
+            after_game: 1,
+            range: 27..37
+        }
+    );
+    assert_eq!(&MARKS_BLANK_LINES_AND_STRAY_TEXT[27..37], b"not a game");
+    assert_eq!(
+        &MARKS_BLANK_LINES_AND_STRAY_TEXT[42..73],
+        b"[White \"B\"]\r\n\r\n1. d4 d5 1/2-1/2"
+    );
+    assert_eq!(&MARKS_BLANK_LINES_AND_STRAY_TEXT[79..86], b"1. c4 *");
+    let (one_byte_at_a_time, result) =
+        read_source(OneByteAtATime(MARKS_BLANK_LINES_AND_STRAY_TEXT));
+    result.unwrap();
+    assert_eq!(one_byte_at_a_time, entries);
+}
+
+#[test]
+fn keeps_a_byte_order_mark_behind_white_space_out_of_the_entries_around_it() {
+    let source = b"1. e4 *\n\n\xEF\xBB\xBFe4 e5 *\n\n\xEF\xBB\xBF\n\n1. d4 *\n";
+    let entries = read(source).unwrap();
+
+    assert_eq!(entries.len(), 3);
+    let (second, problem) = split(&entries[1]).unwrap();
+    assert_eq!(problem, None);
+    assert_eq!(notation(second), ["e4", "e5"]);
+    assert_eq!(
+        ranges(source).unwrap(),
+        [Some(0..7), Some(12..19), Some(26..33)]
+    );
+}
+
+#[test]
+fn ends_an_entry_at_its_last_byte_that_is_not_white_space() {
+    let source = b"1. e4 1-0 {time}  \n\n1. d4 d5 unreadable ; rest\r\n\r\n1. c4 c5 $1\n";
+
+    assert_eq!(
+        ranges(source).unwrap(),
+        [Some(0..16), Some(20..46), Some(50..61)]
+    );
+    assert_eq!(&source[20..46], b"1. d4 d5 unreadable ; rest");
+}
+
+#[test]
+fn ends_a_game_with_an_open_comment_at_the_last_byte_of_the_source_that_is_not_white_space() {
+    assert_eq!(
+        ranges(b"[White \"A\"]\n\n1. e4 {never closed  \n\n").unwrap(),
+        [Some(0..32)]
+    );
+}
+
+#[test]
+fn gives_no_range_to_a_game_with_only_tags_that_a_game_follows_nor_to_that_game() {
+    let source = b"[White \"A\"]\n\n1. e4 *\n\n\
+                   [White \"B\"]\n\n[White \"C\"]\n\n1. d4 *\n\n\
+                   [White \"D\"]\n\n1. c4 *\n";
+
+    assert_eq!(
+        ranges(source).unwrap(),
+        [Some(0..20), None, None, Some(57..77)]
+    );
+}
+
+#[test]
+fn gives_a_game_with_only_tags_at_the_end_of_the_source_its_range() {
+    let source = b"[White \"D\"]\n\n1. c4 *\n\n[White \"E\"]\n";
+
+    assert_eq!(ranges(source).unwrap(), [Some(0..20), Some(22..33)]);
+    assert_eq!(&source[22..33], b"[White \"E\"]");
+}
+
+#[test]
+fn keeps_the_range_of_a_game_with_a_tag_line_that_is_too_long_in_one_piece() {
+    let annotator = "a".repeat(200_000);
+    let bytes = format!(
+        "[White \"A\"]\n[Annotator \"{annotator}\"]\n[Black \"B\"]\n\n1. e4 *\n\n\
+         [White \"C\"]\n\n1. d4 *\n"
+    );
+
+    assert_eq!(
+        ranges(bytes.as_bytes()).unwrap(),
+        [Some(0..200_047), Some(200_049..200_069)]
+    );
+}
+
+#[test]
+fn keeps_ranges_exact_in_a_source_much_longer_than_the_buffers_of_the_reader() {
+    let source = "\u{feff}[White \"A\"]\n\n1. e4 e5 1-0\n\n".repeat(40_000);
+    let found = ranges(source.as_bytes()).unwrap();
+
+    assert_eq!(found.len(), 40_000);
+    for (index, range) in found.into_iter().enumerate() {
+        let start = u64::try_from(index).unwrap() * 30 + 3;
+        assert_eq!(range, Some(start..start + 25));
+    }
 }
 
 fn assert_written(input: &[u8], expected: &str) -> io::Result<()> {
