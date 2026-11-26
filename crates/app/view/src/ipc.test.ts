@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test, vi } from "vitest";
-import { answered, ask } from "./ipc";
+import { answersOnTheirWay, ask } from "./ipc";
 
 // The stand-in for Rust. Only the module under test imports the real function.
 const invoke = vi.hoisted(() => vi.fn());
@@ -22,7 +22,7 @@ test("a request that Rust does not know does not compile", () => {
   expectTypeOf(askForSomethingUnknown).toBeFunction();
 });
 
-test("the requests about a game are answered when their senders have handled the answers", async () => {
+test("the answers about a game are on their way until their senders have handled them", async () => {
   let answerTheTag = (_response: unknown) => {};
   invoke.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -30,14 +30,15 @@ test("the requests about a game are answered when their senders have handled the
     }),
   );
   const steps: string[] = [];
+  expect(answersOnTheirWay(7)).toBeUndefined();
 
   const tag = ask({ type: "SetTag", game: 7, tag: "White", text: "Epsilon" });
   const drawn = tag.then(() => steps.push("the sender handled the answer"));
-  const waited = answered(7).then(() => steps.push("answered"));
+  const waited = answersOnTheirWay(7)?.then(() => steps.push("answered"));
 
+  expect(waited).toBeInstanceOf(Promise);
   // Another game has no request on its way.
-  await answered(8);
-  expect(steps).toEqual([]);
+  expect(answersOnTheirWay(8)).toBeUndefined();
   expect(invoke.mock.calls).toEqual([
     [
       "answer",
@@ -49,6 +50,7 @@ test("the requests about a game are answered when their senders have handled the
   await Promise.all([drawn, waited]);
 
   expect(steps).toEqual(["the sender handled the answer", "answered"]);
+  expect(answersOnTheirWay(7)).toBeUndefined();
 });
 
 test("a request that Rust could not answer holds up nothing", async () => {
@@ -57,5 +59,7 @@ test("a request that Rust could not answer holds up nothing", async () => {
   await expect(ask({ type: "GoTo", game: 9, place: [] })).rejects.toThrow(
     "no answer",
   );
-  await answered(9);
+  await answersOnTheirWay(9);
+
+  expect(answersOnTheirWay(9)).toBeUndefined();
 });

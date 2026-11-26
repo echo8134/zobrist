@@ -9,6 +9,7 @@ import {
   apply,
   askForTool,
   type Change,
+  closeOrAsk,
   closeTab,
   goTo,
   openGame,
@@ -31,20 +32,20 @@ export function Frame() {
     page: "Home",
     shownTab: undefined,
   });
-  // The state with every change so far, also before React has drawn it. A save reads its tab
-  // here after the answers to the requests before it.
+  // The state with every change so far, also before React has drawn it. A save and a close
+  // read their tab here after the answers to the requests before them.
   const newest = useRef(shown);
   const change = (next: Change) => {
     newest.current = apply(newest.current, next);
     setShown(newest.current);
   };
-  const { tabs, page, shownTab } = shown;
+  const { tabs, page, shownTab, asksToClose } = shown;
   const [iconBarOpen, setIconBarOpen] = useState(true);
   const tab = tabs.find(({ game }) => game === shownTab);
 
+  const tabNow = (game: number) =>
+    newest.current.tabs.find((each) => each.game === game);
   const saveGame = async (game: number, tool: SaveTool) => {
-    const tabNow = (ofGame: number) =>
-      newest.current.tabs.find((each) => each.game === ofGame);
     if (await save(game, tool, fileOfThePage(), tabNow, change)) {
       await readFileAgain();
     }
@@ -61,9 +62,12 @@ export function Frame() {
           unsaved: picture.unsaved,
         }))}
         shownTab={shownTab}
+        asksToClose={asksToClose}
         onOpenTab={() => openTab(change)}
         onShowTab={(game) => change({ type: "showTab", game })}
-        onCloseTab={(game) => closeTab(game, change)}
+        onCloseTab={(game) => closeOrAsk(game, tabNow, change)}
+        onCloseWithoutSaving={(game) => closeTab(game, change)}
+        onKeepTab={() => change({ type: "keepTab" })}
       />
       <IconBar
         open={iconBarOpen}

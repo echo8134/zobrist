@@ -450,6 +450,30 @@ describe("the games of a file in tabs", () => {
     await expect(tab(1)).toHaveText("Epsilon - Delta");
   });
 
+  it("asks before it closes a tab whose last change is still on its way to Rust", async () => {
+    await tab(1).click();
+    await expect(tab(1)).toHaveAttribute("aria-selected", "true");
+    await expect(dot(1)).not.toExist();
+    await form().$("aria/Site").setValue("Amsterdam");
+
+    // The field sends its text when the mouse goes down on the close button. The driver of
+    // the test is too slow to click before Rust answers that text, so the script does both
+    // in one go.
+    await browser.execute(`
+      const close = document.querySelector(
+        'header [role="tablist"] > :nth-child(1) > [aria-label^="Close "]',
+      );
+      close.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      close.click();
+    `);
+
+    await expect(tab(1)).toHaveText("Close without saving?");
+    await expect(tabs()).toBeElementsArrayOfSize(2);
+    await browser.$("header").$("aria/Keep").click();
+    await expect(tab(1)).toHaveText("Epsilon - Delta");
+    await expect(dot(1)).toExist();
+  });
+
   it("ends the question when the game is saved while the tab asks", async () => {
     await browser.$("header").$("aria/New board").click();
     await expect(tab(3)).toHaveAttribute("aria-selected", "true");

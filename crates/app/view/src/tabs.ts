@@ -6,7 +6,7 @@ import type { NotationMove } from "./generated/NotationMove";
 import type { Promotion } from "./generated/Promotion";
 import type { SaveGameAnswer } from "./generated/SaveGameAnswer";
 import type { Side } from "./generated/Side";
-import { answered, ask } from "./ipc";
+import { answersOnTheirWay, ask } from "./ipc";
 import type { Page } from "./PageArea";
 
 /** The value of a tag of the game, or the empty text when the game has no such tag. */
@@ -36,6 +36,8 @@ export type Shown = {
   tabs: readonly Tab[];
   page: Page;
   shownTab: Tab["game"] | undefined;
+  /** The tab that asks whether to close it with the changes of its game. */
+  asksToClose?: Tab["game"];
 };
 
 export type Move = { from: string; to: string; promotion: Promotion | null };
@@ -50,6 +52,8 @@ export type Change =
   | { type: "drawPicture"; game: number; picture: GamePicture }
   | { type: "drawPlace"; game: number; picture: GamePicture }
   | { type: "refuseSave"; game: number; refusal: SaveRefusal }
+  | { type: "askToClose"; game: number }
+  | { type: "keepTab" }
   | { type: "closeTab"; game: number }
   | { type: "showPage"; page: Page };
 
@@ -62,6 +66,15 @@ function withChangedTab(
     ...shown,
     tabs: shown.tabs.map((tab) => (tab.game === game ? changed(tab) : tab)),
   };
+}
+
+/** A tab asks only while it is open and its game has changes. */
+function withoutQuestionOf(shown: Shown, game: number | undefined): Shown {
+  if (shown.asksToClose !== game) {
+    return shown;
+  }
+  const { asksToClose: _, ...rest } = shown;
+  return rest;
 }
 
 export function apply(shown: Shown, change: Change): Shown {
@@ -94,7 +107,7 @@ export function apply(shown: Shown, change: Change): Shown {
       // This is the picture after a change of the game or after a save, and the line of a
       // refused save goes with both.
       return withChangedTab(
-        shown,
+        change.picture.unsaved ? shown : withoutQuestionOf(shown, change.game),
         change.game,
         ({ refusedSave: _, ...tab }) => ({ ...tab, picture: change.picture }),
       );
@@ -108,12 +121,16 @@ export function apply(shown: Shown, change: Change): Shown {
         ...tab,
         refusedSave: change.refusal,
       }));
+    case "askToClose":
+      return { ...shown, asksToClose: change.game };
+    case "keepTab":
+      return withoutQuestionOf(shown, shown.asksToClose);
     case "closeTab": {
       const place = shown.tabs.findIndex((tab) => tab.game === change.game);
       const tabAtRight = shown.tabs[place + 1];
       const tabAtLeft = shown.tabs[place - 1];
       return {
-        ...shown,
+        ...withoutQuestionOf(shown, change.game),
         tabs: shown.tabs.filter((tab) => tab.game !== change.game),
         shownTab:
           shown.shownTab === change.game
@@ -316,7 +333,7 @@ export async function save(
 ) {
   // The player may have changed the game right before the save. The tab has such a change
   // only after its answer.
-  await answered(game);
+  await answersOnTheirWay(game);
   const picture = tabNow(game)?.picture;
   // A game without a file and without changes is empty, and nothing saves it.
   if (
@@ -362,4 +379,25 @@ export function refusedSaveLine({ reason, system }: SaveRefusal) {
 export function closeTab(game: number, change: (change: Change) => void) {
   change({ type: "closeTab", game });
   ask({ type: "CloseGame", game });
+}
+
+/**
+ * Closes the tab of a game without changes. A tab whose game has changes asks first. A change
+ * that the player made right before counts, also while its answer is still on its way.
+ */
+export function closeOrAsk(
+  game: number,
+  tabNow: (game: number) => Tab | undefined,
+  change: (change: Change) => void,
+) {
+  const decide = () => {
+    const unsaved = tabNow(game)?.picture.unsaved;
+    if (unsaved === true) {
+      change({ type: "askToClose", game });
+    } else if (unsaved === false) {
+      closeTab(game, change);
+    }
+  };
+  // Without an answer on its way the tab closes in the same moment, as a click expects.
+  return answersOnTheirWay(game)?.then(decide) ?? decide();
 }

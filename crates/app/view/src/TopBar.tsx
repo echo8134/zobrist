@@ -1,5 +1,5 @@
 import { PanelLeft, Plus, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useId } from "react";
 import { IconButton } from "./IconButton";
 import styles from "./TopBar.module.css";
 
@@ -25,9 +25,13 @@ type Props = {
   onToggleIconBar: () => void;
   tabs: readonly { game: number; name: string; unsaved: boolean }[];
   shownTab: number | undefined;
+  /** The tab that asks whether to close it with the changes of its game. */
+  asksToClose: number | undefined;
   onOpenTab: () => void;
   onShowTab: (tab: number) => void;
   onCloseTab: (tab: number) => void;
+  onCloseWithoutSaving: (tab: number) => void;
+  onKeepTab: () => void;
 };
 
 export function TopBar({
@@ -35,20 +39,14 @@ export function TopBar({
   onToggleIconBar,
   tabs,
   shownTab,
+  asksToClose,
   onOpenTab,
   onShowTab,
   onCloseTab,
+  onCloseWithoutSaving,
+  onKeepTab,
 }: Props) {
   const questionId = useId();
-  const [asked, setAsked] = useState<number>();
-  // A tab asks only while its game has changes. A save while it asks ends the question.
-  const asksToClose = tabs.find(
-    ({ game, unsaved }) => game === asked && unsaved,
-  );
-  if (asked !== undefined && asksToClose === undefined) {
-    setAsked(undefined);
-  }
-
   return (
     <header className={topBar}>
       <div className={iconBarOpen ? leftPart : `${leftPart} ${collapsed}`}>
@@ -63,7 +61,7 @@ export function TopBar({
         {tabs.length > 0 && (
           <div className={tabList} role="tablist">
             {tabs.map(({ game, name: tabName, unsaved }) => {
-              const asks = game === asksToClose?.game;
+              const asks = game === asksToClose;
               return (
                 <div
                   key={game}
@@ -85,14 +83,14 @@ export function TopBar({
                       <button
                         type="button"
                         aria-describedby={questionId}
-                        onClick={() => onCloseTab(game)}
+                        onClick={() => onCloseWithoutSaving(game)}
                       >
                         Close
                       </button>
                       <button
                         type="button"
                         aria-describedby={questionId}
-                        onClick={() => setAsked(undefined)}
+                        onClick={onKeepTab}
                       >
                         Keep
                       </button>
@@ -102,9 +100,7 @@ export function TopBar({
                       type="button"
                       className={closeButton}
                       aria-label={`Close ${tabName}`}
-                      onClick={() =>
-                        unsaved ? setAsked(game) : onCloseTab(game)
-                      }
+                      onClick={() => onCloseTab(game)}
                     >
                       <X />
                     </button>
