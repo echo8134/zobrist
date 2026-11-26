@@ -2,12 +2,13 @@
 
 use std::{mem, ops::Deref};
 
-use shakmaty::{Chess, Color, Position, Role, Square};
+use shakmaty::{Chess, Color, Outcome, Position, Role, Square};
 
 use crate::game::{
-    AnnotationSymbol, Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps,
+    AnnotationSymbol, Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps, Tag,
 };
-use crate::pgn::validate_comment;
+use crate::pgn::{escaped_tag_value, validate_comment};
+use crate::shapes::{self, Shapes};
 
 /// Each choice plays one move from the start of the game. An empty place is the start.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -184,13 +185,79 @@ impl PositionSymbol {
     }
 }
 
-/// Why the editor refused to change a comment or symbol.
+/// Why the editor refused to change a comment, its shapes, or a symbol.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnnotationError {
     /// There is no move to annotate at the start of the game.
     NoMove,
-    /// The trimmed comment cannot be written as PGN.
+    /// The comment cannot be written as PGN.
     InvalidComment,
+}
+
+/// A game tag that can be edited independently of the position and result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditableTag {
+    /// The event name.
+    Event,
+    /// The playing site.
+    Site,
+    /// The PGN date.
+    Date,
+    /// The round of the event.
+    Round,
+    /// The player with the white pieces.
+    White,
+    /// The player with the black pieces.
+    Black,
+}
+
+impl EditableTag {
+    const NAMES: [&str; 6] = ["Event", "Site", "Date", "Round", "White", "Black"];
+}
+
+/// Why the editor refused a tag change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagError {
+    /// The trimmed value contains a line break.
+    LineBreak,
+    /// The value is not a PGN date.
+    InvalidDate,
+    /// The PGN writer cannot represent the value in a tag line.
+    UnwritableValue,
+    /// The new first tag would occur twice, splitting the game on import.
+    RepeatedFirstTag,
+}
+
+fn date_part(part: Option<&str>, unknown: &str, minimum: &str, maximum: &str) -> bool {
+    part.is_some_and(|part| {
+        part == unknown
+            || (part.len() == unknown.len()
+                && part.bytes().all(|byte| byte.is_ascii_digit())
+                && (minimum..=maximum).contains(&part))
+    })
+}
+
+fn replace_tag(tags: &mut Vec<Tag>, name: &str, value: &str, later_names: &[&str]) {
+    let index = tags
+        .iter()
+        .position(|tag| tag.name == name)
+        .or_else(|| {
+            tags.iter()
+                .position(|tag| later_names.contains(&tag.name.as_str()))
+        })
+        .unwrap_or_else(|| {
+            tags.iter()
+                .rposition(|tag| EditableTag::NAMES.contains(&tag.name.as_str()))
+                .map_or(0, |last| last + 1)
+        });
+    tags.retain(|tag| tag.name != name);
+    tags.insert(
+        index,
+        Tag {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        },
+    );
 }
 
 #[derive(Clone, Debug)]
@@ -338,9 +405,87 @@ impl GameEditor {
         self.change(|state| state.play(from, to, promotion))
     }
 
-    /// Replaces the comments at the current place with the trimmed text. Empty text clears them.
+    /// The text and distinct shapes in the comments at the current place.
+    #[must_use]
+    pub fn comment(&self) -> (String, Shapes) {
+        let comments = match self.game().main_line() {
+            MainLine::Empty { comments } => comments,
+            MainLine::Moves(line) if self.place().0.is_empty() => line.first.comments_before(),
+            MainLine::Moves(line) => Continuation::last_played(line, self.place())
+                .and_then(|(line, index)| line.nodes().nth(index))
+                .map_or(&[][..], Node::comments_after),
+        };
+        split_comments(comments)
+    }
+
+    /// Replaces the text at the current place and adds any shapes in the new text.
     pub fn set_comment(&mut self, text: &str) -> Result<(), AnnotationError> {
-        self.change(|state| state.set_comment(text))
+        let text = text.trim();
+        validate_comment(text).map_err(|_| AnnotationError::InvalidComment)?;
+        self.change(|state| {
+            state.edit_comment(|_, mut shapes| {
+                let (text, additions) = shapes::split(text);
+                add_shapes(&mut shapes, &additions);
+                shapes::join(&text, &shapes)
+            })
+        })
+    }
+
+    /// Replaces the shapes at the current place and keeps its comment text.
+    pub fn set_shapes(&mut self, shapes: &Shapes) -> Result<(), AnnotationError> {
+        self.change(|state| state.edit_comment(|text, _| shapes::join(&text, shapes)))
+    }
+
+    /// Sets a game tag at its existing line or inserts it in PGN roster order.
+    /// Empty text removes every copy. A refusal leaves the game and its history unchanged.
+    pub fn set_tag(&mut self, tag: EditableTag, text: &str) -> Result<(), TagError> {
+        let text = text.trim();
+        let order = tag as usize;
+        let name = EditableTag::NAMES[order];
+        if text.is_empty() {
+            let tags = self.game().tags();
+            if tags.first().is_some_and(|first| first.name == name) {
+                let mut remaining = tags.iter().filter(|tag| tag.name != name);
+                if let Some(first) = remaining.next()
+                    && remaining.any(|tag| tag.name == first.name)
+                {
+                    return Err(TagError::RepeatedFirstTag);
+                }
+            }
+            self.change(|state| state.game.tags.retain(|tag| tag.name != name));
+            return Ok(());
+        }
+        if text.contains(['\n', '\r']) {
+            return Err(TagError::LineBreak);
+        }
+        if tag == EditableTag::Date {
+            let mut parts = text.split('.');
+            if !date_part(parts.next(), "????", "0000", "9999")
+                || !date_part(parts.next(), "??", "01", "12")
+                || !date_part(parts.next(), "??", "01", "31")
+                || parts.next().is_some()
+            {
+                return Err(TagError::InvalidDate);
+            }
+        }
+        escaped_tag_value(name, text).map_err(|_| TagError::UnwritableValue)?;
+        self.change(|state| {
+            replace_tag(
+                &mut state.game.tags,
+                name,
+                text,
+                &EditableTag::NAMES[order + 1..],
+            );
+        });
+        Ok(())
+    }
+
+    /// Sets the result tag and the marker ending the move text in a single edit.
+    pub fn set_result(&mut self, result: Outcome) {
+        self.change(|state| {
+            replace_tag(&mut state.game.tags, "Result", &result.to_string(), &[]);
+            state.game.result = result;
+        });
     }
 
     /// Replaces all move judgements at the current move, keeping the other glyphs in order.
@@ -436,9 +581,10 @@ impl EditorState {
         Ok(())
     }
 
-    fn set_comment(&mut self, text: &str) -> Result<(), AnnotationError> {
-        let text = text.trim();
-        validate_comment(text).map_err(|_| AnnotationError::InvalidComment)?;
+    fn edit_comment(
+        &mut self,
+        edit: impl FnOnce(String, Shapes) -> String,
+    ) -> Result<(), AnnotationError> {
         let comments = if self.place.0.is_empty() {
             match &mut self.game.main_line {
                 MainLine::Empty { comments } => comments,
@@ -447,9 +593,12 @@ impl EditorState {
         } else {
             &mut self.current_node()?.comments_after
         };
+        let (text, shapes) = split_comments(comments);
+        let comment = edit(text, shapes);
+        validate_comment(&comment).map_err(|_| AnnotationError::InvalidComment)?;
         comments.clear();
-        if !text.is_empty() {
-            comments.push(text.to_owned());
+        if !comment.is_empty() {
+            comments.push(comment);
         }
         Ok(())
     }
@@ -483,12 +632,8 @@ impl EditorState {
         let MainLine::Moves(line) = &mut self.game.main_line else {
             return Err(AnnotationError::NoMove);
         };
-        let next = Continuation::at(line, &self.place.0, |_| {})
-            .map_err(|NoSuchPlace| AnnotationError::NoMove)?;
-        let index = next.index.checked_sub(1).ok_or(AnnotationError::NoMove)?;
-        next.line
-            .nodes_mut()
-            .nth(index)
+        Continuation::last_played(line, &self.place)
+            .and_then(|(line, index)| line.nodes_mut().nth(index))
             .ok_or(AnnotationError::NoMove)
     }
 
@@ -551,6 +696,28 @@ impl EditorState {
     }
 }
 
+fn split_comments(comments: &[String]) -> (String, Shapes) {
+    let mut texts = Vec::new();
+    let mut shapes = Shapes::default();
+    for comment in comments {
+        let (text, additions) = shapes::split(comment);
+        if !text.is_empty() {
+            texts.push(text);
+        }
+        add_shapes(&mut shapes, &additions);
+    }
+    (texts.join(" "), shapes)
+}
+
+fn add_shapes(shapes: &mut Shapes, additions: &Shapes) {
+    for &square in additions.squares() {
+        shapes.add_square(square);
+    }
+    for &arrow in additions.arrows() {
+        shapes.add_arrow(arrow);
+    }
+}
+
 fn reaches_depth_limit(node: &Node, depth: usize) -> bool {
     depth == MAX_VARIATION_DEPTH
         || node.variations.iter().any(|variation| {
@@ -604,6 +771,11 @@ impl<'game> Continuation<&'game mut Line> {
 }
 
 impl<L: LineReference> Continuation<L> {
+    fn last_played(line: L, place: &Place) -> Option<(L, usize)> {
+        let next = Self::at(line, &place.0, |_| {}).ok()?;
+        Some((next.line, next.index.checked_sub(1)?))
+    }
+
     fn at(line: L, choices: &[usize], mut visit: impl FnMut(&Node)) -> Result<Self, NoSuchPlace> {
         let mut next = Self {
             line,

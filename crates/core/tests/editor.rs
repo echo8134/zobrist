@@ -3,16 +3,19 @@
 use std::io;
 
 use shakmaty::Square::{
-    A7, A8, B1, C1, C2, C3, C4, C5, C7, D2, D4, D5, D7, E1, E2, E3, E4, E5, E7, F3, G1, H1,
+    self, A1, A7, A8, B1, C1, C2, C3, C4, C5, C7, D1, D2, D4, D5, D7, E1, E2, E3, E4, E5, E7, F3,
+    G1, H1, H5,
 };
 use shakmaty::fen::Fen;
-use shakmaty::{Chess, Color, EnPassantMode, Position, Role};
+use shakmaty::{Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role};
 use zobrist_core::editor::{
-    AnnotationError, EditVariationError, GameEditor, MoveSymbol, NoSuchPlace, Place, PlayError,
-    PositionSymbol,
+    AnnotationError, EditVariationError, EditableTag, GameEditor, MoveSymbol, NoSuchPlace, Place,
+    PlayError, PositionSymbol, TagError,
 };
 use zobrist_core::game::{Game, MAX_VARIATION_DEPTH};
 use zobrist_core::pgn::{self, Entry};
+use zobrist_core::shapes::Color::{self as ShapeColor, Green, Red};
+use zobrist_core::shapes::{Arrow, ColoredSquare, Shapes};
 
 fn read_games(source: &[u8]) -> io::Result<Vec<Game>> {
     let mut games = Vec::new();
@@ -751,4 +754,330 @@ fn the_current_line_determines_whether_a_move_follows_the_place() -> io::Result<
         assert_eq!(editor.has_next_move(), has_next);
     }
     Ok(())
+}
+
+#[test]
+fn edits_the_players_event_and_result_at_the_current_place() -> io::Result<()> {
+    let mut editor = open("1. e4 *")?;
+    assert!(editor.forward());
+    editor.set_tag(EditableTag::White, " Alpha\t").unwrap();
+    assert_state(&editor, &[0], "[White \"Alpha\"]\n\n1. e4 *\n")?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], "1. e4 *\n")?;
+    assert!(editor.redo());
+
+    editor.set_tag(EditableTag::Black, "Beta").unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        "[White \"Alpha\"]\n[Black \"Beta\"]\n\n1. e4 *\n",
+    )?;
+    editor.set_tag(EditableTag::Event, "Example").unwrap();
+    let before_result = "[Event \"Example\"]\n[White \"Alpha\"]\n[Black \"Beta\"]\n\n1. e4 *\n";
+    assert_state(&editor, &[0], before_result)?;
+    editor.set_result(Outcome::Known(KnownOutcome::Decisive {
+        winner: Color::White,
+    }));
+    assert_state(
+        &editor,
+        &[0],
+        "[Event \"Example\"]\n[White \"Alpha\"]\n[Black \"Beta\"]\n[Result \"1-0\"]\n\n1. e4 1-0\n",
+    )?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], before_result)?;
+    assert!(editor.redo());
+
+    editor.set_tag(EditableTag::White, "Gamma").unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        "[Event \"Example\"]\n[White \"Gamma\"]\n[Black \"Beta\"]\n[Result \"1-0\"]\n\n1. e4 1-0\n",
+    )?;
+    editor.set_tag(EditableTag::Black, "").unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        "[Event \"Example\"]\n[White \"Gamma\"]\n[Result \"1-0\"]\n\n1. e4 1-0\n",
+    )?;
+    editor.set_result(Outcome::Unknown);
+    assert_state(
+        &editor,
+        &[0],
+        "[Event \"Example\"]\n[White \"Gamma\"]\n[Result \"*\"]\n\n1. e4 *\n",
+    )
+}
+
+#[test]
+fn new_tags_take_their_pgn_order_even_when_set_in_reverse() -> io::Result<()> {
+    let mut editor = open("*")?;
+    for (tag, value) in [
+        (EditableTag::Black, "B"),
+        (EditableTag::White, "W"),
+        (EditableTag::Round, "1"),
+        (EditableTag::Date, "2026.11.26"),
+        (EditableTag::Site, "S"),
+        (EditableTag::Event, "E"),
+    ] {
+        editor.set_tag(tag, value).unwrap();
+    }
+    assert_state(
+        &editor,
+        &[],
+        "[Event \"E\"]\n[Site \"S\"]\n[Date \"2026.11.26\"]\n[Round \"1\"]\n[White \"W\"]\n[Black \"B\"]\n\n*\n",
+    )
+}
+
+#[test]
+fn inserts_editable_tags_and_result_around_imported_tags() -> io::Result<()> {
+    let mut editor = open("[Annotator \"N\"]\n[White \"A\"]\n[ECO \"C20\"]\n\n*")?;
+    editor.set_tag(EditableTag::Event, "E").unwrap();
+    assert_state(
+        &editor,
+        &[],
+        "[Annotator \"N\"]\n[Event \"E\"]\n[White \"A\"]\n[ECO \"C20\"]\n\n*\n",
+    )?;
+    editor.set_tag(EditableTag::Black, "B").unwrap();
+    editor.set_result(Outcome::Known(KnownOutcome::Draw));
+    assert_state(
+        &editor,
+        &[],
+        "[Annotator \"N\"]\n[Event \"E\"]\n[White \"A\"]\n[Black \"B\"]\n[Result \"1/2-1/2\"]\n[ECO \"C20\"]\n\n1/2-1/2\n",
+    )?;
+
+    let mut editor = open("[WhiteElo \"1714\"]\n\n*")?;
+    editor.set_result(Outcome::Unknown);
+    assert_state(&editor, &[], "[Result \"*\"]\n[WhiteElo \"1714\"]\n\n*\n")?;
+    editor.set_tag(EditableTag::Site, "S").unwrap();
+    assert_state(
+        &editor,
+        &[],
+        "[Site \"S\"]\n[Result \"*\"]\n[WhiteElo \"1714\"]\n\n*\n",
+    )
+}
+
+#[test]
+fn updating_repeated_tags_keeps_their_first_line_and_clearing_removes_all() -> io::Result<()> {
+    let mut editor = open(
+        "[Annotator \"N\"]\n[White \"A\"]\n[ECO \"C20\"]\n[White \"B\"]\n[Result \"*\"]\n[BlackElo \"1800\"]\n[Result \"1-0\"]\n\n*",
+    )?;
+    editor.set_tag(EditableTag::White, "C").unwrap();
+    assert_state(
+        &editor,
+        &[],
+        "[Annotator \"N\"]\n[White \"C\"]\n[ECO \"C20\"]\n[Result \"*\"]\n[BlackElo \"1800\"]\n[Result \"1-0\"]\n\n*\n",
+    )?;
+    assert!(editor.undo());
+    editor.set_tag(EditableTag::White, " \t\n").unwrap();
+    assert_state(
+        &editor,
+        &[],
+        "[Annotator \"N\"]\n[ECO \"C20\"]\n[Result \"*\"]\n[BlackElo \"1800\"]\n[Result \"1-0\"]\n\n*\n",
+    )?;
+    editor.set_result(Outcome::Known(KnownOutcome::Decisive {
+        winner: Color::Black,
+    }));
+    assert_state(
+        &editor,
+        &[],
+        "[Annotator \"N\"]\n[ECO \"C20\"]\n[Result \"0-1\"]\n[BlackElo \"1800\"]\n\n0-1\n",
+    )
+}
+
+#[test]
+fn dates_accept_unknown_parts_and_check_each_part_independently() -> io::Result<()> {
+    let mut editor = open("*")?;
+    for value in [
+        "2026.11.26",
+        "2026.11.??",
+        "2026.??.??",
+        "????.??.??",
+        "2026.02.31",
+    ] {
+        editor.set_tag(EditableTag::Date, value).unwrap();
+        assert_state(&editor, &[], &format!("[Date \"{value}\"]\n\n*\n"))?;
+    }
+    for value in [
+        "26.11.2026",
+        "2026-11-26",
+        "2026.13.01",
+        "2026.11.32",
+        "2026.11",
+        "2026.00.01",
+        "2026.11.00",
+        "202?.11.26",
+        "2026.1?.26",
+        "2026.11.?6",
+    ] {
+        assert_eq!(
+            editor.set_tag(EditableTag::Date, value),
+            Err(TagError::InvalidDate),
+            "{value}"
+        );
+    }
+    assert_state(&editor, &[], "[Date \"2026.02.31\"]\n\n*\n")?;
+    editor.set_tag(EditableTag::Date, "  ").unwrap();
+    assert_state(&editor, &[], "*\n")
+}
+
+#[test]
+fn refused_tag_edits_preserve_the_game_and_its_history() -> io::Result<()> {
+    let source = "[White \"A\"]\n[Annotator \"x\"]\n[Annotator \"y\"]\n\n*\n";
+    let mut editor = open(source)?;
+    editor.set_tag(EditableTag::Site, "S").unwrap();
+    assert!(editor.undo());
+    assert_eq!(
+        editor.set_tag(EditableTag::White, ""),
+        Err(TagError::RepeatedFirstTag)
+    );
+    for tag in [
+        EditableTag::Event,
+        EditableTag::Site,
+        EditableTag::Date,
+        EditableTag::Round,
+        EditableTag::White,
+        EditableTag::Black,
+    ] {
+        for value in ["A\nB", "A\rB"] {
+            assert_eq!(editor.set_tag(tag, value), Err(TagError::LineBreak));
+        }
+    }
+    let too_long_once_escaped = "\\".repeat(32_764);
+    for value in ["A\u{feff}[B", &too_long_once_escaped] {
+        assert_eq!(
+            editor.set_tag(EditableTag::White, value),
+            Err(TagError::UnwritableValue)
+        );
+    }
+    editor.set_tag(EditableTag::White, "A").unwrap();
+    assert_state(&editor, &[], source)?;
+    assert!(!editor.can_undo());
+    assert!(editor.can_redo());
+    Ok(())
+}
+
+fn square(color: ShapeColor, square: Square) -> ColoredSquare {
+    ColoredSquare { color, square }
+}
+
+#[test]
+fn edits_and_clears_shapes_and_comment_text_independently() -> io::Result<()> {
+    let game = "1. e4 e5 *\n";
+    let with_shapes = "1. e4 {[%csl Gd4] [%cal Ge2e4]} 1... e5 *\n";
+    let with_text = "1. e4 {Center} 1... e5 *\n";
+    let with_both = "1. e4 {Center [%csl Gd4] [%cal Ge2e4]} 1... e5 *\n";
+    let mut shapes = Shapes::default();
+    shapes.add_square(square(Green, D4));
+    shapes.add_arrow(Arrow::new(Green, E2, E4).unwrap());
+    let mut editor = open(game)?;
+    assert!(editor.forward());
+    editor.set_shapes(&shapes).unwrap();
+    assert_state(&editor, &[0], with_shapes)?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], game)?;
+    assert!(editor.redo());
+    assert_state(&editor, &[0], with_shapes)?;
+    editor.set_shapes(&Shapes::default()).unwrap();
+    assert_state(&editor, &[0], game)?;
+
+    editor.set_shapes(&shapes).unwrap();
+    assert_state(&editor, &[0], with_shapes)?;
+    editor.set_comment("Center").unwrap();
+    assert_state(&editor, &[0], with_both)?;
+    editor.set_shapes(&Shapes::default()).unwrap();
+    assert_state(&editor, &[0], with_text)?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], with_both)?;
+    editor.set_comment("").unwrap();
+    assert_state(&editor, &[0], with_shapes)?;
+
+    let mut editor = open(game)?;
+    assert!(editor.forward());
+    editor.set_comment("Center").unwrap();
+    assert_state(&editor, &[0], with_text)?;
+    editor.set_shapes(&shapes).unwrap();
+    assert_state(&editor, &[0], with_both)
+}
+
+#[test]
+fn sets_shapes_at_the_start_with_and_without_moves() -> io::Result<()> {
+    let mut shapes = Shapes::default();
+    shapes.add_arrow(Arrow::new(Red, D1, H5).unwrap());
+    for (source, expected) in [
+        ("1. e4 e5 *", "{[%cal Rd1h5]} 1. e4 e5 *\n"),
+        ("*", "{[%cal Rd1h5]} *\n"),
+    ] {
+        let mut editor = open(source)?;
+        editor.set_shapes(&shapes).unwrap();
+        assert_state(&editor, &[], expected)?;
+        assert_eq!(editor.comment(), (String::new(), shapes.clone()));
+    }
+    Ok(())
+}
+
+#[test]
+fn replacing_imported_shapes_keeps_the_text_from_every_comment_part() -> io::Result<()> {
+    let mut editor = open("1. e4 {Plan [%csl Gd4]} {more [%cal Ge2e4]} *")?;
+    assert!(editor.forward());
+    let (text, shapes) = editor.comment();
+    assert_eq!(text, "Plan more");
+    assert_eq!(shapes.squares(), [square(Green, D4)]);
+    assert_eq!(shapes.arrows(), [Arrow::new(Green, E2, E4).unwrap()]);
+
+    let mut replacement = Shapes::default();
+    replacement.add_square(square(Red, A1));
+    editor.set_shapes(&replacement).unwrap();
+    assert_state(&editor, &[0], "1. e4 {Plan more [%csl Ra1]} *\n")
+}
+
+#[test]
+fn typed_shape_commands_extend_the_shapes_in_order_without_duplicates() -> io::Result<()> {
+    let mut editor = open("1. e4 *")?;
+    assert!(editor.forward());
+    editor.set_comment("Idea [%csl Gd4]").unwrap();
+    let (text, shapes) = editor.comment();
+    assert_eq!(text, "Idea");
+    assert_eq!(shapes.squares(), [square(Green, D4)]);
+    assert_eq!(shapes.arrows(), []);
+    assert_state(&editor, &[0], "1. e4 {Idea [%csl Gd4]} *\n")?;
+
+    editor
+        .set_comment("Plan [%csl Ra1,Gd4] [%cal Ge2e4]")
+        .unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        "1. e4 {Plan [%csl Gd4,Ra1] [%cal Ge2e4]} *\n",
+    )?;
+    editor.set_comment("Threat [%cal Rd1h5,Ge2e4]").unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        "1. e4 {Threat [%csl Gd4,Ra1] [%cal Ge2e4,Rd1h5]} *\n",
+    )
+}
+
+#[test]
+fn refuses_shape_and_text_edits_when_the_combined_comment_is_too_long() -> io::Result<()> {
+    let text = "x".repeat(1 << 20);
+    let mut shapes = Shapes::default();
+    shapes.add_square(square(Green, D4));
+    let mut editor = open("1. e4 *")?;
+    assert!(editor.forward());
+    editor.set_comment(&text).unwrap();
+    assert_eq!(
+        editor.set_shapes(&shapes),
+        Err(AnnotationError::InvalidComment)
+    );
+    assert_state(&editor, &[0], &format!("1. e4 {{{text}}} *\n"))?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], "1. e4 *\n")?;
+
+    editor.set_shapes(&shapes).unwrap();
+    assert_eq!(
+        editor.set_comment(&text),
+        Err(AnnotationError::InvalidComment)
+    );
+    assert_state(&editor, &[0], "1. e4 {[%csl Gd4]} *\n")?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], "1. e4 *\n")
 }
