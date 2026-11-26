@@ -3,7 +3,7 @@ import { Board } from "./Board";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
 import styles from "./TabArea.module.css";
-import type { Move, Tab } from "./tabs";
+import type { Move, Shapes, Tab } from "./tabs";
 
 const { area, boardPart, boardColumn, buttonRow, notationArea } = styles;
 
@@ -11,9 +11,10 @@ type Props = {
   tab: Tab;
   onTurnBoard: () => void;
   onMove: (move: Move) => void;
+  onShapes: (shapes: Shapes) => void;
 };
 
-export function TabArea({ tab, onTurnBoard, onMove }: Props) {
+export function TabArea({ tab, onTurnBoard, onMove, onShapes }: Props) {
   return (
     <main className={area}>
       <div className={boardPart}>
@@ -22,6 +23,7 @@ export function TabArea({ tab, onTurnBoard, onMove }: Props) {
             picture={tab.picture}
             bottomSide={tab.bottomSide}
             onMove={onMove}
+            onShapes={onShapes}
           />
           <div className={buttonRow}>
             <IconButton
