@@ -32,11 +32,44 @@
   },
   "overrides": [
     {
-      "includes": ["src/ipc.ts", "src/Board.tsx"],
+      "includes": ["src/ipc.ts"],
       "linter": {
         "rules": {
           "style": {
-            "noRestrictedImports": "off"
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@lichess-org/chessground",
+                      "@lichess-org/chessground/**"
+                    ],
+                    "message": "Draw a board through src/Board.tsx. No other file of the view imports the board component."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/Board.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@tauri-apps/api", "@tauri-apps/api/*"],
+                    "message": "Call Rust through src/ipc.ts. No other file of the view imports the Tauri API."
+                  }
+                ]
+              }
+            }
           }
         }
       }
