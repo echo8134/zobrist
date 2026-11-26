@@ -1,0 +1,63 @@
+.form {
+  display: grid;
+  flex: none;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--game-data-gap);
+  padding: var(--game-data-padding);
+  border-bottom: 1px solid var(--game-data-line-color);
+}
+
+/* Without the least width a long text in a field would widen its column. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--game-data-name-gap);
+  min-width: 0;
+}
+
+.fieldName {
+  color: var(--game-data-name-color);
+  font-size: var(--game-data-name-size);
+}
+
+.control {
+  width: 100%;
+  height: var(--game-data-field-height);
+  padding: var(--game-data-field-padding);
+  border: 1px solid var(--game-data-field-line-color);
+  border-radius: var(--game-data-field-corner-radius);
+  background-color: var(--background-color);
+  color: inherit;
+  font: inherit;
+}
+
+.refused {
+  border-color: var(--game-data-refused-color);
+}
+
+.hint {
+  color: var(--game-data-refused-color);
+  font-size: var(--game-data-name-size);
+}
+
+.choice {
+  position: relative;
+}
+
+/* The choice is drawn like a field, and the arrow at its right says that it opens. */
+.choice select {
+  appearance: none;
+}
+
+.choice svg {
+  position: absolute;
+  top: 0;
+  right: var(--game-data-chevron-inset);
+  bottom: 0;
+  width: var(--game-data-chevron-size);
+  height: var(--game-data-chevron-size);
+  margin: auto 0;
+  color: var(--game-data-chevron-color);
+  stroke-width: var(--game-data-chevron-stroke);
+  pointer-events: none;
+}
