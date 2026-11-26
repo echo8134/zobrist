@@ -15,3 +15,7 @@
   height: var(--icon-button-icon-size);
   stroke-width: var(--icon-button-icon-stroke);
 }
+
+.iconButton:disabled {
+  color: var(--dim-icon-button-color);
+}
