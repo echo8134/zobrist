@@ -54,7 +54,27 @@ game: number,
 /**
  * The position symbol to keep, or none to remove it.
  */
-symbol: PositionSymbol | null, } | { "type": "CloseGame", 
+symbol: PositionSymbol | null, } | { "type": "Undo", 
+/**
+ * The number from the new-game answer.
+ */
+game: number, } | { "type": "Redo", 
+/**
+ * The number from the new-game answer.
+ */
+game: number, } | { "type": "PromoteVariation", 
+/**
+ * The number from the new-game answer.
+ */
+game: number, } | { "type": "DeleteVariation", 
+/**
+ * The number from the new-game answer.
+ */
+game: number, } | { "type": "DeleteRest", 
+/**
+ * The number from the new-game answer.
+ */
+game: number, } | { "type": "CloseGame", 
 /**
  * The number from the new-game answer.
  */

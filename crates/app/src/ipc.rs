@@ -63,6 +63,31 @@ pub enum Request {
         /// The position symbol to keep, or none to remove it.
         symbol: Option<PositionSymbol>,
     },
+    /// Take back the last change to the game.
+    Undo {
+        /// The number from the new-game answer.
+        game: usize,
+    },
+    /// Restore the last change taken back.
+    Redo {
+        /// The number from the new-game answer.
+        game: usize,
+    },
+    /// Promote the current variation one level.
+    PromoteVariation {
+        /// The number from the new-game answer.
+        game: usize,
+    },
+    /// Delete the current variation.
+    DeleteVariation {
+        /// The number from the new-game answer.
+        game: usize,
+    },
+    /// Delete the moves after the current place.
+    DeleteRest {
+        /// The number from the new-game answer.
+        game: usize,
+    },
     /// Close an open game.
     CloseGame {
         /// The number from the new-game answer.
@@ -199,6 +224,31 @@ pub enum Response {
         /// Absent when the game is no longer open.
         picture: Option<GamePicture>,
     },
+    /// The game after the undo request.
+    Undo {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
+    },
+    /// The game after the redo request.
+    Redo {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
+    },
+    /// The game after the request to promote the variation.
+    PromoteVariation {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
+    },
+    /// The game after the request to delete the variation.
+    DeleteVariation {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
+    },
+    /// The game after the request to delete the remaining moves.
+    DeleteRest {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
+    },
     /// The game is closed.
     CloseGame,
 }
@@ -212,7 +262,9 @@ pub struct GamePicture {
     in_check: bool,
     legal_moves: Vec<LegalMove>,
     #[serde(flatten)]
-    current: CurrentMove,
+    current: CurrentPlace,
+    can_undo: bool,
+    can_redo: bool,
     start_comments: Vec<String>,
     place: Vec<usize>,
     notation: Vec<NotationMove>,
@@ -220,7 +272,9 @@ pub struct GamePicture {
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-struct CurrentMove {
+struct CurrentPlace {
+    in_variation: bool,
+    has_next_move: bool,
     last_move: Option<MoveSquares>,
     move_symbol: Option<MoveSymbol>,
     position_symbol: Option<PositionSymbol>,
@@ -281,7 +335,7 @@ impl NotationMove {
     fn from_step(
         placed: &PlacedStep<'_>,
         current_place: &Place,
-        current: &mut CurrentMove,
+        current: &mut CurrentPlace,
     ) -> Self {
         let place = placed.place();
         let before = placed.step().position_before();
@@ -334,7 +388,11 @@ impl NotationMove {
 impl GamePicture {
     fn from_editor(editor: &GameEditor) -> Self {
         let position = editor.position();
-        let mut current = CurrentMove::default();
+        let mut current = CurrentPlace {
+            in_variation: editor.in_variation(),
+            has_next_move: editor.has_next_move(),
+            ..CurrentPlace::default()
+        };
         let notation = editor
             .walk()
             .map(|step| NotationMove::from_step(&step, editor.place(), &mut current))
@@ -361,6 +419,8 @@ impl GamePicture {
             in_check: position.is_check(),
             legal_moves,
             current,
+            can_undo: editor.can_undo(),
+            can_redo: editor.can_redo(),
             start_comments: match editor.game().main_line() {
                 MainLine::Empty { comments } => comments.clone(),
                 MainLine::Moves(_) => Vec::new(),
@@ -387,10 +447,10 @@ impl Default for Games {
 }
 
 impl Games {
-    fn edit<E>(
+    fn edit<T>(
         &mut self,
         game: usize,
-        change: impl FnOnce(&mut GameEditor) -> Result<(), E>,
+        change: impl FnOnce(&mut GameEditor) -> T,
     ) -> Option<GamePicture> {
         let editor = self.editors.get_mut(&game)?;
         // A refused edit leaves the editor at the position the view should draw.
@@ -440,6 +500,21 @@ impl Games {
                 picture: self.edit(game, |editor| {
                     editor.set_position_symbol(symbol.map(Into::into))
                 }),
+            },
+            Request::Undo { game } => Response::Undo {
+                picture: self.edit(game, GameEditor::undo),
+            },
+            Request::Redo { game } => Response::Redo {
+                picture: self.edit(game, GameEditor::redo),
+            },
+            Request::PromoteVariation { game } => Response::PromoteVariation {
+                picture: self.edit(game, GameEditor::promote),
+            },
+            Request::DeleteVariation { game } => Response::DeleteVariation {
+                picture: self.edit(game, GameEditor::delete_variation),
+            },
+            Request::DeleteRest { game } => Response::DeleteRest {
+                picture: self.edit(game, GameEditor::delete_rest),
             },
             Request::CloseGame { game } => {
                 self.editors.remove(&game);
