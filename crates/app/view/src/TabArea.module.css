@@ -1,0 +1,35 @@
+.area {
+  grid-area: area;
+  display: flex;
+}
+
+.boardPart {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  padding: var(--board-part-padding);
+  container-type: size;
+}
+
+.boardColumn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--button-row-gap);
+  width: round(
+    down,
+    min(100cqw, 100cqh - var(--button-row-gap) - var(--button-row-height)),
+    calc(var(--board-squares-per-side) * 1px)
+  );
+}
+
+.buttonRow {
+  display: flex;
+  height: var(--button-row-height);
+}
+
+.notationArea {
+  flex: none;
+  width: var(--notation-area-width);
+  border-left: 1px solid var(--notation-area-line-color);
+  background-color: var(--notation-area-background-color);
+}
