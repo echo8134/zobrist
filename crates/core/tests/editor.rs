@@ -14,7 +14,7 @@ use zobrist_core::pgn::{self, Entry};
 fn read_games(source: &[u8]) -> io::Result<Vec<Game>> {
     let mut games = Vec::new();
     pgn::read_games(source, |entry| {
-        if let Entry::Game { game, problem } = entry {
+        if let Entry::Game { game, problem, .. } = entry {
             assert_eq!(problem, None);
             games.push(*game);
         }

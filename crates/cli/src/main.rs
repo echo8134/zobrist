@@ -443,7 +443,7 @@ impl Report {
 
 fn problem_line(entry: &Entry) -> Option<String> {
     match entry {
-        Entry::Game { game, problem } => problem.as_ref().map(|problem| {
+        Entry::Game { game, problem, .. } => problem.as_ref().map(|problem| {
             let kept = match game.counts().main_line_moves {
                 1 => "1 move kept".to_owned(),
                 moves => format!("{moves} moves kept"),
@@ -456,7 +456,7 @@ fn problem_line(entry: &Entry) -> Option<String> {
                 problem.reason,
             )
         }),
-        Entry::StrayText { after_game } => Some(format!(
+        Entry::StrayText { after_game, .. } => Some(format!(
             "after game {after_game}: text that is not part of a game"
         )),
     }
