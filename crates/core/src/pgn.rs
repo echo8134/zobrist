@@ -86,30 +86,13 @@ pub fn write_game(game: &Game, mut output: impl Write) -> io::Result<()> {
         if tag.name.trim_ascii() != tag.name
             || tag.name.contains(['"', ']', '\n'])
             || tag.name.contains(MARKED_TAG_LINE)
-            || tag.value.contains(MARKED_TAG_LINE)
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "PGN tag cannot be read back unchanged",
             ));
         }
-        if tag.value.contains('\n') {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("PGN tag {} contains a line break", tag.name),
-            ));
-        }
-        let value = tag.value.replace('\\', "\\\\").replace('"', "\\\"");
-        // The reader needs the bytes from '[' through the closing quote in one buffer.
-        if tag.name.len() + value.len() + 4 > SUPPORTED_TAG_LINE_LENGTH {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "PGN tag {} exceeds the supported UTF-8 tag length",
-                    tag.name
-                ),
-            ));
-        }
+        let value = escaped_tag_value(&tag.name, &tag.value)?;
         writeln!(output, "[{} \"{value}\"]", tag.name)?;
     }
     if !game.tags().is_empty() {
@@ -126,6 +109,30 @@ pub fn write_game(game: &Game, mut output: impl Write) -> io::Result<()> {
         }
     }
     writeln!(output, "{}", game.result())
+}
+
+pub(super) fn escaped_tag_value(name: &str, value: &str) -> io::Result<String> {
+    if value.contains(MARKED_TAG_LINE) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PGN tag cannot be read back unchanged",
+        ));
+    }
+    if value.contains('\n') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("PGN tag {name} contains a line break"),
+        ));
+    }
+    let value = value.replace('\\', "\\\\").replace('"', "\\\"");
+    // The reader needs the bytes from '[' through the closing quote in one buffer.
+    if name.len() + value.len() + 4 > SUPPORTED_TAG_LINE_LENGTH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("PGN tag {name} exceeds the supported UTF-8 tag length"),
+        ));
+    }
+    Ok(value)
 }
 
 fn write_line(steps: Steps<'_>, output: &mut impl Write) -> io::Result<()> {

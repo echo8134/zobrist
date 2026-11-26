@@ -16,7 +16,15 @@ game: number,
 /**
  * The picture at the starting position.
  */
-picture: GamePicture, } | { "type": "PlayMove", 
+picture: GamePicture, } | { "type": "SetTag", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "SetResult", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "PlayMove", 
 /**
  * Absent when the game is no longer open.
  */

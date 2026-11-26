@@ -38,10 +38,10 @@ pub enum Move {
 /// A game read from PGN or built move by move.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
-    tags: Vec<Tag>,
+    pub(super) tags: Vec<Tag>,
     start: Chess,
     pub(super) main_line: MainLine,
-    result: Outcome,
+    pub(super) result: Outcome,
 }
 
 /// What [`Game::counts`] adds up.
@@ -181,8 +181,8 @@ impl Game {
         &self.main_line
     }
 
-    /// The result from the marker that ends the move text. The `Result` tag stays in
-    /// [`Game::tags`] as written.
+    /// The result from the marker that ends the move text. Imported games keep the original
+    /// `Result` tag until the editor sets the result.
     #[must_use]
     pub fn result(&self) -> Outcome {
         self.result
