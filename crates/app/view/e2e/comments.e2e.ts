@@ -34,13 +34,6 @@ async function playMoves(moves: string) {
   }
 }
 
-// A click of a mouse takes the focus from the field before it does anything else. The click
-// of the driver leaves the focus where it is, so the test takes it away.
-async function clickOnTheBoard() {
-  await browser.execute("document.activeElement.blur()");
-  await clickSquare("a4");
-}
-
 const seen = () =>
   browser.execute(`
     const texts = document.createTreeWalker(document.querySelector("main aside ol"), NodeFilter.SHOW_TEXT);
@@ -110,7 +103,7 @@ describe("the comments and the symbols of a game", () => {
   it("writes the comment of the field behind the current move when the field loses the focus", async () => {
     await commentField().click();
     await commentField().setValue("Open game");
-    await clickOnTheBoard();
+    await clickSquare("a4");
 
     await expectSoon(seen, {
       notation: "1. e4 [e5] Open game",
@@ -148,6 +141,35 @@ describe("the comments and the symbols of a game", () => {
 
   it("shows the comment of the picture again when Rust refuses the text of the field", async () => {
     await commentField().setValue("Best } by test");
+    await browser.keys(["Control", "Enter"]);
+
+    await expectSoon(seen, {
+      notation: "1. [e4] Best by test 1... e5 Open game",
+      field: "Best by test",
+      setSymbols: [],
+      dimSymbols: 0,
+    });
+  });
+
+  it("keeps what the player types while Rust answers the comment before", async () => {
+    // The text grows in the same moment in which Ctrl+Enter sends it, before Rust can answer.
+    await browser.execute(`
+      const field = document.querySelector("main aside textarea");
+      field.value = "Best by test,";
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }),
+      );
+      field.value = "Best by test, and more";
+    `);
+
+    await expectSoon(seen, {
+      notation: "1. [e4] Best by test, 1... e5 Open game",
+      field: "Best by test, and more",
+      setSymbols: [],
+      dimSymbols: 0,
+    });
+
+    await commentField().setValue("Best by test");
     await browser.keys(["Control", "Enter"]);
 
     await expectSoon(seen, {
@@ -279,7 +301,7 @@ describe("the comments and the symbols of a game", () => {
       dimSymbols: 0,
     });
 
-    await clickOnTheBoard();
+    await clickSquare("a4");
     await browser.keys(["Control", "z"]);
 
     await expectSoon(seen, {
