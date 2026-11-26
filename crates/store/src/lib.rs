@@ -1,4 +1,4 @@
-//! Reads and creates databases of chess games.
+//! Reads and creates game databases and adds games to PGN files.
 //!
 //! # File format, version 1
 //!
@@ -47,6 +47,9 @@
 //! | 6 | Add the following `u8` annotation symbol to the preceding move. |
 
 mod codec;
+mod pgn_file;
+
+pub use pgn_file::add_pgn_games;
 
 use std::error::Error;
 use std::fmt;
@@ -271,6 +274,34 @@ fn copy_with_checksum(mut source: impl Read, mut target: impl Write) -> io::Resu
 
 struct StagingDirectory(PathBuf);
 
+impl StagingDirectory {
+    fn beside(target: &Path) -> io::Result<Self> {
+        let name = target.file_name().ok_or(io::ErrorKind::InvalidInput)?;
+        let parent = target.parent().ok_or(io::ErrorKind::InvalidInput)?;
+        let directory = DirBuilder::new();
+        #[cfg(unix)]
+        let directory = {
+            use std::os::unix::fs::DirBuilderExt as _;
+            let mut directory = directory;
+            directory.mode(0o700);
+            directory
+        };
+        loop {
+            let number = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let temporary = format!(".zobrist-{}-{number}", process::id());
+            if name.eq_ignore_ascii_case(temporary.as_str()) {
+                continue;
+            }
+            let path = parent.join(temporary);
+            match directory.create(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
 impl Drop for StagingDirectory {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.0).ok();
@@ -294,29 +325,7 @@ impl DatabaseWriter {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
-        let name = target.file_name().ok_or(io::ErrorKind::InvalidInput)?;
-        let parent = target.parent().ok_or(io::ErrorKind::InvalidInput)?;
-        let directory = DirBuilder::new();
-        #[cfg(unix)]
-        let directory = {
-            use std::os::unix::fs::DirBuilderExt as _;
-            let mut directory = directory;
-            directory.mode(0o700);
-            directory
-        };
-        let staging = loop {
-            let number = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-            let temporary = format!(".zobrist-{}-{number}", process::id());
-            if name.eq_ignore_ascii_case(temporary.as_str()) {
-                continue;
-            }
-            let path = parent.join(temporary);
-            match directory.create(&path) {
-                Ok(()) => break StagingDirectory(path),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error),
-            }
-        };
+        let staging = StagingDirectory::beside(&target)?;
         let create = |name: &str| File::create_new(staging.0.join(name)).map(BufWriter::new);
         let parts = [
             create("games")?,

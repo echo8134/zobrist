@@ -16,7 +16,7 @@ The chess domain model. Pure. No IO and no framework dependencies.
 
 ### `crates/store` (zobrist-store)
 
-Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. Search over games and positions is planned.
+Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. It also adds games to PGN files while preserving their existing bytes. Search over games and positions is planned.
 
 ### `crates/engine` (zobrist-engine, planned)
 
