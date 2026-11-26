@@ -42,6 +42,14 @@
   background-color: var(--notation-area-background-color);
 }
 
+.refusedSave {
+  flex: none;
+  margin: 0;
+  padding: var(--refused-save-padding);
+  color: var(--refusal-color);
+  font-size: var(--refused-save-size);
+}
+
 .notationScroller {
   flex: 1;
   min-height: 0;

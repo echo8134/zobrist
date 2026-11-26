@@ -48,6 +48,27 @@ async function send(type: "OpenPgnFile" | "CreatePgnFile") {
   keep({ ...kept, answer: response.answer });
 }
 
+/** The path of the file that the page shows, when it shows one. */
+export function fileOfThePage() {
+  return kept.answer?.type === "File" ? kept.answer.path : undefined;
+}
+
+/**
+ * Reads the file of the page again. A save of a tab changes the file, and a game of the list
+ * that does not open means that the file is no longer what the list shows.
+ */
+export async function readFileAgain() {
+  const path = fileOfThePage();
+  if (path === undefined) {
+    return;
+  }
+  const { answer } = await ask({ type: "OpenPgnFile", path });
+  // The player may have opened another file meanwhile.
+  if (fileOfThePage() === path) {
+    keep({ ...kept, answer });
+  }
+}
+
 const refusals: Record<RefusalReason, string> = {
   cannotRead: "This file cannot be opened.",
   existsAlready: "This file exists already.",
@@ -71,9 +92,19 @@ function lineOf(answer: PgnFileAnswer): string | undefined {
     : `${answer.problems} games have a problem.`;
 }
 
-export function FilesPage() {
+type Props = {
+  /** Opens a game of a file in a tab and tells whether Rust opened it. */
+  onOpenGame: (path: string, number: number) => Promise<boolean>;
+};
+
+export function FilesPage({ onOpenGame }: Props) {
   const { typed, answer } = useSyncExternalStore(subscribe, () => kept);
   const text = answer === undefined ? undefined : lineOf(answer);
+  const open = async (path: string, number: number) => {
+    if (!(await onOpenGame(path, number))) {
+      await readFileAgain();
+    }
+  };
   return (
     <>
       <div className={pathRow}>
@@ -134,7 +165,10 @@ export function FilesPage() {
           </thead>
           <tbody>
             {answer.rows.map((row) => (
-              <tr key={row.number}>
+              <tr
+                key={row.number}
+                onClick={() => void open(answer.path, row.number)}
+              >
                 <td>{row.number}</td>
                 <td>{row.white}</td>
                 <td>{row.black}</td>

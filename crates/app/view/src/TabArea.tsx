@@ -9,9 +9,12 @@ import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
 import styles from "./TabArea.module.css";
 import {
+  isSaveKey,
   type Move,
   type NotationTool,
   placeToAskFor,
+  refusedSaveLine,
+  type SaveTool,
   type Shapes,
   type Tab,
   toolForKey,
@@ -23,6 +26,7 @@ const {
   boardColumn,
   buttonRow,
   notationArea,
+  refusedSave,
   notationScroller,
 } = styles;
 
@@ -32,6 +36,7 @@ type Props = {
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
   onTool: (tool: NotationTool) => void;
+  onSave: (tool: SaveTool) => void;
   onShapes: (shapes: Shapes) => void;
   onSetTag: (tag: EditableTag, text: string) => Promise<boolean>;
   onSetResult: (result: GameResult) => void;
@@ -43,6 +48,7 @@ export function TabArea({
   onMove,
   onGoTo,
   onTool,
+  onSave,
   onShapes,
   onSetTag,
   onSetResult,
@@ -52,6 +58,12 @@ export function TabArea({
   // A plain effect runs later, and until then the key would start from the picture before.
   useLayoutEffect(() => {
     const act = (event: KeyboardEvent) => {
+      // The key of Save works in a field too. The field sends its text first.
+      if (isSaveKey(event)) {
+        event.preventDefault();
+        onSave("Save");
+        return;
+      }
       const { target } = event;
       if (
         target instanceof HTMLInputElement ||
@@ -72,7 +84,7 @@ export function TabArea({
     };
     document.addEventListener("keydown", act);
     return () => document.removeEventListener("keydown", act);
-  }, [picture, onGoTo, onTool]);
+  }, [picture, onGoTo, onTool, onSave]);
 
   return (
     <main className={area}>
@@ -94,7 +106,12 @@ export function TabArea({
         </div>
       </div>
       <aside className={notationArea}>
-        <NotationTools picture={picture} onUse={onTool} />
+        <NotationTools picture={picture} onUse={onTool} onSave={onSave} />
+        {tab.refusedSave !== undefined && (
+          <p className={refusedSave} role="alert">
+            {refusedSaveLine(tab.refusedSave)}
+          </p>
+        )}
         <GameDataForm
           picture={picture}
           onSetTag={onSetTag}

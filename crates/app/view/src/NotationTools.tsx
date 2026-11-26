@@ -2,6 +2,8 @@ import {
   ArrowUp,
   type LucideIcon,
   Redo,
+  Save,
+  SavePlus,
   Scissors,
   Trash2,
   Undo,
@@ -9,7 +11,7 @@ import {
 import type { GamePicture } from "./generated/GamePicture";
 import { IconButton } from "./IconButton";
 import styles from "./NotationTools.module.css";
-import type { NotationTool } from "./tabs";
+import type { NotationTool, SaveTool } from "./tabs";
 
 const { notationTools, group } = styles;
 
@@ -53,11 +55,28 @@ const groups: readonly (readonly Button[])[] = [
 type Props = {
   picture: GamePicture;
   onUse: (tool: NotationTool) => void;
+  onSave: (tool: SaveTool) => void;
 };
 
-export function NotationTools({ picture, onUse }: Props) {
+export function NotationTools({ picture, onUse, onSave }: Props) {
+  const { file, unsaved } = picture;
   return (
     <div className={notationTools}>
+      <div className={group}>
+        <IconButton
+          name="Save"
+          icon={Save}
+          disabled={!unsaved}
+          onClick={() => onSave("Save")}
+        />
+        <IconButton
+          name="Save as new game"
+          icon={SavePlus}
+          // A game without a file and without changes is empty.
+          disabled={file === null && !unsaved}
+          onClick={() => onSave("SaveAsNewGame")}
+        />
+      </div>
       {groups.map((buttons) => (
         <div key={buttons[0]?.tool} className={group}>
           {buttons.map(({ tool, name, icon, hasWork }) => (

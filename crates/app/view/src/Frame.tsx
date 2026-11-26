@@ -1,4 +1,5 @@
-import { useReducer, useState } from "react";
+import { useRef, useState } from "react";
+import { fileOfThePage, readFileAgain } from "./FilesPage";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
 import { PageArea } from "./PageArea";
@@ -7,10 +8,15 @@ import { TopBar } from "./TopBar";
 import {
   apply,
   askForTool,
+  type Change,
   closeTab,
   goTo,
+  openGame,
   openTab,
   playMove,
+  type SaveTool,
+  type Shown,
+  save,
   setResult,
   setShapes,
   setTag,
@@ -20,13 +26,30 @@ import {
 const { frame } = styles;
 
 export function Frame() {
-  const [{ tabs, page, shownTab }, change] = useReducer(apply, {
+  const [shown, setShown] = useState<Shown>({
     tabs: [],
     page: "Home",
     shownTab: undefined,
   });
+  // The state with every change so far, also before React has drawn it. A save reads its tab
+  // here after the answers to the requests before it.
+  const newest = useRef(shown);
+  const change = (next: Change) => {
+    newest.current = apply(newest.current, next);
+    setShown(newest.current);
+  };
+  const { tabs, page, shownTab } = shown;
   const [iconBarOpen, setIconBarOpen] = useState(true);
   const tab = tabs.find(({ game }) => game === shownTab);
+
+  const saveGame = async (game: number, tool: SaveTool) => {
+    const tabNow = (ofGame: number) =>
+      newest.current.tabs.find((each) => each.game === ofGame);
+    if (await save(game, tool, fileOfThePage(), tabNow, change)) {
+      await readFileAgain();
+    }
+  };
+
   return (
     <div className={frame}>
       <TopBar
@@ -35,6 +58,7 @@ export function Frame() {
         tabs={tabs.map(({ game, picture }) => ({
           game,
           name: tabName(picture),
+          unsaved: picture.unsaved,
         }))}
         shownTab={shownTab}
         onOpenTab={() => openTab(change)}
@@ -47,7 +71,10 @@ export function Frame() {
         onChoose={(chosen) => change({ type: "showPage", page: chosen })}
       />
       {tab === undefined ? (
-        <PageArea page={page} />
+        <PageArea
+          page={page}
+          onOpenGame={(path, number) => openGame(path, number, change)}
+        />
       ) : (
         <TabArea
           key={tab.game}
@@ -56,6 +83,7 @@ export function Frame() {
           onMove={(move) => playMove(tab.game, move, change)}
           onGoTo={(place) => goTo(tab.game, place, change)}
           onTool={(tool) => askForTool(tab.game, tool, change)}
+          onSave={(tool) => saveGame(tab.game, tool)}
           onShapes={(shapes) => setShapes(tab.game, shapes, change)}
           onSetTag={(tag, text) => setTag(tab, tag, text, change)}
           onSetResult={(result) => setResult(tab.game, result, change)}

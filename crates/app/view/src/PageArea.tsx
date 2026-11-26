@@ -24,9 +24,8 @@ function VersionLine() {
   return <p className={versionLine}>zobrist {use(version).version}</p>;
 }
 
-const contents: Record<Page, ReactNode> = {
+const contents: Record<Exclude<Page, "Files">, ReactNode> = {
   Home: null,
-  Files: <FilesPage />,
   Databases: null,
   Events: null,
   Engines: null,
@@ -38,11 +37,20 @@ const contents: Record<Page, ReactNode> = {
   ),
 };
 
-export function PageArea({ page }: { page: Page }) {
+type Props = {
+  page: Page;
+  onOpenGame: (path: string, number: number) => Promise<boolean>;
+};
+
+export function PageArea({ page, onOpenGame }: Props) {
   return (
     <main className={area}>
       <h1 className={heading}>{page}</h1>
-      {contents[page]}
+      {page === "Files" ? (
+        <FilesPage onOpenGame={onOpenGame} />
+      ) : (
+        contents[page]
+      )}
     </main>
   );
 }

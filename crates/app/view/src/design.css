@@ -40,6 +40,16 @@
   --close-button-icon-size: 14px;
   --close-button-icon-stroke: 1.6;
 
+  --tab-dot-size: 6px;
+  --tab-dot-gap: 6px;
+  --tab-dot-color: #444444;
+
+  --asking-tab-width: 280px;
+  --tab-question-size: 12px;
+  --tab-answer-width: 44px;
+  --tab-answer-height: 20px;
+  --tab-answer-gap: 4px;
+
   --icon-bar-width: 208px;
   --icon-bar-padding: 10px 8px;
   --icon-bar-gap: 2px;
@@ -86,6 +96,9 @@
   --notation-tools-gap: 2px;
   --notation-tools-group-gap: 12px;
   --notation-tools-line-color: #e6e6e6;
+
+  --refused-save-padding: 6px 16px;
+  --refused-save-size: 12px;
 
   --move-gap: 2px;
   --move-line-height: 24px;
