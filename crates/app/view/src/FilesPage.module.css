@@ -1,0 +1,71 @@
+.pathRow {
+  display: flex;
+  gap: var(--path-row-gap);
+  margin-top: var(--path-row-gap-above);
+}
+
+.field {
+  width: var(--field-width);
+  height: var(--field-height);
+  padding: var(--field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
+  background-color: var(--background-color);
+  color: inherit;
+  font: inherit;
+}
+
+.button {
+  height: var(--button-height);
+  padding: var(--button-padding);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background-color: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+}
+
+.line {
+  margin: var(--file-line-gap-above) 0 0;
+  color: var(--file-line-color);
+}
+
+.refusal {
+  color: var(--refusal-color);
+}
+
+/* The columns take their widths from the head row. */
+.list {
+  width: 100%;
+  margin-top: var(--list-gap-above);
+  border-spacing: 0;
+  table-layout: fixed;
+  text-align: left;
+}
+
+.list th,
+.list td {
+  height: var(--list-row-height);
+  padding: var(--list-cell-padding);
+  overflow: hidden;
+  border-bottom: 1px solid var(--list-line-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list th {
+  color: var(--list-head-color);
+  font-weight: var(--list-head-weight);
+}
+
+.numberColumn {
+  width: var(--list-number-width);
+}
+
+.resultColumn {
+  width: var(--list-result-width);
+}
+
+.dateColumn {
+  width: var(--list-date-width);
+}

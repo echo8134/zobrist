@@ -1,4 +1,5 @@
 import { type ReactNode, Suspense, use } from "react";
+import { FilesPage } from "./FilesPage";
 import { ask } from "./ipc";
 import styles from "./PageArea.module.css";
 
@@ -25,7 +26,7 @@ function VersionLine() {
 
 const contents: Record<Page, ReactNode> = {
   Home: null,
-  Files: null,
+  Files: <FilesPage />,
   Databases: null,
   Events: null,
   Engines: null,
