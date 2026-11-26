@@ -125,4 +125,12 @@ path: string, } | { "type": "CreatePgnFile",
 /**
  * The path as it was typed.
  */
-path: string, };
+path: string, } | { "type": "OpenGame", 
+/**
+ * The path of the file.
+ */
+path: string, 
+/**
+ * The number of the game in the file, counting from 1.
+ */
+number: number, };

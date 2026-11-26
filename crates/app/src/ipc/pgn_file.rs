@@ -137,7 +137,7 @@ fn list(path: &Path) -> io::Result<(Vec<GameRow>, usize)> {
 
 /// The path as the maintainer typed it, without white space at its ends. `~/` at its start is
 /// the home folder.
-fn resolve(typed: &str) -> PathBuf {
+pub(super) fn resolve(typed: &str) -> PathBuf {
     let typed = typed.trim();
     match (typed.strip_prefix("~/"), env::home_dir()) {
         (Some(below_home), Some(home)) => home.join(below_home),

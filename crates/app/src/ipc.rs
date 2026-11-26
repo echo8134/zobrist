@@ -3,8 +3,11 @@
 //! The view sends a [`Request`] and gets back the [`Response`] case with the same name. The
 //! TypeScript types of the view are generated from these two types.
 
+mod game_file;
 mod pgn_file;
 
+pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer};
+use game_file::{InFile, OpenGame, SavedState};
 pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
 
 use std::collections::HashMap;
@@ -153,6 +156,14 @@ pub enum Request {
     CreatePgnFile {
         /// The path as it was typed.
         path: String,
+    },
+    /// Open one game of a PGN file as an open game of the app.
+    OpenGame {
+        /// The path of the file.
+        path: String,
+        /// The number of the game in the file, counting from 1.
+        #[ts(type = "number")]
+        number: u64,
     },
 }
 
@@ -437,6 +448,11 @@ pub enum Response {
         /// What the page Files shows next.
         answer: PgnFileAnswer,
     },
+    /// The open game, or the refusal.
+    OpenGame {
+        /// The game and its picture, or why there is none.
+        answer: OpenGameAnswer,
+    },
 }
 
 /// The complete picture after a request to set the start position.
@@ -506,6 +522,8 @@ pub struct GamePicture {
     start_comments: Vec<String>,
     place: Vec<usize>,
     notation: Vec<NotationMove>,
+    #[serde(flatten)]
+    saved: SavedState,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -644,7 +662,7 @@ impl NotationMove {
 }
 
 impl GamePicture {
-    fn from_editor(editor: &GameEditor) -> Self {
+    fn from_editor(editor: &GameEditor, file: Option<&InFile>) -> Self {
         let position = editor.position();
         let mut current = CurrentPlace {
             in_variation: editor.in_variation(),
@@ -696,32 +714,36 @@ impl GamePicture {
             },
             place: editor.place().0.clone(),
             notation,
+            saved: SavedState::of(editor.game(), file),
         }
     }
 }
 
 /// The open games of one run of the app.
 pub struct Games {
-    editors: HashMap<usize, GameEditor>,
+    open_games: HashMap<usize, OpenGame>,
     next_number: usize,
 }
 
 impl Default for Games {
     fn default() -> Self {
         Self {
-            editors: HashMap::new(),
+            open_games: HashMap::new(),
             next_number: 1,
         }
     }
 }
 
 impl Games {
-    fn open(&mut self, game: Game) -> (usize, GamePicture) {
+    fn open(&mut self, game: Game, file: Option<InFile>) -> (usize, GamePicture) {
         let number = self.next_number;
         self.next_number = number.strict_add(1);
-        let editor = GameEditor::new(game);
-        let picture = GamePicture::from_editor(&editor);
-        self.editors.insert(number, editor);
+        let open = OpenGame {
+            editor: GameEditor::new(game),
+            file,
+        };
+        let picture = open.picture();
+        self.open_games.insert(number, open);
         (number, picture)
     }
 
@@ -741,7 +763,7 @@ impl Games {
             let noun = if moves == 1 { "move" } else { "moves" };
             format!("{}, {moves} {noun} kept", problem.reason)
         });
-        let (game, picture) = self.open(*game);
+        let (game, picture) = self.open(*game, None);
         Some(OpenedGame {
             game,
             picture,
@@ -754,10 +776,10 @@ impl Games {
         game: usize,
         change: impl FnOnce(&mut GameEditor) -> T,
     ) -> Option<GamePicture> {
-        let editor = self.editors.get_mut(&game)?;
+        let open = self.open_games.get_mut(&game)?;
         // A refused edit leaves the editor at the position the view should draw.
-        let _result = change(editor);
-        Some(GamePicture::from_editor(editor))
+        let _result = change(&mut open.editor);
+        Some(open.picture())
     }
 
     /// Answers a request one step after the other. The app does not call this, because it
@@ -779,16 +801,16 @@ impl Games {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             },
             Request::NewGame => {
-                let (game, picture) = self
-                    .open(GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown));
+                let new = GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown);
+                let (game, picture) = self.open(new, None);
                 Response::NewGame { game, picture }
             }
             Request::SetStartPosition { game, fen } => Response::SetStartPosition {
-                change: self.editors.get_mut(&game).map(|editor| {
-                    let refused =
-                        fen.is_none_or(|position| editor.set_start_position(position).is_err());
+                change: self.open_games.get_mut(&game).map(|open| {
+                    let refused = fen
+                        .is_none_or(|position| open.editor.set_start_position(position).is_err());
                     PositionChange {
-                        picture: GamePicture::from_editor(editor),
+                        picture: open.picture(),
                         refused,
                     }
                 }),
@@ -797,7 +819,8 @@ impl Games {
                 opened: self.open_pgn(&text),
             },
             Request::GamePgn { game } => {
-                Response::GamePgn(PgnExport::from_editor(self.editors.get(&game)))
+                let open = self.open_games.get(&game);
+                Response::GamePgn(PgnExport::from_editor(open.map(|open| &open.editor)))
             }
             Request::SetTag { game, tag, text } => Response::SetTag {
                 picture: self.edit(game, |editor| editor.set_tag(tag.into(), &text)),
@@ -850,11 +873,12 @@ impl Games {
                 picture: self.edit(game, GameEditor::delete_rest),
             },
             Request::CloseGame { game } => {
-                self.editors.remove(&game);
+                self.open_games.remove(&game);
                 Response::CloseGame
             }
             Request::OpenPgnFile { path } => return pgn_file::open(path),
             Request::CreatePgnFile { path } => return pgn_file::create(path),
+            Request::OpenGame { path, number } => return game_file::open(path, number),
         };
         FirstStep::Answer(Box::new(response))
     }
@@ -923,7 +947,7 @@ mod tests {
     #[test]
     fn imported_shapes_follow_their_place_and_leave_midgame_prefaces_intact() -> io::Result<()> {
         let mut editor = import(b"{Start [%cal Rd1h5]} 1. e4 {Plan [%csl Gd4]} {more} {[%cal Ge2e4]} (1. d4 {[%csl Ba1]}) {Before [%csl Yb2]} e5 *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(
             picture["arrows"],
             json!([{ "color": "red", "from": "d1", "to": "h5" }])
@@ -936,7 +960,7 @@ mod tests {
         assert_eq!(notation[1]["commentsBefore"], json!(["Before [%csl Yb2]"]));
 
         editor.go_to(Place(vec![1])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(
             picture["squares"],
             json!([{ "color": "blue", "square": "a1" }])
@@ -948,7 +972,7 @@ mod tests {
     #[test]
     fn the_empty_game_shows_only_text_in_its_start_comments() -> io::Result<()> {
         let editor = import(b"{[%csl Gd4]} {Plan [%cal Ge2e4]} {[%clk 0:15]} *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(picture["startComments"], json!(["Plan", "[%clk 0:15]"]));
         assert_eq!(
             picture["squares"],
@@ -970,7 +994,7 @@ mod tests {
                 imported = Some(GameEditor::new(*game));
             }
         })?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap()))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap(), None))?;
         assert_eq!(
             picture["tags"],
             json!([
@@ -996,7 +1020,7 @@ mod tests {
         })?;
         let mut editor = GameEditor::new(imported.unwrap());
         editor.go_to(Place(vec![0])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(picture["moveSymbol"], "!");
         assert_eq!(picture["positionSymbol"], "=");
         assert_eq!(picture["startComments"], json!([]));
