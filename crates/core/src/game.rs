@@ -72,8 +72,8 @@ pub enum MainLine {
 /// A sequence of at least one node. The main line and every variation are lines.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
-    first: Node,
-    rest: Vec<Node>,
+    pub(super) first: Node,
+    pub(super) rest: Vec<Node>,
 }
 
 /// One move with its annotation symbols, its comments, and the variations that replace it.
@@ -254,7 +254,7 @@ impl Line {
         }
     }
 
-    fn last_mut(&mut self) -> &mut Node {
+    pub(super) fn last_mut(&mut self) -> &mut Node {
         self.rest.last_mut().unwrap_or(&mut self.first)
     }
 }

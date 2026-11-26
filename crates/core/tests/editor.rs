@@ -7,7 +7,7 @@ use shakmaty::Square::{
 };
 use shakmaty::fen::Fen;
 use shakmaty::{Chess, Color, EnPassantMode, Position, Role};
-use zobrist_core::editor::{GameEditor, NoSuchPlace, Place, PlayError};
+use zobrist_core::editor::{EditVariationError, GameEditor, NoSuchPlace, Place, PlayError};
 use zobrist_core::game::{Game, MAX_VARIATION_DEPTH};
 use zobrist_core::pgn::{self, Entry};
 
@@ -274,4 +274,179 @@ fn visits_every_place_of_each_clean_fixture_game_and_returns_it_intact() -> io::
         assert_eq!(editor.into_game(), game);
     }
     Ok(())
+}
+
+const NESTED_GAME: &str = "1. e4 e5 (1... c5 2. Nf3 (2. Nc3)) 2. Nf3 Nc6 *\n";
+const FIRST_MOVE_VARIATIONS: &str = "1. e4 (1. d4 (1. c4)) (1. Nf3) *\n";
+
+#[test]
+fn promotes_the_line_containing_the_current_move_one_level() -> io::Result<()> {
+    let sicilian = "1. e4 c5 (1... e5 2. Nf3 Nc6) 2. Nf3 (2. Nc3) *\n";
+    for (before, after, expected) in [
+        (&[0, 1][..], &[0, 0][..], sicilian),
+        (&[0, 1, 0], &[0, 0, 0], sicilian),
+        (
+            &[0, 1, 1],
+            &[0, 1, 0],
+            "1. e4 e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3 Nc6 *\n",
+        ),
+    ] {
+        let mut editor = open(NESTED_GAME)?;
+        editor.go_to(Place(before.to_vec())).unwrap();
+        let position = editor.position().clone();
+        editor.promote().unwrap();
+        assert_state(&editor, after, expected)?;
+        assert_eq!(editor.position(), &position);
+    }
+    Ok(())
+}
+
+#[test]
+fn promotion_preserves_comments_and_sibling_variations() -> io::Result<()> {
+    let mut editor = open("1. e4 e5 {after} (1... c5 {sicilian}) (1... e6) 2. Nf3 *")?;
+    editor.go_to(Place(vec![0, 1])).unwrap();
+    editor.promote().unwrap();
+    assert_state(
+        &editor,
+        &[0, 0],
+        "1. e4 c5 {sicilian} (1... e5 {after} 2. Nf3) (1... e6) *\n",
+    )
+}
+
+#[test]
+fn promotion_swaps_only_two_choices_among_first_move_variations() -> io::Result<()> {
+    let mut editor = open(FIRST_MOVE_VARIATIONS)?;
+    editor.go_to(Place(vec![2])).unwrap();
+    editor.promote().unwrap();
+    assert_state(&editor, &[1], "1. e4 (1. c4 (1. d4)) (1. Nf3) *\n")?;
+
+    let mut editor = open(FIRST_MOVE_VARIATIONS)?;
+    editor.go_to(Place(vec![1])).unwrap();
+    editor.promote().unwrap();
+    let expected = "1. d4 (1. e4) (1. c4) (1. Nf3) *\n";
+    assert_state(&editor, &[0], expected)?;
+    for (choice, square, role) in [
+        (1, E4, Role::Pawn),
+        (2, C4, Role::Pawn),
+        (3, F3, Role::Knight),
+    ] {
+        editor.go_to(Place(vec![choice])).unwrap();
+        assert_eq!(
+            editor.position().board().piece_at(square),
+            Some(role.of(Color::White))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn deleting_a_variation_returns_to_the_position_before_its_first_move() -> io::Result<()> {
+    for (game, before, after, expected) in [
+        (
+            NESTED_GAME,
+            &[0, 1, 0][..],
+            &[0][..],
+            "1. e4 e5 2. Nf3 Nc6 *\n",
+        ),
+        (
+            NESTED_GAME,
+            &[0, 1, 1],
+            &[0, 1],
+            "1. e4 e5 (1... c5 2. Nf3) 2. Nf3 Nc6 *\n",
+        ),
+        (
+            FIRST_MOVE_VARIATIONS,
+            &[2],
+            &[],
+            "1. e4 (1. d4) (1. Nf3) *\n",
+        ),
+    ] {
+        let mut editor = open(game)?;
+        editor.go_to(Place(after.to_vec())).unwrap();
+        let position = editor.position().clone();
+        editor.go_to(Place(before.to_vec())).unwrap();
+        editor.delete_variation().unwrap();
+        assert_state(&editor, after, expected)?;
+        assert_eq!(editor.position(), &position);
+    }
+    Ok(())
+}
+
+#[test]
+fn deleting_the_rest_removes_all_continuations_from_the_current_place() -> io::Result<()> {
+    for (place, expected) in [
+        (&[0, 0][..], "1. e4 e5 (1... c5 2. Nf3 (2. Nc3)) *\n"),
+        (&[0, 1], "1. e4 e5 (1... c5) 2. Nf3 Nc6 *\n"),
+        (&[0], "1. e4 *\n"),
+        (&[], "*\n"),
+        (&[0, 0, 0, 0], NESTED_GAME),
+        (&[0, 1, 1], NESTED_GAME),
+    ] {
+        let mut editor = open(NESTED_GAME)?;
+        editor.go_to(Place(place.to_vec())).unwrap();
+        let position = editor.position().clone();
+        editor.delete_rest();
+        assert_state(&editor, place, expected)?;
+        assert_eq!(editor.position(), &position);
+    }
+    Ok(())
+}
+
+#[test]
+fn deleting_all_moves_discards_move_comments_and_keeps_the_tags_and_result() -> io::Result<()> {
+    let mut editor = open("[Event \"Final\"]\n\n{before} 1. e4 {after} 1-0")?;
+    editor.delete_rest();
+    assert_state(&editor, &[], "[Event \"Final\"]\n\n1-0\n")
+}
+
+#[test]
+fn variation_edits_refuse_the_start_and_main_line() -> io::Result<()> {
+    let mut editor = open(NESTED_GAME)?;
+    for place in [&[][..], &[0, 0]] {
+        editor.go_to(Place(place.to_vec())).unwrap();
+        let position = editor.position().clone();
+        assert_eq!(editor.promote(), Err(EditVariationError::NoVariation));
+        assert_state(&editor, place, NESTED_GAME)?;
+        assert_eq!(editor.position(), &position);
+        assert_eq!(
+            editor.delete_variation(),
+            Err(EditVariationError::NoVariation)
+        );
+        assert_state(&editor, place, NESTED_GAME)?;
+        assert_eq!(editor.position(), &position);
+    }
+    Ok(())
+}
+
+#[test]
+fn promotion_checks_the_depth_of_the_demoted_continuation() -> io::Result<()> {
+    for depth in [MAX_VARIATION_DEPTH - 1, MAX_VARIATION_DEPTH] {
+        let replies = format!("e5{}{}", " (1... c5".repeat(depth), ")".repeat(depth));
+        let before = format!("1. e4 (1. d4) 1... {replies} *\n");
+        let mut editor = open(&before)?;
+        editor.go_to(Place(vec![1])).unwrap();
+        let position = editor.position().clone();
+        if depth == MAX_VARIATION_DEPTH {
+            assert_eq!(editor.promote(), Err(EditVariationError::TooDeep));
+            assert_state(&editor, &[1], &before)?;
+        } else {
+            editor.promote().unwrap();
+            assert_state(&editor, &[0], &format!("1. d4 (1. e4 {replies}) *\n"))?;
+        }
+        assert_eq!(editor.position(), &position);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_sibling_at_the_depth_limit_keeps_its_place_during_promotion() -> io::Result<()> {
+    let nested = format!(
+        "{}{}",
+        " (1. c4".repeat(MAX_VARIATION_DEPTH),
+        ")".repeat(MAX_VARIATION_DEPTH)
+    );
+    let mut editor = open(&format!("1. e4{nested} (1. d4) *"))?;
+    editor.go_to(Place(vec![MAX_VARIATION_DEPTH + 1])).unwrap();
+    editor.promote().unwrap();
+    assert_state(&editor, &[0], &format!("1. d4{nested} (1. e4) *\n"))
 }
