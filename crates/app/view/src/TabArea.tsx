@@ -1,5 +1,5 @@
 import { ArrowUpDown } from "lucide-react";
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { Board } from "./Board";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
@@ -17,7 +17,9 @@ type Props = {
 
 export function TabArea({ tab, onTurnBoard, onMove, onGoTo }: Props) {
   const { picture } = tab;
-  useEffect(() => {
+  // A layout effect, so that a key right after a new picture is drawn starts from that picture.
+  // A plain effect runs later, and until then the key would start from the picture before.
+  useLayoutEffect(() => {
     const walk = (event: KeyboardEvent) => {
       const { target } = event;
       const takesText =
