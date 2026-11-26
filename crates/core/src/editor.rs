@@ -2,9 +2,9 @@
 
 use std::mem;
 
-use shakmaty::{Chess, Position, Role, Square};
+use shakmaty::{Chess, Color, Position, Role, Square};
 
-use crate::game::{Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node};
+use crate::game::{Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps};
 
 /// Each choice plays one move from the start of the game. An empty place is the start.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -21,6 +21,68 @@ impl Place {
             .rposition(|&choice| choice != 0)
             .ok_or(EditVariationError::NoVariation)
     }
+}
+
+/// A move in a game and the choices that reach it.
+#[derive(Debug)]
+pub struct PlacedStep<'game> {
+    step: Step<'game>,
+    parent: Place,
+    choice: usize,
+}
+
+impl<'game> PlacedStep<'game> {
+    /// The move, its notation, and the position it was played in.
+    #[must_use]
+    pub fn step(&self) -> &Step<'game> {
+        &self.step
+    }
+
+    /// The place immediately after this move.
+    #[must_use]
+    pub fn place(&self) -> Place {
+        let mut place = self.parent.clone();
+        place.0.push(self.choice);
+        place
+    }
+
+    /// Walks the lines that replace this move in their PGN order.
+    pub fn variations(&self) -> impl Iterator<Item = impl Iterator<Item = PlacedStep<'game>>> {
+        self.step
+            .variations()
+            .zip(variation_choices(self.step.node(), self.choice))
+            .map(|(steps, choice)| walk_line(steps, self.parent.clone(), choice))
+    }
+}
+
+fn walk_line(
+    steps: Steps<'_>,
+    mut parent: Place,
+    mut first_choice: usize,
+) -> impl Iterator<Item = PlacedStep<'_>> {
+    steps.map(move |step| {
+        let choice = mem::take(&mut first_choice);
+        let placed = PlacedStep {
+            step,
+            parent: parent.clone(),
+            choice,
+        };
+        parent.0.push(choice);
+        placed
+    })
+}
+
+/// The square targeted on the board. For castling, use the king's destination when it moves
+/// two squares, and the rook's square for other starting arrangements.
+#[must_use]
+pub fn board_target(chess_move: shakmaty::Move, turn: Color) -> Square {
+    if let (Some(from), Some(side)) = (chess_move.from(), chess_move.castling_side()) {
+        let target = side.king_to(turn);
+        if from.distance(target) == 2 {
+            return target;
+        }
+    }
+    chess_move.to()
 }
 
 /// The game has no move for at least one choice in the requested place.
@@ -88,6 +150,11 @@ impl GameEditor {
         &self.place
     }
 
+    /// Walks the main line from the start. Each move gives its place and nested variations.
+    pub fn walk(&self) -> impl Iterator<Item = PlacedStep<'_>> {
+        walk_line(self.game.steps(), Place::default(), 0)
+    }
+
     /// Goes back one move. Returns whether the place changed.
     pub fn back(&mut self) -> bool {
         let Some((_, previous)) = self.place.0.split_last() else {
@@ -133,10 +200,7 @@ impl GameEditor {
                 candidate.from() == Some(from)
                     && candidate.promotion() == promotion
                     && (candidate.to() == to
-                        || (from.distance(to) == 2
-                            && candidate
-                                .castling_side()
-                                .is_some_and(|side| side.king_to(self.position.turn()) == to)))
+                        || board_target(*candidate, self.position.turn()) == to)
             })
             .ok_or(PlayError::IllegalMove)?;
 
@@ -311,7 +375,7 @@ impl<'game> Continuation<'game> {
     fn find(&self, mut matches: impl FnMut(&Node, usize) -> bool) -> Option<Vec<(usize, usize)>> {
         let mut path = Vec::new();
         let node = self.line.nodes().nth(self.index)?;
-        find_choice(node, &mut matches, &mut 0, &mut path).then_some(path)
+        find_choice(node, &mut matches, 0, &mut path).then_some(path)
     }
 }
 
@@ -320,20 +384,145 @@ impl<'game> Continuation<'game> {
 fn find_choice(
     node: &Node,
     matches: &mut impl FnMut(&Node, usize) -> bool,
-    number: &mut usize,
+    number: usize,
     path: &mut Vec<(usize, usize)>,
 ) -> bool {
-    if matches(node, *number) {
+    if matches(node, number) {
         return true;
     }
-    let parent = *number;
-    for (slot, variation) in node.variations.iter().enumerate() {
-        *number += 1;
-        path.push((slot, parent));
-        if find_choice(&variation.first, matches, number, path) {
+    for (slot, (variation, choice)) in node
+        .variations
+        .iter()
+        .zip(variation_choices(node, number))
+        .enumerate()
+    {
+        path.push((slot, number));
+        if find_choice(&variation.first, matches, choice, path) {
             return true;
         }
         path.pop();
     }
     false
+}
+
+fn variation_choices(node: &Node, parent: usize) -> impl Iterator<Item = usize> {
+    // All first moves nested under the preceding variation also occupy choices at this ply.
+    let offsets = std::iter::once(1).chain(
+        node.variations
+            .iter()
+            .map(|line| first_move_count(&line.first)),
+    );
+    offsets
+        .take(node.variations.len())
+        .scan(parent, |choice, offset| {
+            *choice += offset;
+            Some(*choice)
+        })
+}
+
+fn first_move_count(node: &Node) -> usize {
+    1 + node
+        .variations
+        .iter()
+        .map(|line| first_move_count(&line.first))
+        .sum::<usize>()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use shakmaty::{Color, Position, Square};
+
+    use crate::game::Move;
+    use crate::pgn::{self, Entry};
+
+    use super::{GameEditor, Place, PlacedStep, board_target};
+
+    type WalkedMove = (Vec<usize>, Place, String);
+
+    fn collect_line<'game>(
+        line: impl Iterator<Item = PlacedStep<'game>>,
+        variations: &mut Vec<usize>,
+        moves: &mut Vec<WalkedMove>,
+        follower: &mut GameEditor,
+    ) {
+        for placed in line {
+            let place = placed.place();
+            follower.go_to(place.clone()).unwrap();
+            let Move::Legal(played) = placed.step().node().played() else {
+                unreachable!("these fixtures have only legal board moves")
+            };
+            let after = placed
+                .step()
+                .position_before()
+                .clone()
+                .play(played)
+                .unwrap();
+            assert_eq!(follower.position(), &after);
+            assert!(follower.back());
+            assert_eq!(follower.position(), placed.step().position_before());
+            moves.push((
+                variations.clone(),
+                place,
+                placed.step().notation().to_string(),
+            ));
+            for (slot, variation) in placed.variations().enumerate() {
+                variations.push(slot);
+                collect_line(variation, variations, moves, follower);
+                variations.pop();
+            }
+        }
+    }
+
+    fn walk_games(source: &[u8]) -> io::Result<Vec<Vec<WalkedMove>>> {
+        let mut games = Vec::new();
+        pgn::read_games(source, |entry| {
+            if let Entry::Game { game, problem } = entry {
+                assert_eq!(problem, None);
+                let mut follower = GameEditor::new((*game).clone());
+                let editor = GameEditor::new(*game);
+                let mut moves = Vec::new();
+                collect_line(editor.walk(), &mut Vec::new(), &mut moves, &mut follower);
+                games.push(moves);
+            }
+        })?;
+        Ok(games)
+    }
+
+    #[test]
+    fn walks_first_move_variations_with_their_places_and_nesting() -> io::Result<()> {
+        let games = walk_games(b"1. e4 (1. d4 (1. c4)) (1. Nf3) *")?;
+        assert_eq!(
+            games,
+            [vec![
+                (vec![], Place(vec![0]), "e4".to_owned()),
+                (vec![0], Place(vec![1]), "d4".to_owned()),
+                (vec![0, 0], Place(vec![2]), "c4".to_owned()),
+                (vec![1], Place(vec![3]), "Nf3".to_owned()),
+            ]]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn follows_every_walked_place_of_the_clean_games() -> io::Result<()> {
+        let games = walk_games(include_bytes!("../../cli/tests/fixtures/clean.pgn"))?;
+        assert_eq!(games.iter().map(Vec::len).collect::<Vec<_>>(), [9, 4]);
+        Ok(())
+    }
+
+    #[test]
+    fn castling_targets_the_rook_when_the_king_moves_only_one_square() {
+        assert_eq!(
+            board_target(
+                shakmaty::Move::Castle {
+                    king: Square::F1,
+                    rook: Square::H1
+                },
+                Color::White,
+            ),
+            Square::H1
+        );
+    }
 }
