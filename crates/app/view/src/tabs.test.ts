@@ -1,11 +1,14 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import type { GamePicture } from "./generated/GamePicture";
+import type { NotationMove } from "./generated/NotationMove";
 import { ask } from "./ipc";
 import {
   apply,
   type Change,
   closeTab,
+  goTo,
   openTab,
+  placeToAskFor,
   playMove,
   type Shown,
   setResult,
@@ -126,6 +129,77 @@ test("an answer without a picture changes no tab", async () => {
   await playMove(7, { from: "e2", to: "e4", promotion: null }, change);
 
   expect(shown()).toEqual(atStart);
+});
+
+test("a walk to a place goes to Rust, and its tab takes the picture of the answer", async () => {
+  const { change, shown } = tabState({
+    tabs: [{ game: 7, picture, bottomSide: "white" }],
+    page: "Home",
+    shownTab: 7,
+  });
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "GoTo",
+    picture: pictureAfterE4,
+  });
+
+  await goTo(7, [0], change);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "GoTo", game: 7, place: [0] }],
+  ]);
+  expect(shown().tabs).toEqual([
+    { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+  ]);
+});
+
+const move = (
+  text: string,
+  place: number[],
+  variations: NotationMove[][] = [],
+) => ({ text, place, variations }) as NotationMove;
+const notation = [
+  move("e4", [0]),
+  move(
+    "e5",
+    [0, 0],
+    [[move("c5", [0, 1]), move("Nc3", [0, 1, 0], [[move("Nf3", [0, 1, 1])]])]],
+  ),
+  move("Nf3", [0, 0, 0]),
+];
+
+test("the left arrow leads one move back and stays at the start", () => {
+  expect(placeToAskFor("ArrowLeft", { place: [0, 1, 1], notation })).toEqual([
+    0, 1,
+  ]);
+  expect(placeToAskFor("ArrowLeft", { place: [], notation })).toEqual([]);
+});
+
+test("the right arrow leads to the first move after the current one", () => {
+  expect(placeToAskFor("ArrowRight", { place: [0], notation })).toEqual([0, 0]);
+  expect(placeToAskFor("ArrowRight", { place: [0, 1], notation })).toEqual([
+    0, 1, 0,
+  ]);
+});
+
+test("Home leads to the start of the game", () => {
+  expect(placeToAskFor("Home", { place: [0, 1, 0], notation })).toEqual([]);
+});
+
+test("End leads to the last move of the line that holds the current move", () => {
+  expect(placeToAskFor("End", { place: [0], notation })).toEqual([0, 0, 0]);
+  expect(placeToAskFor("End", { place: [0, 1], notation })).toEqual([0, 1, 0]);
+  expect(placeToAskFor("End", { place: [0, 1, 1], notation })).toEqual([
+    0, 1, 1,
+  ]);
+});
+
+test("End leads from the start to the last move of the main line", () => {
+  expect(placeToAskFor("End", { place: [], notation })).toEqual([0, 0, 0]);
+  expect(placeToAskFor("End", { place: [], notation: [] })).toEqual([]);
+});
+
+test("another key leads nowhere", () => {
+  expect(placeToAskFor("a", { place: [0], notation })).toBeUndefined();
 });
 
 const withPlayers = (white: string | undefined, black: string | undefined) =>

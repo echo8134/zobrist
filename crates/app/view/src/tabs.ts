@@ -1,6 +1,7 @@
 import type { EditableTag } from "./generated/EditableTag";
 import type { GamePicture } from "./generated/GamePicture";
 import type { GameResult } from "./generated/GameResult";
+import type { NotationMove } from "./generated/NotationMove";
 import type { Promotion } from "./generated/Promotion";
 import type { Side } from "./generated/Side";
 import { ask } from "./ipc";
@@ -100,14 +101,69 @@ export async function openTab(change: (change: Change) => void) {
   change({ type: "openTab", game, picture });
 }
 
-export async function playMove(
+async function drawAnswer(
+  game: number,
+  answer: Promise<{ picture: GamePicture | null }>,
+  change: (change: Change) => void,
+) {
+  const { picture } = await answer;
+  if (picture !== null) {
+    change({ type: "drawPicture", game, picture });
+  }
+}
+
+export function playMove(
   game: number,
   move: Move,
   change: (change: Change) => void,
 ) {
-  const { picture } = await ask({ type: "PlayMove", game, ...move });
-  if (picture !== null) {
-    change({ type: "drawPicture", game, picture });
+  return drawAnswer(game, ask({ type: "PlayMove", game, ...move }), change);
+}
+
+export function goTo(
+  game: number,
+  place: number[],
+  change: (change: Change) => void,
+) {
+  return drawAnswer(game, ask({ type: "GoTo", game, place }), change);
+}
+
+function lineThatHolds(
+  place: readonly number[],
+  line: readonly NotationMove[],
+): readonly NotationMove[] | undefined {
+  for (const move of line) {
+    if (move.place.join() === place.join()) {
+      return line;
+    }
+    for (const variation of move.variations) {
+      const found = lineThatHolds(place, variation);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function placeToAskFor(
+  key: string,
+  { place, notation }: Pick<GamePicture, "place" | "notation">,
+): number[] | undefined {
+  switch (key) {
+    case "ArrowLeft":
+      return place.slice(0, -1);
+    case "ArrowRight":
+      return [...place, 0];
+    case "Home":
+      return [];
+    case "End": {
+      const line =
+        place.length === 0 ? notation : lineThatHolds(place, notation);
+      return line?.at(-1)?.place ?? place;
+    }
+    default:
+      return undefined;
   }
 }
 

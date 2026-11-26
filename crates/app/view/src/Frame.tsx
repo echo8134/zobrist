@@ -7,6 +7,7 @@ import { TopBar } from "./TopBar";
 import {
   apply,
   closeTab,
+  goTo,
   openTab,
   playMove,
   setResult,
@@ -52,6 +53,7 @@ export function Frame() {
           tab={tab}
           onTurnBoard={() => change({ type: "turnBoard", game: tab.game })}
           onMove={(move) => playMove(tab.game, move, change)}
+          onGoTo={(place) => goTo(tab.game, place, change)}
           onShapes={(shapes) => setShapes(tab.game, shapes, change)}
           onSetTag={(tag, text) => setTag(tab, tag, text, change)}
           onSetResult={(result) => setResult(tab.game, result, change)}
