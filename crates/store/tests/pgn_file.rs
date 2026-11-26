@@ -7,7 +7,7 @@ use std::{env, fs, io, process};
 use shakmaty::{Chess, Outcome};
 use zobrist_core::game::{Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{PgnGameRow, add_pgn_games, replace_pgn_game};
+use zobrist_store::{PgnGameRow, add_pgn_game, add_pgn_games, read_pgn_game, replace_pgn_game};
 
 const OLD_GAME: &[u8] = b"[White \"Old\"]\n\n1. e4 e5 1-0";
 const NEW_GAME: &[u8] = b"[White \"New\"]\n\n1. d4 d5 *";
@@ -110,6 +110,60 @@ fn adding_through_a_symbolic_link_preserves_it_and_updates_its_destination() -> 
     assert_eq!(fs::read_to_string(&destination)?, "*\n");
     assert_eq!(fs::read_link(&link)?, relative);
     fs::remove_dir_all(directory)
+}
+
+#[test]
+fn adds_one_game_as_the_last_game_and_gives_its_number() -> io::Result<()> {
+    let path = target("add-one");
+    let new = game(NEW_GAME)?;
+    assert_eq!(add_pgn_game(&path, &new)?, number(1)?);
+    assert_eq!(fs::read(&path)?, [NEW_GAME, b"\n"].concat());
+
+    fs::write(&path, [OLD_GAME, b"\n\n", OLD_GAME].concat())?;
+    assert_eq!(add_pgn_game(&path, &new)?, number(3)?);
+    assert_eq!(
+        fs::read(&path)?,
+        [OLD_GAME, b"\n\n", OLD_GAME, b"\n\n", NEW_GAME, b"\n"].concat()
+    );
+    fs::remove_file(path)
+}
+
+#[test]
+fn refuses_to_add_a_game_that_the_end_of_the_file_would_take_in() -> io::Result<()> {
+    let path = target("add-one-open");
+    let new = game(NEW_GAME)?;
+    let open_ends: [&[u8]; 2] = [b"1. d4 {unfinished", b"1. d4 *\n\n[Black \"Cut"];
+    for old in open_ends {
+        fs::write(&path, old)?;
+        let error = add_pgn_game(&path, &new).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            error.to_string(),
+            "the file would not read back with the new game as its last game"
+        );
+        assert_eq!(fs::read(&path)?, old);
+    }
+    fs::remove_file(path)
+}
+
+#[test]
+fn reads_one_game_by_its_number_and_none_behind_the_last_game() -> io::Result<()> {
+    let path = target("read-one");
+    fs::write(
+        &path,
+        [OLD_GAME, b"\n\n", NEW_GAME, b"\n\n1. e4 e5 2. Ke3 *\n"].concat(),
+    )?;
+    assert_eq!(read_pgn_game(&path, number(1)?)?, Some(game(OLD_GAME)?));
+    assert_eq!(read_pgn_game(&path, number(2)?)?, Some(game(NEW_GAME)?));
+    assert_eq!(
+        read_pgn_game(&path, number(3)?)?,
+        Some(game(b"1. e4 e5 *")?)
+    );
+    assert_eq!(read_pgn_game(&path, number(4)?)?, None);
+    fs::remove_file(&path)?;
+    let error = read_pgn_game(&path, number(1)?).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    Ok(())
 }
 
 #[test]
