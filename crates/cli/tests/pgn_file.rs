@@ -1,4 +1,4 @@
-//! Listing games and adding them to a PGN file through the CLI.
+//! Listing games, adding them to a PGN file, and replacing one through the CLI.
 
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Output};
@@ -142,4 +142,174 @@ fn file_failures_name_the_path_and_preserve_the_target() -> io::Result<()> {
     assert_eq!(output.stdout, b"");
     assert!(String::from_utf8_lossy(&output.stderr).contains(&*missing_parent.to_string_lossy()));
     fs::remove_file(target)
+}
+
+const NEW_GAME: &[u8] = b"[White \"New\"]\n[Black \"Game\"]\n\n1. d4 d5 *\n";
+
+#[test]
+fn replaces_a_game_and_puts_it_back_without_changing_the_other_game() -> io::Result<()> {
+    let target = temporary_path("replace");
+    let new = temporary_path("replace-new");
+    let first = temporary_path("replace-first");
+    let clean = fs::read(CLEAN)?;
+    fs::write(&target, &clean)?;
+    fs::write(&new, NEW_GAME)?;
+    let first_nine_lines = clean.split_inclusive(|byte| *byte == b'\n').take(9);
+    fs::write(&first, first_nine_lines.collect::<Vec<_>>().concat())?;
+
+    assert_output(
+        &pgn("replace", &[&target, Path::new("1"), &new])?,
+        0,
+        b"game replaced: 1\n",
+        b"",
+    );
+    assert_output(
+        &pgn("list", &[&target])?,
+        0,
+        b"1\tNew\tGame\t*\t?\t?\n2\tGamma\tDelta\t0-1\t2024.01.01\tExample\n",
+        b"",
+    );
+    assert_eq!(
+        fs::read(&target)?,
+        [&NEW_GAME[..NEW_GAME.len() - 1], &clean[192..]].concat()
+    );
+
+    assert_output(
+        &pgn("replace", &[&target, Path::new("1"), &first])?,
+        0,
+        b"game replaced: 1\n",
+        b"",
+    );
+    assert_eq!(
+        fs::read(&target)?,
+        pgn("write", &[Path::new(CLEAN)])?.stdout
+    );
+    fs::remove_file(target)?;
+    fs::remove_file(new)?;
+    fs::remove_file(first)
+}
+
+#[test]
+fn replaces_a_game_that_has_a_problem() -> io::Result<()> {
+    let target = temporary_path("replace-damaged");
+    let new = temporary_path("replace-damaged-new");
+    fs::copy(DAMAGED, &target)?;
+    fs::write(&new, NEW_GAME)?;
+
+    assert_output(
+        &pgn("replace", &[&target, Path::new("2"), &new])?,
+        0,
+        b"game replaced: 2\n",
+        b"",
+    );
+    assert_output(
+        &pgn("check", &[&target])?,
+        0,
+        b"games: 3\nmain line moves: 13\nvariations: 0\ncomments: 0\nproblems: 0\n",
+        b"",
+    );
+    fs::remove_file(target)?;
+    fs::remove_file(new)
+}
+
+#[test]
+fn a_refused_replacement_says_why_and_keeps_every_byte_of_the_target() -> io::Result<()> {
+    let target = temporary_path("refuse");
+    let new = temporary_path("refuse-new");
+    let empty = temporary_path("refuse-empty");
+    let damaged = temporary_path("refuse-damaged");
+    let clean = fs::read(CLEAN)?;
+    fs::write(&target, &clean)?;
+    fs::write(&new, NEW_GAME)?;
+    fs::write(&empty, b"")?;
+    fs::write(&damaged, b"[White \"Gamma\"]\n\n1. e4 e5 2. Ke3 *\n")?;
+    let refusals: [(&[&Path], String); 4] = [
+        (
+            &[&target, Path::new("3"), &new],
+            format!(
+                "zobrist: cannot replace a game of {}: there is no game 3, the file holds 2\n",
+                target.display()
+            ),
+        ),
+        (
+            &[&target, Path::new("1"), &empty],
+            format!(
+                "zobrist: cannot replace a game with {}: it holds no game\n",
+                empty.display()
+            ),
+        ),
+        (
+            &[&target, Path::new("1"), Path::new(CLEAN)],
+            format!(
+                "zobrist: cannot replace a game with {CLEAN}: \
+                 it holds 2 games, and a replacement is one game\n"
+            ),
+        ),
+        (
+            &[&target, Path::new("1"), &damaged],
+            format!(
+                "game 1 (Gamma - ?): illegal move \"Ke3\" at White's move 2, 2 moves kept\n\
+                 zobrist: cannot replace a game with {}: it has a problem\n",
+                damaged.display()
+            ),
+        ),
+    ];
+    for (arguments, stderr) in refusals {
+        assert_output(&pgn("replace", arguments)?, 2, b"", stderr.as_bytes());
+        assert_eq!(fs::read(&target)?, clean);
+    }
+
+    let output = pgn("replace", &[&target, Path::new("0"), &new])?;
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.stdout, b"");
+    assert!(
+        output
+            .stderr
+            .starts_with(b"error: invalid value '0' for '<NUMBER>': ")
+    );
+    assert_eq!(fs::read(&target)?, clean);
+
+    let absent = Path::new("missing-source.pgn");
+    let output = pgn("replace", &[&target, Path::new("1"), absent])?;
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.stdout, b"");
+    assert!(
+        output
+            .stderr
+            .starts_with(b"zobrist: cannot read missing-source.pgn:")
+    );
+    assert_eq!(fs::read(&target)?, clean);
+
+    fs::remove_file(&new)?;
+    fs::remove_file(empty)?;
+    fs::remove_file(damaged)?;
+    fs::remove_file(target)
+}
+
+#[test]
+fn a_target_that_cannot_be_read_or_written_is_refused() -> io::Result<()> {
+    let target = temporary_path("unwritable");
+    let new = temporary_path("unwritable-new");
+    fs::write(&new, NEW_GAME)?;
+    let cannot_replace = format!("zobrist: cannot replace a game of {}: ", target.display());
+
+    let output = pgn("replace", &[&target, Path::new("1"), &new])?;
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.stdout, b"");
+    assert!(output.stderr.starts_with(cannot_replace.as_bytes()));
+    assert!(!target.try_exists()?);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::copy(CLEAN, &target)?;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o444))?;
+        let output = pgn("replace", &[&target, Path::new("1"), &new])?;
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(output.stdout, b"");
+        assert!(output.stderr.starts_with(cannot_replace.as_bytes()));
+        assert_eq!(fs::read(&target)?, fs::read(CLEAN)?);
+        fs::remove_file(&target)?;
+    }
+    fs::remove_file(new)
 }

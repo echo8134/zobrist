@@ -15,7 +15,7 @@
 //! let bytes = b"[White \"Alpha\"]\n[Black \"Beta\"]\n\n1. f3 e5 2. g4 Qh4# 0-1\n";
 //! let mut moves = Vec::new();
 //! pgn::read_games(&bytes[..], |entry| {
-//!     if let Entry::Game { game, problem } = entry {
+//!     if let Entry::Game { game, problem, .. } = entry {
 //!         assert_eq!(game.tag("White"), Some("Alpha"));
 //!         assert_eq!(problem, None);
 //!         moves.extend(game.steps().map(|step| step.notation().to_string()));

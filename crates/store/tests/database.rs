@@ -273,6 +273,7 @@ fn restores_nested_and_sibling_variations_comments_symbols_and_damaged_games() {
         let Entry::Game {
             game,
             problem: Some(_),
+            ..
         } = entry
         else {
             unreachable!("expected the kept part of a damaged game");

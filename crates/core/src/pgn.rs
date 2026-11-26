@@ -3,11 +3,12 @@
 //! No game is dropped. A game that cannot be read completely keeps every move before its first
 //! problem, and the [`Problem`] travels next to it in an [`Entry::Game`].
 
+use std::cell::RefCell;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::mem;
 use std::num::NonZeroU32;
-use std::ops::ControlFlow;
+use std::ops::{ControlFlow, Range};
 use std::str;
 
 use pgn_reader::{Nag as RawNag, RawComment, RawTag, Reader, SanPlus, Skip, Visitor};
@@ -25,25 +26,50 @@ const SUPPORTED_TAG_LINE_LENGTH: usize = 1 << 16;
 
 const MAX_COMMENT_LENGTH: usize = 1 << 20;
 
+/// The buffer of pgn-reader is twice the supported tag line length, and the reader keeps twice
+/// that buffer.
+const KEPT_BYTES: usize = 4 * SUPPORTED_TAG_LINE_LENGTH;
+
 /// Reads every game of a PGN byte source in file order and hands each entry to `each`.
 /// Streams, memory stays flat.
+///
+/// Each entry comes with its range in the source, counted in the bytes of the source as they
+/// are on disk. The range starts at the first byte of the entry and ends behind its last byte
+/// that is not white space, so text that the reader skips at the end of a game belongs to that
+/// game. White space and byte order marks around an entry belong to no entry.
 ///
 /// Returns `Err` when the source fails, after every entry that was finished before the failure
 /// has been handed out. Damage inside the PGN text never ends the reading. The reader buffers
 /// on its own, so pass a `File` directly.
 pub fn read_games<R: Read>(source: R, each: impl FnMut(Entry)) -> io::Result<()> {
-    let mut reader = Reader::build(WithoutByteOrderMarks::new(source))
+    let trail = RefCell::new(Trail::default());
+    let mut reader = Reader::build(WithoutByteOrderMarks::new(source, &trail))
         .set_supported_tag_line_length(SUPPORTED_TAG_LINE_LENGTH)
         .finish();
     let mut collector = Collector::new(each);
+    // pgn-reader tells its place only between two calls, as the bytes it holds unread.
+    let place = |reader: &Reader<_>| trail.borrow().handed() - reader.buffer().len() as u64;
     loop {
+        // `read_game` skips a byte order mark and then white space, and another mark can stand
+        // behind that white space. The entry starts where asking again no longer moves the place.
+        let mut start = place(&reader);
+        loop {
+            reader.has_more()?;
+            let settled = place(&reader);
+            if settled == start {
+                break;
+            }
+            start = settled;
+        }
+        collector.begin(trail.borrow().start_at(start)?);
+        let end = |reader| trail.borrow().end_before(place(reader));
         match reader.read_game(&mut collector) {
-            Ok(Some(())) => {}
+            Ok(Some(())) => collector.finish(Some(end(&reader)?)),
             Ok(None) => {
-                collector.finish_game_left_open();
+                collector.finish_game_left_open(end(&reader)?);
                 return Ok(());
             }
-            Err(error) if is_damage(&error) => collector.recover(),
+            Err(error) if is_damage(&error) => collector.recover(end(&reader)?),
             Err(error) => return Err(error),
         }
     }
@@ -166,19 +192,19 @@ fn write_comments(
     after: &str,
 ) -> io::Result<()> {
     for comment in comments {
-        if comment.contains('}') || comment.trim() != comment || comment.contains(MARKED_TAG_LINE) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "PGN comment cannot be read back unchanged",
-            ));
-        }
-        if comment.len() > MAX_COMMENT_LENGTH {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "PGN comment exceeds 1 MiB in UTF-8",
-            ));
-        }
+        validate_comment(comment)
+            .map_err(|reason| io::Error::new(io::ErrorKind::InvalidData, reason))?;
         write!(output, "{before}{{{comment}}}{after}")?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_comment(comment: &str) -> Result<(), &'static str> {
+    if comment.contains('}') || comment.trim() != comment || comment.contains(MARKED_TAG_LINE) {
+        return Err("PGN comment cannot be read back unchanged");
+    }
+    if comment.len() > MAX_COMMENT_LENGTH {
+        return Err("PGN comment exceeds 1 MiB in UTF-8");
     }
     Ok(())
 }
@@ -192,12 +218,18 @@ pub enum Entry {
         game: Box<Game>,
         /// The first problem, when the game could not be read completely.
         problem: Option<Problem>,
+        /// Where the game stands in the source, as [`read_games`] counts it. `None` for a game
+        /// with only tags that another game follows, and for that other game, because
+        /// pgn-reader reads the two as one and gives no place between them.
+        range: Option<Range<u64>>,
     },
     /// Text between two games that holds no tag, no move, no comment, and no result marker. It
     /// is not a game.
     StrayText {
         /// The number of games before it.
         after_game: u64,
+        /// Where the text stands in the source, as [`read_games`] counts it.
+        range: Range<u64>,
     },
 }
 
@@ -299,6 +331,16 @@ struct Collector<F> {
     problem: Option<Problem>,
     result: Option<Outcome>,
     comment: Vec<u8>,
+    start: Start,
+}
+
+/// Where in the source the entry that is being read starts.
+enum Start {
+    /// No entry is open, so the next call of pgn-reader opens one at its place.
+    Unset,
+    At(u64),
+    /// The entry follows a game with only tags. pgn-reader read both in one call.
+    Unknown,
 }
 
 enum Phase {
@@ -321,6 +363,13 @@ impl<F: FnMut(Entry)> Collector<F> {
             problem: None,
             result: None,
             comment: Vec::new(),
+            start: Start::Unset,
+        }
+    }
+
+    fn begin(&mut self, start: u64) {
+        if matches!(self.start, Start::Unset) {
+            self.start = Start::At(start);
         }
     }
 
@@ -351,7 +400,7 @@ impl<F: FnMut(Entry)> Collector<F> {
     /// Sorts damage by phase. pgn-reader reports a tag line longer than its buffer, which happens
     /// only in the tags, and a comment open at the end of the source, which happens only in the
     /// move text. After a skipped tag line the next `read_game` continues the same game.
-    fn recover(&mut self) {
+    fn recover(&mut self, end: u64) {
         match &mut self.phase {
             Phase::Tags(_) => self.record_first_problem(Reason::UnreadableTagLine),
             Phase::Moves(_) => {
@@ -360,7 +409,7 @@ impl<F: FnMut(Entry)> Collector<F> {
                     builder.comment(text);
                 }
                 self.record_first_problem(Reason::UnclosedComment);
-                self.finish();
+                self.finish(Some(end));
             }
         }
     }
@@ -377,13 +426,17 @@ impl<F: FnMut(Entry)> Collector<F> {
         self.comment.extend_from_slice(bytes);
     }
 
-    fn finish_game_left_open(&mut self) {
+    fn finish_game_left_open(&mut self, end: u64) {
         if self.problem.is_some() {
-            self.finish();
+            self.finish(Some(end));
         }
     }
 
-    fn finish(&mut self) {
+    fn finish(&mut self, end: Option<u64>) {
+        let range = match (mem::replace(&mut self.start, Start::Unset), end) {
+            (Start::At(start), Some(end)) => Some(start..end),
+            _ => None,
+        };
         let builder = match mem::take(&mut self.phase) {
             Phase::Moves(builder) => *builder,
             Phase::Tags(tags) => self.start_moves(tags),
@@ -396,15 +449,19 @@ impl<F: FnMut(Entry)> Collector<F> {
             && problem.is_none()
             && game.tags().is_empty()
             && matches!(game.main_line(), MainLine::Empty { comments } if comments.is_empty());
-        let entry = if holds_nothing {
-            Entry::StrayText {
+        let entry = match range {
+            // An entry without a range has a tag, so it is never stray text.
+            Some(range) if holds_nothing => Entry::StrayText {
                 after_game: self.games,
-            }
-        } else {
-            self.games += 1;
-            Entry::Game {
-                game: Box::new(game),
-                problem,
+                range,
+            },
+            range => {
+                self.games += 1;
+                Entry::Game {
+                    game: Box::new(game),
+                    problem,
+                    range,
+                }
             }
         };
         (self.each)(entry);
@@ -431,7 +488,8 @@ impl<F: FnMut(Entry)> Visitor for Collector<F> {
         if let Phase::Tags(tags) = &self.phase
             && tags.first().is_some_and(|first| first.name == tag.name)
         {
-            self.finish();
+            self.finish(None);
+            self.start = Start::Unknown;
         }
         if let Phase::Tags(tags) = &mut self.phase {
             tags.push(tag);
@@ -518,9 +576,8 @@ impl<F: FnMut(Entry)> Visitor for Collector<F> {
         ControlFlow::Continue(())
     }
 
-    fn end_game(&mut self, _movetext: ()) {
-        self.finish();
-    }
+    // `read_games` finishes the entry behind this call, where it knows the place of pgn-reader.
+    fn end_game(&mut self, _movetext: ()) {}
 }
 
 /// Whether a `read_game` error is one of pgn-reader's two errors for damage in the text. Every
@@ -549,6 +606,83 @@ fn decode_utf8_or_latin1(bytes: &[u8]) -> String {
     }
 }
 
+/// The newest bytes that pgn-reader was handed. pgn-reader tells only how many bytes it holds
+/// unread, so the reader keeps the bytes itself to turn that place into an offset of the source
+/// and to step back from it over white space.
+#[derive(Default)]
+struct Trail {
+    kept: Vec<u8>,
+    /// How many bytes pgn-reader was handed before `kept`.
+    kept_start: u64,
+    /// The source offset behind the last byte that left `kept` and is not white space.
+    end_before_kept: u64,
+    /// Each removed byte order mark puts the source further ahead of the bytes that pgn-reader
+    /// was handed: from which of those bytes on, and by how many bytes.
+    leads: Vec<(u64, u64)>,
+}
+
+impl Trail {
+    fn handed(&self) -> u64 {
+        self.kept_start + self.kept.len() as u64
+    }
+
+    fn hand(&mut self, bytes: &[u8]) {
+        if self.kept.len() >= 2 * KEPT_BYTES {
+            let dropped = self.kept.len() - KEPT_BYTES;
+            if let Some(end) = self.end_in(&self.kept[..dropped]) {
+                self.end_before_kept = end;
+            }
+            self.kept.drain(..dropped);
+            self.kept_start += dropped as u64;
+            let passed = self.leads_up_to(self.kept_start);
+            self.leads.drain(..passed.saturating_sub(1));
+        }
+        self.kept.extend_from_slice(bytes);
+    }
+
+    fn leads_up_to(&self, handed: u64) -> usize {
+        self.leads.partition_point(|(from, _)| *from <= handed)
+    }
+
+    /// The source holds this many bytes here that pgn-reader does not get.
+    fn skip(&mut self, source_bytes: u64) {
+        let lead = self.leads.last().map_or(0, |(_, lead)| *lead);
+        self.leads.push((self.handed(), lead + source_bytes));
+    }
+
+    fn in_source(&self, handed: u64) -> u64 {
+        let lead = self.leads[..self.leads_up_to(handed)].last();
+        handed + lead.map_or(0, |(_, lead)| *lead)
+    }
+
+    /// The source offset behind the last of the first kept bytes that is not white space.
+    fn end_in(&self, kept: &[u8]) -> Option<u64> {
+        let last = kept
+            .iter()
+            .rposition(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))?;
+        Some(self.in_source(self.kept_start + last as u64) + 1)
+    }
+
+    /// pgn-reader does not say how many bytes it buffers. If it ever holds more unread bytes
+    /// than `KEPT_BYTES`, fail here and do not report a wrong range.
+    fn kept_before(&self, place: u64) -> io::Result<&[u8]> {
+        place
+            .checked_sub(self.kept_start)
+            .and_then(|length| self.kept.get(..usize::try_from(length).ok()?))
+            .ok_or_else(|| io::Error::other("pgn-reader fell behind the bytes kept for it"))
+    }
+
+    fn start_at(&self, place: u64) -> io::Result<u64> {
+        self.kept_before(place)?;
+        Ok(self.in_source(place))
+    }
+
+    fn end_before(&self, place: u64) -> io::Result<u64> {
+        let kept = self.kept_before(place)?;
+        Ok(self.end_in(kept).unwrap_or(self.end_before_kept))
+    }
+}
+
 const MARKED_TAG_LINE: &str = "\u{feff}[";
 
 /// Removes a UTF-8 byte order mark directly in front of `[`. At the start of a line, or of the
@@ -558,8 +692,9 @@ const MARKED_TAG_LINE: &str = "\u{feff}[";
 /// start of a game, before it skips whitespace, so a mark after an empty line would hide the
 /// tag line behind it. A file joined without a final line break puts the mark at the end of the
 /// last line of move text, and the line break makes the tag line behind it start a line.
-struct WithoutByteOrderMarks<R> {
+struct WithoutByteOrderMarks<'trail, R> {
     source: R,
+    trail: &'trail RefCell<Trail>,
     buffer: Box<[u8]>,
     start: usize,
     end: usize,
@@ -567,10 +702,11 @@ struct WithoutByteOrderMarks<R> {
     source_done: bool,
 }
 
-impl<R: Read> WithoutByteOrderMarks<R> {
-    fn new(source: R) -> WithoutByteOrderMarks<R> {
+impl<'trail, R: Read> WithoutByteOrderMarks<'trail, R> {
+    fn new(source: R, trail: &'trail RefCell<Trail>) -> WithoutByteOrderMarks<'trail, R> {
         WithoutByteOrderMarks {
             source,
+            trail,
             buffer: vec![0; 1 << 16].into_boxed_slice(),
             start: 0,
             end: 0,
@@ -592,7 +728,7 @@ impl<R: Read> WithoutByteOrderMarks<R> {
     }
 }
 
-impl<R: Read> Read for WithoutByteOrderMarks<R> {
+impl<R: Read> Read for WithoutByteOrderMarks<'_, R> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         if out.is_empty() {
             return Ok(0);
@@ -611,10 +747,14 @@ impl<R: Read> Read for WithoutByteOrderMarks<R> {
             }
             if window.starts_with(mark) {
                 self.start += 3;
+                let mut trail = self.trail.borrow_mut();
                 if self.at_line_start {
+                    trail.skip(3);
                     continue;
                 }
                 out[0] = b'\n';
+                trail.hand(b"\n");
+                trail.skip(2);
                 self.at_line_start = true;
                 return Ok(1);
             }
@@ -622,6 +762,7 @@ impl<R: Read> Read for WithoutByteOrderMarks<R> {
             let next_possible_mark = (1..limit).find(|&index| window[index] == mark[0]);
             let stop = next_possible_mark.unwrap_or(limit);
             out[..stop].copy_from_slice(&window[..stop]);
+            self.trail.borrow_mut().hand(&window[..stop]);
             self.at_line_start = window[stop - 1] == b'\n';
             self.start += stop;
             return Ok(stop);

@@ -1,10 +1,13 @@
 //! Navigates and edits the moves of a game.
 
-use std::mem;
+use std::{mem, ops::Deref};
 
 use shakmaty::{Chess, Color, Position, Role, Square};
 
-use crate::game::{Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps};
+use crate::game::{
+    AnnotationSymbol, Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps,
+};
+use crate::pgn::validate_comment;
 
 /// Each choice plays one move from the start of the game. An empty place is the start.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -107,12 +110,102 @@ pub enum EditVariationError {
     TooDeep,
 }
 
-/// Owns a game and a current place in it.
-#[derive(Debug)]
-pub struct GameEditor {
+/// A judgement of a move, numbered by its PGN annotation glyph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MoveSymbol {
+    /// A good move (`!`).
+    Good = 1,
+    /// A mistake (`?`).
+    Mistake = 2,
+    /// A brilliant move (`!!`).
+    Brilliant = 3,
+    /// A blunder (`??`).
+    Blunder = 4,
+    /// An interesting move (`!?`).
+    Interesting = 5,
+    /// A dubious move (`?!`).
+    Dubious = 6,
+}
+
+impl MoveSymbol {
+    /// The move judgement represented by this glyph, if any.
+    #[must_use]
+    pub fn from_glyph(glyph: AnnotationSymbol) -> Option<Self> {
+        match glyph.0 {
+            1 => Some(Self::Good),
+            2 => Some(Self::Mistake),
+            3 => Some(Self::Brilliant),
+            4 => Some(Self::Blunder),
+            5 => Some(Self::Interesting),
+            6 => Some(Self::Dubious),
+            _ => None,
+        }
+    }
+}
+
+/// An assessment of a position, numbered by its PGN annotation glyph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PositionSymbol {
+    /// An equal position.
+    Equal = 10,
+    /// An unclear position.
+    Unclear = 13,
+    /// White has a slight advantage.
+    WhiteSlight = 14,
+    /// Black has a slight advantage.
+    BlackSlight = 15,
+    /// White has a clear advantage.
+    WhiteClear = 16,
+    /// Black has a clear advantage.
+    BlackClear = 17,
+    /// White has a decisive advantage.
+    WhiteDecisive = 18,
+    /// Black has a decisive advantage.
+    BlackDecisive = 19,
+}
+
+impl PositionSymbol {
+    /// The position assessment represented by this glyph, if any.
+    #[must_use]
+    pub fn from_glyph(glyph: AnnotationSymbol) -> Option<Self> {
+        match glyph.0 {
+            10 => Some(Self::Equal),
+            13 => Some(Self::Unclear),
+            14 => Some(Self::WhiteSlight),
+            15 => Some(Self::BlackSlight),
+            16 => Some(Self::WhiteClear),
+            17 => Some(Self::BlackClear),
+            18 => Some(Self::WhiteDecisive),
+            19 => Some(Self::BlackDecisive),
+            _ => None,
+        }
+    }
+}
+
+/// Why the editor refused to change a comment or symbol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnnotationError {
+    /// There is no move to annotate at the start of the game.
+    NoMove,
+    /// The trimmed comment cannot be written as PGN.
+    InvalidComment,
+}
+
+#[derive(Clone, Debug)]
+struct EditorState {
     game: Game,
     place: Place,
     position: Chess,
+}
+
+/// Owns a game, the current place, and the changes that can be undone or redone.
+#[derive(Debug)]
+pub struct GameEditor {
+    current: EditorState,
+    previous: Vec<EditorState>,
+    undone: Vec<EditorState>,
 }
 
 impl GameEditor {
@@ -120,44 +213,94 @@ impl GameEditor {
     #[must_use]
     pub fn new(game: Game) -> Self {
         Self {
-            position: game.start_position().clone(),
-            game,
-            place: Place::default(),
+            current: EditorState {
+                position: game.start_position().clone(),
+                game,
+                place: Place::default(),
+            },
+            previous: Vec::new(),
+            undone: Vec::new(),
         }
+    }
+
+    /// Whether a change is available to undo.
+    #[must_use]
+    pub fn can_undo(&self) -> bool {
+        !self.previous.is_empty()
+    }
+
+    /// Whether an undone change is available to redo.
+    #[must_use]
+    pub fn can_redo(&self) -> bool {
+        !self.undone.is_empty()
+    }
+
+    /// Restores the game and place before the last change. Returns whether a state was restored.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.previous.pop() else {
+            return false;
+        };
+        self.undone.push(mem::replace(&mut self.current, previous));
+        true
+    }
+
+    /// Restores the game and place saved by undo. Returns whether a state was restored.
+    pub fn redo(&mut self) -> bool {
+        let Some(undone) = self.undone.pop() else {
+            return false;
+        };
+        self.previous.push(mem::replace(&mut self.current, undone));
+        true
+    }
+
+    /// Whether the current move belongs to a variation.
+    #[must_use]
+    pub fn in_variation(&self) -> bool {
+        self.current.place.variation_ply().is_ok()
+    }
+
+    /// Whether the current line continues after this place.
+    #[must_use]
+    pub fn has_next_move(&self) -> bool {
+        let MainLine::Moves(line) = self.current.game.main_line() else {
+            return false;
+        };
+        Continuation::at(line, &self.current.place.0, |_| {})
+            .is_ok_and(|next| next.line.nodes().nth(next.index).is_some())
     }
 
     /// The game as it stands, including all edits.
     #[must_use]
     pub fn game(&self) -> &Game {
-        &self.game
+        &self.current.game
     }
 
     /// Takes the game out of the editor.
     #[must_use]
     pub fn into_game(self) -> Game {
-        self.game
+        self.current.game
     }
 
     /// The position after the moves in the current place.
     #[must_use]
     pub fn position(&self) -> &Chess {
-        &self.position
+        &self.current.position
     }
 
     /// The current place in the game.
     #[must_use]
     pub fn place(&self) -> &Place {
-        &self.place
+        &self.current.place
     }
 
     /// Walks the main line from the start. Each move gives its place and nested variations.
     pub fn walk(&self) -> impl Iterator<Item = PlacedStep<'_>> {
-        walk_line(self.game.steps(), Place::default(), 0)
+        walk_line(self.current.game.steps(), Place::default(), 0)
     }
 
     /// Goes back one move. Returns whether the place changed.
     pub fn back(&mut self) -> bool {
-        let Some((_, previous)) = self.place.0.split_last() else {
+        let Some((_, previous)) = self.current.place.0.split_last() else {
             return false;
         };
         self.go_to(Place(previous.to_vec())).is_ok()
@@ -165,22 +308,22 @@ impl GameEditor {
 
     /// Goes forward one move along the current line. Returns whether the place changed.
     pub fn forward(&mut self) -> bool {
-        let mut place = self.place.clone();
+        let mut place = self.current.place.clone();
         place.0.push(0);
         self.go_to(place).is_ok()
     }
 
     /// Goes to a place. A refusal leaves the editor unchanged.
     pub fn go_to(&mut self, place: Place) -> Result<(), NoSuchPlace> {
-        let mut position = self.game.start_position().clone();
+        let mut position = self.current.game.start_position().clone();
         if !place.0.is_empty() {
-            let MainLine::Moves(line) = &mut self.game.main_line else {
+            let MainLine::Moves(line) = self.current.game.main_line() else {
                 return Err(NoSuchPlace);
             };
             Continuation::at(line, &place.0, |node| node.replay(&mut position))?;
         }
-        self.place = place;
-        self.position = position;
+        self.current.place = place;
+        self.current.position = position;
         Ok(())
     }
 
@@ -192,6 +335,56 @@ impl GameEditor {
         to: Square,
         promotion: Option<Role>,
     ) -> Result<(), PlayError> {
+        self.change(|state| state.play(from, to, promotion))
+    }
+
+    /// Replaces the comments at the current place with the trimmed text. Empty text clears them.
+    pub fn set_comment(&mut self, text: &str) -> Result<(), AnnotationError> {
+        self.change(|state| state.set_comment(text))
+    }
+
+    /// Replaces all move judgements at the current move, keeping the other glyphs in order.
+    pub fn set_move_symbol(&mut self, symbol: Option<MoveSymbol>) -> Result<(), AnnotationError> {
+        self.change(|state| state.set_move_symbol(symbol))
+    }
+
+    /// Replaces all position assessments at the current move, keeping the other glyphs in order.
+    pub fn set_position_symbol(
+        &mut self,
+        symbol: Option<PositionSymbol>,
+    ) -> Result<(), AnnotationError> {
+        self.change(|state| state.set_position_symbol(symbol))
+    }
+
+    /// Promotes the current variation one level and stays on the same move.
+    pub fn promote(&mut self) -> Result<(), EditVariationError> {
+        self.change(EditorState::promote)
+    }
+
+    /// Deletes the current variation and returns to the position before its first move.
+    pub fn delete_variation(&mut self) -> Result<(), EditVariationError> {
+        self.change(EditorState::delete_variation)
+    }
+
+    /// Deletes every continuation after the current place.
+    pub fn delete_rest(&mut self) {
+        self.change(EditorState::delete_rest);
+    }
+
+    fn change<T>(&mut self, change: impl FnOnce(&mut EditorState) -> T) -> T {
+        let before = self.current.clone();
+        let result = change(&mut self.current);
+        // Playing a move already in the game advances the place and preserves both histories.
+        if self.current.game != before.game {
+            self.previous.push(before);
+            self.undone.clear();
+        }
+        result
+    }
+}
+
+impl EditorState {
+    fn play(&mut self, from: Square, to: Square, promotion: Option<Role>) -> Result<(), PlayError> {
         let chess_move = self
             .position
             .legal_moves()
@@ -243,8 +436,63 @@ impl GameEditor {
         Ok(())
     }
 
-    /// Promotes the current variation one level and stays on the same move.
-    pub fn promote(&mut self) -> Result<(), EditVariationError> {
+    fn set_comment(&mut self, text: &str) -> Result<(), AnnotationError> {
+        let text = text.trim();
+        validate_comment(text).map_err(|_| AnnotationError::InvalidComment)?;
+        let comments = if self.place.0.is_empty() {
+            match &mut self.game.main_line {
+                MainLine::Empty { comments } => comments,
+                MainLine::Moves(line) => &mut line.first.comments_before,
+            }
+        } else {
+            &mut self.current_node()?.comments_after
+        };
+        comments.clear();
+        if !text.is_empty() {
+            comments.push(text.to_owned());
+        }
+        Ok(())
+    }
+
+    fn set_move_symbol(&mut self, symbol: Option<MoveSymbol>) -> Result<(), AnnotationError> {
+        let glyphs = &mut self.current_node()?.annotation_symbols;
+        glyphs.retain(|&glyph| MoveSymbol::from_glyph(glyph).is_none());
+        if let Some(symbol) = symbol {
+            glyphs.insert(0, AnnotationSymbol(symbol as u8));
+        }
+        Ok(())
+    }
+
+    fn set_position_symbol(
+        &mut self,
+        symbol: Option<PositionSymbol>,
+    ) -> Result<(), AnnotationError> {
+        let glyphs = &mut self.current_node()?.annotation_symbols;
+        glyphs.retain(|&glyph| PositionSymbol::from_glyph(glyph).is_none());
+        if let Some(symbol) = symbol {
+            let after_moves = glyphs
+                .iter()
+                .rposition(|&glyph| MoveSymbol::from_glyph(glyph).is_some())
+                .map_or(0, |last_move| last_move + 1);
+            glyphs.insert(after_moves, AnnotationSymbol(symbol as u8));
+        }
+        Ok(())
+    }
+
+    fn current_node(&mut self) -> Result<&mut Node, AnnotationError> {
+        let MainLine::Moves(line) = &mut self.game.main_line else {
+            return Err(AnnotationError::NoMove);
+        };
+        let next = Continuation::at(line, &self.place.0, |_| {})
+            .map_err(|NoSuchPlace| AnnotationError::NoMove)?;
+        let index = next.index.checked_sub(1).ok_or(AnnotationError::NoMove)?;
+        next.line
+            .nodes_mut()
+            .nth(index)
+            .ok_or(AnnotationError::NoMove)
+    }
+
+    fn promote(&mut self) -> Result<(), EditVariationError> {
         let ply = self.place.variation_ply()?;
         let (outer, slot, outer_choice) =
             Continuation::outer(&mut self.game.main_line, &self.place, ply, |_| {})?;
@@ -271,8 +519,7 @@ impl GameEditor {
         Ok(())
     }
 
-    /// Deletes the current variation and returns to the position before its first move.
-    pub fn delete_variation(&mut self) -> Result<(), EditVariationError> {
+    fn delete_variation(&mut self) -> Result<(), EditVariationError> {
         let ply = self.place.variation_ply()?;
         let mut position = self.game.start_position().clone();
         let (outer, slot, _) =
@@ -290,8 +537,7 @@ impl GameEditor {
         Ok(())
     }
 
-    /// Deletes every continuation after the current place.
-    pub fn delete_rest(&mut self) {
+    fn delete_rest(&mut self) {
         let MainLine::Moves(line) = &mut self.game.main_line else {
             return;
         };
@@ -314,32 +560,29 @@ fn reaches_depth_limit(node: &Node, depth: usize) -> bool {
         })
 }
 
-struct Continuation<'game> {
-    line: &'game mut Line,
+trait LineReference: Deref<Target = Line> + Sized {
+    fn into_variation(self, index: usize, slot: usize) -> Option<Self>;
+}
+
+impl LineReference for &Line {
+    fn into_variation(self, index: usize, slot: usize) -> Option<Self> {
+        self.nodes().nth(index)?.variations.get(slot)
+    }
+}
+
+impl LineReference for &mut Line {
+    fn into_variation(self, index: usize, slot: usize) -> Option<Self> {
+        self.nodes_mut().nth(index)?.variations.get_mut(slot)
+    }
+}
+
+struct Continuation<L> {
+    line: L,
     index: usize,
     depth: usize,
 }
 
-impl<'game> Continuation<'game> {
-    fn at(
-        line: &'game mut Line,
-        choices: &[usize],
-        mut visit: impl FnMut(&Node),
-    ) -> Result<Self, NoSuchPlace> {
-        let mut next = Self {
-            line,
-            index: 0,
-            depth: 0,
-        };
-        for &choice in choices {
-            let path = next.path_to(choice).ok_or(NoSuchPlace)?;
-            next = next.descend(&path).ok_or(NoSuchPlace)?;
-            visit(next.line.nodes().nth(next.index).ok_or(NoSuchPlace)?);
-            next.index += 1;
-        }
-        Ok(next)
-    }
-
+impl<'game> Continuation<&'game mut Line> {
     fn outer(
         main: &'game mut MainLine,
         place: &Place,
@@ -358,10 +601,27 @@ impl<'game> Continuation<'game> {
         let outer = next.descend(&path).ok_or(EditVariationError::NoVariation)?;
         Ok((outer, slot, parent_choice))
     }
+}
+
+impl<L: LineReference> Continuation<L> {
+    fn at(line: L, choices: &[usize], mut visit: impl FnMut(&Node)) -> Result<Self, NoSuchPlace> {
+        let mut next = Self {
+            line,
+            index: 0,
+            depth: 0,
+        };
+        for &choice in choices {
+            let path = next.path_to(choice).ok_or(NoSuchPlace)?;
+            next = next.descend(&path).ok_or(NoSuchPlace)?;
+            visit(next.line.nodes().nth(next.index).ok_or(NoSuchPlace)?);
+            next.index += 1;
+        }
+        Ok(next)
+    }
 
     fn descend(mut self, path: &[(usize, usize)]) -> Option<Self> {
         for &(slot, _) in path {
-            self.line = &mut self.line.nodes_mut().nth(self.index)?.variations[slot];
+            self.line = self.line.into_variation(self.index, slot)?;
             self.index = 0;
             self.depth += 1;
         }
@@ -478,7 +738,7 @@ mod tests {
     fn walk_games(source: &[u8]) -> io::Result<Vec<Vec<WalkedMove>>> {
         let mut games = Vec::new();
         pgn::read_games(source, |entry| {
-            if let Entry::Game { game, problem } = entry {
+            if let Entry::Game { game, problem, .. } = entry {
                 assert_eq!(problem, None);
                 let mut follower = GameEditor::new((*game).clone());
                 let editor = GameEditor::new(*game);
