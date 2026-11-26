@@ -24,7 +24,7 @@ UCI engine process management.
 
 ### `crates/cli` (zobrist-cli)
 
-The first user interface and the agents' test bed. Everything the app can do is reachable here first.
+The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
