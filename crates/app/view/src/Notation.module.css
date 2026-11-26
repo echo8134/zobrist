@@ -1,0 +1,26 @@
+.notation {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--move-gap);
+  margin: 0;
+  padding: 0;
+  line-height: var(--move-line-height);
+  list-style: none;
+}
+
+.entry {
+  display: flex;
+}
+
+.moveNumber {
+  color: var(--move-number-color);
+}
+
+.moveText {
+  padding: var(--move-padding);
+  border-radius: var(--move-corner-radius);
+}
+
+.moveText[aria-current] {
+  background-color: var(--current-move-background-color);
+}

@@ -1,0 +1,36 @@
+/* The class of the board component in each selector lets these rules win over its own rules
+   for an element with that class and for a piece inside it. */
+.promotionChooser:global(.cg-wrap) {
+  position: absolute;
+  top: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 12.5%;
+  min-width: 0;
+  height: 50%;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--promotion-chooser-line-color);
+  background-color: var(--promotion-chooser-background-color);
+}
+
+.promotionChooser:global(.cg-wrap).fromBottom {
+  top: auto;
+  bottom: 0;
+  flex-direction: column-reverse;
+}
+
+.choice {
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.promotionChooser:global(.cg-wrap) .choicePiece {
+  position: static;
+  display: block;
+  width: 100%;
+  height: 100%;
+}

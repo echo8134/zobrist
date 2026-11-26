@@ -3,16 +3,19 @@
 use std::io;
 
 use shakmaty::Square::{
-    A7, A8, B1, C1, C2, C3, C4, C5, C7, D2, D4, D5, D7, E1, E2, E3, E4, E5, E7, F3, G1, H1,
+    self, A1, A7, A8, B1, C1, C2, C3, C4, C5, C7, D1, D2, D4, D5, D7, E1, E2, E3, E4, E5, E7, F3,
+    G1, H1, H5,
 };
 use shakmaty::fen::Fen;
-use shakmaty::{Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role};
+use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role};
 use zobrist_core::editor::{
     AnnotationError, EditVariationError, EditableTag, GameEditor, MoveSymbol, NoSuchPlace, Place,
     PlayError, PositionSymbol, TagError,
 };
 use zobrist_core::game::{Game, MAX_VARIATION_DEPTH};
 use zobrist_core::pgn::{self, Entry};
+use zobrist_core::shapes::Color::{self as ShapeColor, Green, Red};
+use zobrist_core::shapes::{Arrow, ColoredSquare, Shapes};
 
 fn read_games(source: &[u8]) -> io::Result<Vec<Game>> {
     let mut games = Vec::new();
@@ -37,6 +40,98 @@ fn assert_state(editor: &GameEditor, choices: &[usize], expected: &str) -> io::R
     let mut bytes = Vec::new();
     pgn::write_game(editor.game(), &mut bytes)?;
     assert_eq!(std::str::from_utf8(&bytes), Ok(expected));
+    Ok(())
+}
+
+fn start_position(fen: &str) -> io::Result<Chess> {
+    fen.parse::<Fen>()
+        .map_err(io::Error::other)?
+        .into_position(CastlingMode::Standard)
+        .map_err(io::Error::other)
+}
+
+#[test]
+fn resetting_the_start_position_replaces_the_moves_and_undo_restores_them() -> io::Result<()> {
+    let original = "[White \"Alpha\"]\n\n1. e4 e5 *\n";
+    let mut editor = open(original)?;
+    editor.go_to(Place(vec![0, 0])).unwrap();
+    let previous = editor.position().clone();
+    let fen = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1";
+    let tags = format!("[White \"Alpha\"]\n[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n");
+    editor.set_start_position(start_position(fen)?).unwrap();
+    assert_state(&editor, &[], &format!("{tags}*\n"))?;
+    assert_eq!(
+        Fen::from_position(editor.position(), EnPassantMode::Always).to_string(),
+        fen
+    );
+    assert!(editor.undo());
+    assert_state(&editor, &[0, 0], original)?;
+    assert_eq!(editor.position(), &previous);
+    assert!(editor.redo());
+    assert_state(&editor, &[], &format!("{tags}*\n"))?;
+    editor.play(E2, E4, None).unwrap();
+    assert_state(&editor, &[0], &format!("{tags}1. e4 *\n"))?;
+    editor.set_start_position(Chess::default()).unwrap();
+    assert_state(&editor, &[], "[White \"Alpha\"]\n\n*\n")?;
+    assert_eq!(editor.position(), &Chess::default());
+    Ok(())
+}
+
+#[test]
+fn setting_the_start_keeps_fullmove_numbers_and_en_passant_targets() -> io::Result<()> {
+    let mut editor = open("*")?;
+    let fen = "4k3/4p3/8/8/8/8/8/4K3 b - - 0 12";
+    editor.set_start_position(start_position(fen)?).unwrap();
+    editor.play(E7, E5, None).unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        &format!("[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n12... e5 *\n"),
+    )?;
+
+    for fen in [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 4 12",
+        "4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1",
+    ] {
+        editor.set_start_position(start_position(fen)?).unwrap();
+        assert_state(
+            &editor,
+            &[],
+            &format!("[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n*\n"),
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn resetting_the_start_clears_annotations_and_updates_an_existing_result_in_place() -> io::Result<()>
+{
+    let original = "[White \"A\"]\n[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n[Result \"1-0\"]\n[SetUp \"1\"]\n[Annotator \"N\"]\n[Result \"1-0\"]\n\n{Plan [%csl Gd4]} 1-0\n";
+    let mut editor = open(original)?;
+    let fen = "4k3/4p3/8/8/8/8/8/4K3 b - - 0 12";
+    editor.set_start_position(start_position(fen)?).unwrap();
+    assert_state(
+        &editor,
+        &[],
+        &format!(
+            "[White \"A\"]\n[Result \"*\"]\n[Annotator \"N\"]\n[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n*\n"
+        ),
+    )?;
+    assert!(editor.undo());
+    assert_state(&editor, &[], original)
+}
+
+#[test]
+fn refuses_a_setup_edit_that_would_split_the_game_on_export() -> io::Result<()> {
+    let original = "[SetUp \"1\"]\n[Annotator \"A\"]\n[Annotator \"B\"]\n\n1. e4 *\n";
+    let mut editor = open(original)?;
+    assert!(editor.forward());
+    assert_eq!(
+        editor.set_start_position(Chess::default()),
+        Err(TagError::RepeatedFirstTag)
+    );
+    assert_state(&editor, &[0], original)?;
+    assert!(!editor.can_undo());
     Ok(())
 }
 
@@ -950,4 +1045,131 @@ fn refused_tag_edits_preserve_the_game_and_its_history() -> io::Result<()> {
     assert!(!editor.can_undo());
     assert!(editor.can_redo());
     Ok(())
+}
+
+fn square(color: ShapeColor, square: Square) -> ColoredSquare {
+    ColoredSquare { color, square }
+}
+
+#[test]
+fn edits_and_clears_shapes_and_comment_text_independently() -> io::Result<()> {
+    let game = "1. e4 e5 *\n";
+    let with_shapes = "1. e4 {[%csl Gd4] [%cal Ge2e4]} 1... e5 *\n";
+    let with_text = "1. e4 {Center} 1... e5 *\n";
+    let with_both = "1. e4 {Center [%csl Gd4] [%cal Ge2e4]} 1... e5 *\n";
+    let mut shapes = Shapes::default();
+    shapes.add_square(square(Green, D4));
+    shapes.add_arrow(Arrow::new(Green, E2, E4).unwrap());
+    let mut editor = open(game)?;
+    assert!(editor.forward());
+    editor.set_shapes(&shapes).unwrap();
+    assert_state(&editor, &[0], with_shapes)?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], game)?;
+    assert!(editor.redo());
+    assert_state(&editor, &[0], with_shapes)?;
+    editor.set_shapes(&Shapes::default()).unwrap();
+    assert_state(&editor, &[0], game)?;
+
+    editor.set_shapes(&shapes).unwrap();
+    assert_state(&editor, &[0], with_shapes)?;
+    editor.set_comment("Center").unwrap();
+    assert_state(&editor, &[0], with_both)?;
+    editor.set_shapes(&Shapes::default()).unwrap();
+    assert_state(&editor, &[0], with_text)?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], with_both)?;
+    editor.set_comment("").unwrap();
+    assert_state(&editor, &[0], with_shapes)?;
+
+    let mut editor = open(game)?;
+    assert!(editor.forward());
+    editor.set_comment("Center").unwrap();
+    assert_state(&editor, &[0], with_text)?;
+    editor.set_shapes(&shapes).unwrap();
+    assert_state(&editor, &[0], with_both)
+}
+
+#[test]
+fn sets_shapes_at_the_start_with_and_without_moves() -> io::Result<()> {
+    let mut shapes = Shapes::default();
+    shapes.add_arrow(Arrow::new(Red, D1, H5).unwrap());
+    for (source, expected) in [
+        ("1. e4 e5 *", "{[%cal Rd1h5]} 1. e4 e5 *\n"),
+        ("*", "{[%cal Rd1h5]} *\n"),
+    ] {
+        let mut editor = open(source)?;
+        editor.set_shapes(&shapes).unwrap();
+        assert_state(&editor, &[], expected)?;
+        assert_eq!(editor.comment(), (String::new(), shapes.clone()));
+    }
+    Ok(())
+}
+
+#[test]
+fn replacing_imported_shapes_keeps_the_text_from_every_comment_part() -> io::Result<()> {
+    let mut editor = open("1. e4 {Plan [%csl Gd4]} {more [%cal Ge2e4]} *")?;
+    assert!(editor.forward());
+    let (text, shapes) = editor.comment();
+    assert_eq!(text, "Plan more");
+    assert_eq!(shapes.squares(), [square(Green, D4)]);
+    assert_eq!(shapes.arrows(), [Arrow::new(Green, E2, E4).unwrap()]);
+
+    let mut replacement = Shapes::default();
+    replacement.add_square(square(Red, A1));
+    editor.set_shapes(&replacement).unwrap();
+    assert_state(&editor, &[0], "1. e4 {Plan more [%csl Ra1]} *\n")
+}
+
+#[test]
+fn typed_shape_commands_extend_the_shapes_in_order_without_duplicates() -> io::Result<()> {
+    let mut editor = open("1. e4 *")?;
+    assert!(editor.forward());
+    editor.set_comment("Idea [%csl Gd4]").unwrap();
+    let (text, shapes) = editor.comment();
+    assert_eq!(text, "Idea");
+    assert_eq!(shapes.squares(), [square(Green, D4)]);
+    assert_eq!(shapes.arrows(), []);
+    assert_state(&editor, &[0], "1. e4 {Idea [%csl Gd4]} *\n")?;
+
+    editor
+        .set_comment("Plan [%csl Ra1,Gd4] [%cal Ge2e4]")
+        .unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        "1. e4 {Plan [%csl Gd4,Ra1] [%cal Ge2e4]} *\n",
+    )?;
+    editor.set_comment("Threat [%cal Rd1h5,Ge2e4]").unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        "1. e4 {Threat [%csl Gd4,Ra1] [%cal Ge2e4,Rd1h5]} *\n",
+    )
+}
+
+#[test]
+fn refuses_shape_and_text_edits_when_the_combined_comment_is_too_long() -> io::Result<()> {
+    let text = "x".repeat(1 << 20);
+    let mut shapes = Shapes::default();
+    shapes.add_square(square(Green, D4));
+    let mut editor = open("1. e4 *")?;
+    assert!(editor.forward());
+    editor.set_comment(&text).unwrap();
+    assert_eq!(
+        editor.set_shapes(&shapes),
+        Err(AnnotationError::InvalidComment)
+    );
+    assert_state(&editor, &[0], &format!("1. e4 {{{text}}} *\n"))?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], "1. e4 *\n")?;
+
+    editor.set_shapes(&shapes).unwrap();
+    assert_eq!(
+        editor.set_comment(&text),
+        Err(AnnotationError::InvalidComment)
+    );
+    assert_state(&editor, &[0], "1. e4 {[%csl Gd4]} *\n")?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], "1. e4 *\n")
 }

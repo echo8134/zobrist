@@ -1,6 +1,9 @@
 .area {
   grid-area: area;
   display: flex;
+  /* Without this the row of the frame grows with a long notation and pushes the board out of
+     the window. */
+  min-height: 0;
 }
 
 .boardPart {
@@ -31,5 +34,7 @@
   flex: none;
   width: var(--notation-area-width);
   border-left: 1px solid var(--notation-area-line-color);
+  padding: var(--notation-area-padding);
+  overflow-y: auto;
   background-color: var(--notation-area-background-color);
 }

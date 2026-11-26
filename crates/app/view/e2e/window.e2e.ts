@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { browser, expect } from "@wdio/globals";
 
 const screenshots = fileURLToPath(
@@ -103,6 +104,109 @@ const drawnCoordinates = () =>
         .join("");
     return { fromLeft: inDrawnOrder("files", "x"), fromTop: inDrawnOrder("ranks", "y") };
   `);
+
+type BottomSide = "white" | "black";
+
+async function offsetFromMiddleOfBoard(square: string, bottomSide: BottomSide) {
+  const squareSide = (await browser.$("main cg-board").getSize("width")) / 8;
+  const fromFileA = "abcdefgh".indexOf(square.charAt(0));
+  const fromRank1 = Number(square.charAt(1)) - 1;
+  const fromLeft = bottomSide === "white" ? fromFileA : 7 - fromFileA;
+  const fromTop = bottomSide === "white" ? 7 - fromRank1 : fromRank1;
+  return { x: (fromLeft - 3.5) * squareSide, y: (fromTop - 3.5) * squareSide };
+}
+
+async function clickSquare(square: string, bottomSide: BottomSide = "white") {
+  await browser
+    .$("main cg-board")
+    .click(await offsetFromMiddleOfBoard(square, bottomSide));
+}
+
+async function dragPiece(
+  from: string,
+  to: string,
+  bottomSide: BottomSide = "white",
+) {
+  const board = browser.$("main cg-board");
+  await browser
+    .action("pointer")
+    .move({
+      origin: board,
+      ...(await offsetFromMiddleOfBoard(from, bottomSide)),
+    })
+    .down()
+    .move({
+      origin: board,
+      ...(await offsetFromMiddleOfBoard(to, bottomSide)),
+      duration: 100,
+    })
+    .up()
+    .perform();
+}
+
+async function playMoves(moves: string, bottomSide: BottomSide = "white") {
+  const writtenMoves = () => browser.$$("main aside li").length;
+  let expectedMoves = await writtenMoves();
+  for (const move of moves.split(" ")) {
+    await clickSquare(move.slice(0, 2), bottomSide);
+    await clickSquare(move.slice(2), bottomSide);
+    expectedMoves += 1;
+    // The other side can move only after the answer of Rust, and the written move shows it.
+    await browser.waitUntil(
+      async () => (await writtenMoves()) === expectedMoves,
+      { interval: 10, timeoutMsg: `the notation did not get the move ${move}` },
+    );
+  }
+}
+
+// A mark of the board counts only while it is drawn, because the board component keeps the
+// element of a mark that is gone.
+const game = (squares: string, bottomSide: BottomSide = "white") =>
+  browser.execute(`
+    const board = document.querySelector("main cg-board").getBoundingClientRect();
+    const squareOf = (element) => {
+      const { x, y } = element.getBoundingClientRect();
+      const fromLeft = Math.round((x - board.x) / (board.width / 8));
+      const fromTop = Math.round((y - board.y) / (board.height / 8));
+      return ${bottomSide === "white"}
+        ? "abcdefgh"[fromLeft] + (8 - fromTop)
+        : "hgfedcba"[fromLeft] + (fromTop + 1);
+    };
+    const letters = { pawn: "p", knight: "n", bishop: "b", rook: "r", queen: "q", king: "k" };
+    const pieces = Object.fromEntries("${squares}".split(" ").map((square) => [square, "."]));
+    for (const piece of document.querySelectorAll("main cg-board piece")) {
+      const letter = letters[piece.classList[1]];
+      const square = squareOf(piece);
+      if (square in pieces) {
+        pieces[square] = piece.classList[0] === "white" ? letter.toUpperCase() : letter;
+      }
+    }
+    const marked = (mark) =>
+      [...document.querySelectorAll("main cg-board square." + mark)]
+        .filter((square) => square.getBoundingClientRect().width > 0)
+        .map(squareOf)
+        .sort()
+        .join(" ");
+    const texts = (selector) =>
+      [...document.querySelectorAll(selector)].map((element) => element.textContent);
+    return {
+      pieces,
+      lastMove: marked("last-move"),
+      targets: marked("move-dest"),
+      selected: marked("selected"),
+      check: marked("check"),
+      notation: texts("main aside li span").join(" "),
+      currentMoves: texts("main aside [aria-current]"),
+    };
+  `);
+
+async function expectSoon(read: () => Promise<unknown>, expected: unknown) {
+  const giveUpAt = Date.now() + 3000;
+  while (!isDeepStrictEqual(await read(), expected) && Date.now() < giveUpAt) {
+    await browser.pause(50);
+  }
+  expect(await read()).toEqual(expected);
+}
 
 /** Saves a picture of the window and returns its size in pixels. */
 async function screenshot(name: string) {
@@ -348,7 +452,7 @@ describe("the window", () => {
       .$("main cg-board piece.white.king")
       .dragAndDrop({ x: 0, y: -2 * (672 / 8) });
 
-    expect(await drawnBoard()).toEqual(startPositionWithWhiteAtBottom);
+    await expectSoon(drawnBoard, startPositionWithWhiteAtBottom);
   });
 
   it("fits the board to the size of the window", async () => {
@@ -492,4 +596,294 @@ describe("the window", () => {
     });
     expect(await plusButton().getLocation("x")).toBe(48 + 8);
   });
+
+  it("moves a piece by dragging and by two clicks, and writes the moves", async () => {
+    await toggle("Open the icon bar").click();
+    await openTabAndWait();
+
+    await dragPiece("e2", "e4");
+
+    await expectSoon(() => game("e2 e4"), {
+      pieces: { e2: ".", e4: "P" },
+      lastMove: "e2 e4",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4",
+      currentMoves: ["e4"],
+    });
+
+    await clickSquare("e7");
+
+    await expectSoon(() => game("e7 e5"), {
+      pieces: { e7: "p", e5: "." },
+      lastMove: "e2 e4",
+      targets: "e5 e6",
+      selected: "e7",
+      check: "",
+      notation: "1. e4",
+      currentMoves: ["e4"],
+    });
+
+    await clickSquare("e5");
+
+    await expectSoon(() => game("e7 e5"), {
+      pieces: { e7: ".", e5: "p" },
+      lastMove: "e5 e7",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5",
+      currentMoves: ["e5"],
+    });
+  });
+
+  it("puts a piece back after a move that is not legal", async () => {
+    await dragPiece("g1", "g3");
+
+    await expectSoon(() => game("g1 g3"), {
+      pieces: { g1: "N", g3: "." },
+      lastMove: "e5 e7",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5",
+      currentMoves: ["e5"],
+    });
+  });
+
+  it("lets only the side to move pick up a piece", async () => {
+    await clickSquare("d7");
+
+    expect(await game("d7")).toEqual({
+      pieces: { d7: "p" },
+      lastMove: "e5 e7",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5",
+      currentMoves: ["e5"],
+    });
+  });
+
+  it("writes the main line with its move numbers and marks the last move", async () => {
+    await playMoves("g1f3");
+
+    await expectSoon(() => game("g1 f3"), {
+      pieces: { g1: ".", f3: "N" },
+      lastMove: "f3 g1",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3",
+      currentMoves: ["Nf3"],
+    });
+    await expect(
+      browser.$$("main cg-board piece.anim"),
+    ).toBeElementsArrayOfSize(0);
+    expect(await screenshot("moves")).toEqual({ width: 1280, height: 800 });
+  });
+
+  it("castles when the king goes two squares", async () => {
+    await playMoves("b8c6 f1c4 f8c5");
+
+    await dragPiece("e1", "g1");
+
+    await expectSoon(() => game("e1 f1 g1 h1"), {
+      pieces: { e1: ".", f1: "R", g1: "K", h1: "." },
+      lastMove: "e1 g1",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O",
+      currentMoves: ["O-O"],
+    });
+  });
+
+  it("takes a pawn in passing", async () => {
+    await openTabAndWait();
+    await playMoves("e2e4 a7a6 e4e5 d7d5 e5d6");
+
+    await expectSoon(() => game("e5 d5 d6"), {
+      pieces: { e5: ".", d5: ".", d6: "P" },
+      lastMove: "d6 e5",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 a6 2. e5 d5 3. exd6",
+      currentMoves: ["exd6"],
+    });
+  });
+
+  it("asks for the piece of a pawn that reaches the last row", async () => {
+    await openTabAndWait();
+    await playMoves("h2h4 g7g5 h4g5 h7h6 g5h6 a7a6 h6h7 a6a5");
+    const beforeThePromotion = {
+      pieces: { h7: "P", g8: "n" },
+      lastMove: "a5 a6",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. h4 g5 2. hxg5 h6 3. gxh6 a6 4. h7 a5",
+      currentMoves: ["a5"],
+    };
+    const chooser = () => browser.$("main fieldset");
+    const choices = () =>
+      chooser()
+        .$$("button")
+        .map((button) => button.getComputedLabel());
+
+    await dragPiece("h7", "g8");
+
+    await expect(chooser()).toBeDisplayed();
+    expect(await chooser().getComputedRole()).toBe("group");
+    expect(await choices()).toEqual(["Queen", "Knight", "Rook", "Bishop"]);
+    expect(await chooser().getSize()).toEqual({ width: 84, height: 4 * 84 });
+    expect(await chooser().getLocation()).toEqual({
+      x: 208 + 24 + 16 + 6 * 84,
+      y: 40 + 24,
+    });
+    expect(await chooser().$("aria/Queen").getLocation("y")).toBeLessThan(
+      await chooser().$("aria/Bishop").getLocation("y"),
+    );
+
+    await browser.keys("Escape");
+
+    await expect(chooser()).not.toBeExisting();
+    await expectSoon(() => game("h7 g8"), beforeThePromotion);
+
+    await dragPiece("h7", "g8");
+    await expect(chooser()).toBeDisplayed();
+    await tab(1).click();
+    await tab(3).click();
+
+    await expect(chooser()).not.toBeExisting();
+    await expectSoon(() => game("h7 g8"), beforeThePromotion);
+
+    await turnButton().click();
+    await dragPiece("h7", "g8", "black");
+
+    await expect(chooser()).toBeDisplayed();
+    expect(await chooser().getLocation()).toEqual({
+      x: 208 + 24 + 16 + 1 * 84,
+      y: 40 + 24 + 4 * 84,
+    });
+    expect(await chooser().$("aria/Queen").getLocation("y")).toBeGreaterThan(
+      await chooser().$("aria/Bishop").getLocation("y"),
+    );
+
+    await chooser().$("aria/Knight").click();
+
+    await expect(chooser()).not.toBeExisting();
+    await expectSoon(() => game("h7 g8", "black"), {
+      pieces: { h7: ".", g8: "N" },
+      lastMove: "g8 h7",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. h4 g5 2. hxg5 h6 3. gxh6 a6 4. h7 a5 5. hxg8=N",
+      currentMoves: ["hxg8=N"],
+    });
+  });
+
+  it("marks the king in check and takes no move after mate", async () => {
+    await openTabAndWait();
+    await playMoves("e2e4 e7e5 d1h5 b8c6 f1c4 g8f6 h5f7");
+    const afterMate = {
+      pieces: { f7: "Q", e8: "k" },
+      lastMove: "f7 h5",
+      targets: "",
+      selected: "",
+      check: "e8",
+      notation: "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7#",
+      currentMoves: ["Qxf7#"],
+    };
+
+    await expectSoon(() => game("f7 e8"), afterMate);
+
+    await clickSquare("e8");
+    expect(await game("f7 e8")).toEqual(afterMate);
+
+    await clickSquare("a1");
+    expect(await game("f7 e8")).toEqual(afterMate);
+  });
+
+  it("keeps the game of each tab and takes a move on a turned board", async () => {
+    await tab(1).click();
+
+    expect(await drawnBoard()).toEqual([
+      "r.bqk.nr",
+      "pppp.ppp",
+      "..n.....",
+      "..b.p...",
+      "..B.P...",
+      ".....N..",
+      "PPPP.PPP",
+      "RNBQ.RK.",
+    ]);
+    expect(await game("g1")).toEqual({
+      pieces: { g1: "K" },
+      lastMove: "e1 g1",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O",
+      currentMoves: ["O-O"],
+    });
+
+    await turnButton().click();
+
+    expect(await drawnBoard()).toEqual([
+      ".KR.QBNR",
+      "PPP.PPPP",
+      "..N.....",
+      "...P.B..",
+      "...p.b..",
+      ".....n..",
+      "ppp.pppp",
+      "rn.kqb.r",
+    ]);
+
+    await playMoves("d7d6", "black");
+
+    await expectSoon(() => game("d7 d6", "black"), {
+      pieces: { d7: ".", d6: "p" },
+      lastMove: "d6 d7",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O d6",
+      currentMoves: ["d6"],
+    });
+  });
+
+  // The icon bar needs 268 px, so the window is no lower than that and the top bar. Sixty moves
+  // fill ten lines, which is more than the notation area holds in that window.
+  it("lets a notation that is longer than its area scroll, and keeps the window as it is", async () => {
+    await openTabAndWait();
+    await playMoves(Array(15).fill("g1f3 g8f6 f3g1 f6g8").join(" "));
+
+    await browser.setWindowSize(1280, 40 + 268);
+
+    await expect(browser.$("main aside")).toHaveSize({
+      width: 320,
+      height: 268,
+    });
+    expect(
+      await browser.execute(`
+        const notationArea = document.querySelector("main aside");
+        return {
+          heightOfThePage: document.documentElement.scrollHeight,
+          notationCanScroll: notationArea.scrollHeight > notationArea.clientHeight,
+        };
+      `),
+    ).toEqual({ heightOfThePage: 40 + 268, notationCanScroll: true });
+
+    await browser.setWindowSize(1280, 800);
+
+    await expect(browser.$("main cg-board")).toHaveSize({
+      width: 672,
+      height: 672,
+    });
+  }).timeout(60_000);
 });

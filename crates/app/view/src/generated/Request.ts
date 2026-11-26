@@ -4,11 +4,28 @@ import type { GameResult } from "./GameResult";
 import type { MoveSymbol } from "./MoveSymbol";
 import type { PositionSymbol } from "./PositionSymbol";
 import type { Promotion } from "./Promotion";
+import type { ShapeEdit } from "./ShapeEdit";
 
 /**
  * What the view can ask for.
  */
-export type Request = { "type": "Version" } | { "type": "NewGame" } | { "type": "SetTag", 
+export type Request = { "type": "Version" } | { "type": "NewGame" } | { "type": "SetStartPosition", 
+/**
+ * The open game's number.
+ */
+game: number, 
+/**
+ * The requested position. An invalid FEN leaves the game as it was.
+ */
+fen: string, } | { "type": "OpenPgnText", 
+/**
+ * The PGN to read.
+ */
+text: string, } | { "type": "GamePgn", 
+/**
+ * The open game's number.
+ */
+game: number, } | { "type": "SetTag", 
 /**
  * The number from the new-game answer.
  */
@@ -58,9 +75,9 @@ place: Array<number>, } | { "type": "SetComment",
  */
 game: number, 
 /**
- * The comment text. Empty text removes it.
+ * The new text. Empty text leaves just the shapes.
  */
-text: string, } | { "type": "SetMoveSymbol", 
+text: string, } | { "type": "SetShapes" } & ShapeEdit | { "type": "SetMoveSymbol", 
 /**
  * The number from the new-game answer.
  */
