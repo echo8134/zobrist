@@ -6,7 +6,7 @@
 mod game_file;
 mod pgn_file;
 
-pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer};
+pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SavedState};
 pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
 
@@ -164,6 +164,18 @@ pub enum Request {
         /// The number of the game in the file, counting from 1.
         #[ts(type = "number")]
         number: u64,
+    },
+    /// Save an open game into its place in its file.
+    SaveGame {
+        /// The open game's number.
+        game: usize,
+    },
+    /// Save an open game as the last game of a file.
+    SaveGameAs {
+        /// The open game's number.
+        game: usize,
+        /// The path of the file. Rust creates the file when nothing is there.
+        path: String,
     },
 }
 
@@ -452,6 +464,16 @@ pub enum Response {
     OpenGame {
         /// The game and its picture, or why there is none.
         answer: OpenGameAnswer,
+    },
+    /// The game after it was saved into its place, or the refusal.
+    SaveGame {
+        /// Absent when the game is no longer open.
+        answer: Option<SaveGameAnswer>,
+    },
+    /// The game after it was saved as the last game of a file, or the refusal.
+    SaveGameAs {
+        /// Absent when the game is no longer open.
+        answer: Option<SaveGameAnswer>,
     },
 }
 
@@ -879,6 +901,8 @@ impl Games {
             Request::OpenPgnFile { path } => return pgn_file::open(path),
             Request::CreatePgnFile { path } => return pgn_file::create(path),
             Request::OpenGame { path, number } => return game_file::open(path, number),
+            Request::SaveGame { game } => return game_file::save(self, game),
+            Request::SaveGameAs { game, path } => return game_file::save_as(self, game, path),
         };
         FirstStep::Answer(Box::new(response))
     }
@@ -907,12 +931,24 @@ impl FirstStep {
 #[derive(Default)]
 pub struct SharedGames {
     games: Mutex<Games>,
+    one_save: Mutex<()>,
 }
 
 impl SharedGames {
     /// Answers a request. It holds the lock on the games only for the steps that touch them.
     /// Work on a file runs between those steps, on a thread that may wait.
     pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
+        // A save publishes its file whole. Two saves into one file that overlap would each
+        // publish it without the game of the other, so a save waits for the save before it.
+        let saves = matches!(
+            request,
+            Request::SaveGame { .. } | Request::SaveGameAs { .. }
+        );
+        let _one_save = if saves {
+            Some(self.one_save.lock().await)
+        } else {
+            None
+        };
         let first = self.games.lock().await.begin(request);
         match first {
             FirstStep::Answer(response) => Ok(*response),

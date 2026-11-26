@@ -1,5 +1,5 @@
-//! Reads and creates game databases, adds games to PGN files, and replaces one game of a PGN
-//! file.
+//! Reads and creates game databases, reads one game of a PGN file, adds games to PGN files, and
+//! replaces one game of a PGN file.
 //!
 //! # File format, version 1
 //!

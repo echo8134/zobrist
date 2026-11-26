@@ -1,14 +1,16 @@
 //! A game of a PGN file as an open game of the app: opening it, and saving it into a file.
 
+use std::fs::File;
 use std::io;
 use std::num::NonZeroU64;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use ts_rs::TS;
 use zobrist_core::editor::GameEditor;
 use zobrist_core::game::{Game, MainLine};
-use zobrist_store::read_pgn_game;
+use zobrist_core::pgn::{self, Entry};
+use zobrist_store::{add_pgn_games, read_pgn_game, replace_pgn_game};
 
 use super::{FirstStep, GamePicture, Games, Response, pgn_file};
 
@@ -176,4 +178,127 @@ impl Games {
             picture: Box::new(picture),
         }
     }
+
+    /// The last step of a save. The game as the file holds it becomes the game that was
+    /// written, which is not the game of the editor when a request changed that one meanwhile.
+    fn saved(&mut self, game: usize, written: Result<InFile, Refused>) -> Option<SaveGameAnswer> {
+        let file = match written {
+            Ok(file) => file,
+            Err(Refused { reason, system }) => {
+                return Some(SaveGameAnswer::Refusal { reason, system });
+            }
+        };
+        let open = self.open_games.get_mut(&game)?;
+        open.file = Some(file);
+        Some(SaveGameAnswer::Saved {
+            picture: Box::new(open.picture()),
+        })
+    }
+}
+
+/// The saved game, or why Rust did not save it.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "type")]
+pub enum SaveGameAnswer {
+    /// The file holds the game.
+    Saved {
+        /// The picture of the game, which names its file and its number there.
+        picture: Box<GamePicture>,
+    },
+    /// Rust did not save the game.
+    Refusal {
+        /// Why.
+        reason: GameFileRefusal,
+        /// What the system said, when it said more than the reason.
+        system: Option<String>,
+    },
+}
+
+pub(super) fn save(games: &Games, game: usize) -> FirstStep {
+    let Some(open) = games.open_games.get(&game) else {
+        return FirstStep::Answer(Box::new(Response::SaveGame { answer: None }));
+    };
+    let Some(file) = &open.file else {
+        return FirstStep::Answer(Box::new(Response::SaveGame {
+            answer: Some(SaveGameAnswer::Refusal {
+                reason: GameFileRefusal::NoFile,
+                system: None,
+            }),
+        }));
+    };
+    let (path, number, held) = (file.path.clone(), file.number, file.held.clone());
+    let to_write = open.editor.game().clone();
+    FirstStep::file_work(move || {
+        let written = write_in_place(&path, number, &held, &to_write).map(|()| InFile {
+            path,
+            number,
+            held: to_write,
+        });
+        move |games: &mut Games| Response::SaveGame {
+            answer: games.saved(game, written),
+        }
+    })
+}
+
+/// Replaces game `number` of the file, but only while it is the game that the app read there
+/// or last wrote there. A file that another program changed would lose a game without a sign.
+fn write_in_place(
+    path: &Path,
+    number: NonZeroU64,
+    held: &Game,
+    game: &Game,
+) -> Result<(), Refused> {
+    let in_file = read_pgn_game(path, number).map_err(|error| Refused::cannot_read(&error))?;
+    if in_file.as_ref() != Some(held) {
+        return Err(Refused::without_text(GameFileRefusal::FileChanged));
+    }
+    replace_pgn_game(path, number, game).map_err(|error| Refused {
+        // The function refuses with this kind when it cannot place the game or when the
+        // new file would not read back.
+        reason: if error.kind() == io::ErrorKind::InvalidInput {
+            GameFileRefusal::CannotReplace
+        } else {
+            GameFileRefusal::CannotWrite
+        },
+        system: Some(error.to_string()),
+    })
+}
+
+pub(super) fn save_as(games: &Games, game: usize, typed: String) -> FirstStep {
+    let Some(open) = games.open_games.get(&game) else {
+        return FirstStep::Answer(Box::new(Response::SaveGameAs { answer: None }));
+    };
+    let to_write = open.editor.game().clone();
+    FirstStep::file_work(move || {
+        let written = write_as_last(&typed, &to_write).map(|(path, number)| InFile {
+            path,
+            number,
+            held: to_write,
+        });
+        move |games: &mut Games| Response::SaveGameAs {
+            answer: games.saved(game, written),
+        }
+    })
+}
+
+/// Adds the game to the file and counts the games that the file then has, because that count
+/// is the number of the new game.
+fn write_as_last(typed: &str, game: &Game) -> Result<(PathBuf, NonZeroU64), Refused> {
+    let path = pgn_file::resolve(typed);
+    add_pgn_games(&path, |add| add(game)).map_err(|error: io::Error| Refused {
+        reason: GameFileRefusal::CannotWrite,
+        system: Some(error.to_string()),
+    })?;
+    let cannot_read = |error: io::Error| Refused::cannot_read(&error);
+    let path = path.canonicalize().map_err(cannot_read)?;
+    let mut games = 0;
+    pgn::read_games(File::open(&path).map_err(cannot_read)?, |entry| {
+        if matches!(entry, Entry::Game { .. }) {
+            games += 1;
+        }
+    })
+    .map_err(cannot_read)?;
+    let number = NonZeroU64::new(games)
+        .ok_or_else(|| Refused::without_text(GameFileRefusal::FileChanged))?;
+    Ok((path, number))
 }

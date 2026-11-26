@@ -5,6 +5,7 @@ import type { OpenedGame } from "./OpenedGame";
 import type { PgnExport } from "./PgnExport";
 import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
+import type { SaveGameAnswer } from "./SaveGameAnswer";
 
 /**
  * What Rust answers. Each case has the name of its request.
@@ -93,4 +94,12 @@ answer: PgnFileAnswer, } | { "type": "OpenGame",
 /**
  * The game and its picture, or why there is none.
  */
-answer: OpenGameAnswer, };
+answer: OpenGameAnswer, } | { "type": "SaveGame", 
+/**
+ * Absent when the game is no longer open.
+ */
+answer: SaveGameAnswer | null, } | { "type": "SaveGameAs", 
+/**
+ * Absent when the game is no longer open.
+ */
+answer: SaveGameAnswer | null, };

@@ -133,4 +133,16 @@ path: string,
 /**
  * The number of the game in the file, counting from 1.
  */
-number: number, };
+number: number, } | { "type": "SaveGame", 
+/**
+ * The open game's number.
+ */
+game: number, } | { "type": "SaveGameAs", 
+/**
+ * The open game's number.
+ */
+game: number, 
+/**
+ * The path of the file. Rust creates the file when nothing is there.
+ */
+path: string, };
