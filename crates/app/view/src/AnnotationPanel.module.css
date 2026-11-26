@@ -1,0 +1,44 @@
+.annotationPanel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--annotation-panel-gap);
+  padding: var(--annotation-panel-padding);
+  border-top: 1px solid var(--annotation-panel-line-color);
+}
+
+.commentField {
+  height: var(--comment-field-height);
+  padding: var(--comment-field-padding);
+  border: 1px solid var(--comment-field-line-color);
+  border-radius: var(--comment-field-corner-radius);
+  color: inherit;
+  font: inherit;
+  resize: none;
+}
+
+.symbolRow {
+  display: flex;
+  gap: var(--symbol-button-gap);
+}
+
+.symbolButton {
+  width: var(--symbol-button-size);
+  height: var(--symbol-button-size);
+  padding: 0;
+  border: none;
+  border-radius: var(--symbol-button-corner-radius);
+  background: none;
+  color: var(--symbol-button-color);
+  font: inherit;
+  font-weight: var(--symbol-button-weight);
+}
+
+.symbolButton[aria-pressed="true"] {
+  background-color: var(--set-symbol-button-background-color);
+  color: var(--set-symbol-button-color);
+}
+
+.symbolButton:disabled {
+  color: var(--dim-symbol-button-color);
+}

@@ -223,4 +223,15 @@ describe("the shapes on the board", () => {
 
     await expectShapes(["green g1-f3"]);
   });
+
+  it("keeps the shapes of a move beside a comment, and the notation shows the comment only", async () => {
+    const commentField = browser.$("main aside").$("aria/Comment");
+    await commentField.click();
+    await commentField.setValue("Develops the knight");
+    await browser.keys(["Control", "Enter"]);
+
+    await browser.waitUntil(async () => (await writtenMoves())[1] === "1...e5");
+    expect(await writtenMoves()).toEqual(["1.e4Develops the knight", "1...e5"]);
+    await expectShapes(["green g1-f3"]);
+  });
 });

@@ -1,11 +1,13 @@
 import { ArrowUpDown } from "lucide-react";
 import { useLayoutEffect } from "react";
+import { AnnotationPanel } from "./AnnotationPanel";
 import { Board } from "./Board";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
 import styles from "./TabArea.module.css";
 import {
+  type Annotation,
   type Move,
   type NotationTool,
   placeToAskFor,
@@ -29,6 +31,7 @@ type Props = {
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
   onTool: (tool: NotationTool) => void;
+  onAnnotate: (annotation: Annotation) => void;
   onShapes: (shapes: Shapes) => void;
 };
 
@@ -38,6 +41,7 @@ export function TabArea({
   onMove,
   onGoTo,
   onTool,
+  onAnnotate,
   onShapes,
 }: Props) {
   const { picture } = tab;
@@ -91,10 +95,12 @@ export function TabArea({
         <div className={notationScroller}>
           <Notation
             mainLine={picture.notation}
+            startComments={picture.startComments}
             currentPlace={picture.place}
             onGoTo={onGoTo}
           />
         </div>
+        <AnnotationPanel picture={picture} onAnnotate={onAnnotate} />
       </aside>
     </main>
   );

@@ -5,6 +5,7 @@ import { PageArea } from "./PageArea";
 import { TabArea } from "./TabArea";
 import { TopBar } from "./TopBar";
 import {
+  annotate,
   apply,
   askForTool,
   closeTab,
@@ -50,6 +51,7 @@ export function Frame() {
           onMove={(move) => playMove(tab.game, move, change)}
           onGoTo={(place) => goTo(tab.game, place, change)}
           onTool={(tool) => askForTool(tab.game, tool, change)}
+          onAnnotate={(annotation) => annotate(tab.game, annotation, change)}
           onShapes={(shapes) => setShapes(tab.game, shapes, change)}
         />
       )}

@@ -161,7 +161,7 @@ async function playMoves(moves: string, bottomSide: BottomSide = "white") {
 
 const readNotation = `
   const notationText = (currentInBrackets) => {
-    const texts = document.createTreeWalker(document.querySelector("main aside"), NodeFilter.SHOW_TEXT);
+    const texts = document.createTreeWalker(document.querySelector("main aside ol"), NodeFilter.SHOW_TEXT);
     const parts = [];
     while (texts.nextNode()) {
       const text = texts.currentNode.textContent;
@@ -422,7 +422,7 @@ describe("the window", () => {
     const notationArea = browser.$("main aside");
     expect(await notationArea.getSize("width")).toBe(320);
     expect(await notationArea.getLocation("x")).toBe(1280 - 320);
-    expect(await notationArea.getText()).toBe("");
+    expect(await browser.$("main aside ol").getText()).toBe("");
 
     const board = browser.$("main cg-board");
     expect(await board.getSize()).toEqual({ width: 672, height: 672 });
