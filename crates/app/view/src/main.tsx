@@ -1,12 +1,8 @@
-import { StrictMode, Suspense, use } from "react";
+import "@fontsource-variable/inter";
+import "./design.css";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ask } from "./ipc";
-
-const version = ask({ type: "Version" });
-
-function VersionLine() {
-  return <p>zobrist {use(version).version}</p>;
-}
+import { Frame } from "./Frame";
 
 const root = document.getElementById("root");
 if (root === null) {
@@ -14,8 +10,6 @@ if (root === null) {
 }
 createRoot(root).render(
   <StrictMode>
-    <Suspense>
-      <VersionLine />
-    </Suspense>
+    <Frame />
   </StrictMode>,
 );

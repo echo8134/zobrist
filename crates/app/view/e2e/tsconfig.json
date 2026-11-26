@@ -4,5 +4,5 @@
     "lib": ["ES2023"],
     "types": ["node", "@wdio/globals/types", "@wdio/mocha-framework"]
   },
-  "include": [".", "../wdio.conf.ts"]
+  "include": [".", "../vite.config.ts", "../wdio.conf.ts"]
 }

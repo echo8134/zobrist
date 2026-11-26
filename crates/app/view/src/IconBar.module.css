@@ -1,0 +1,39 @@
+.iconBar {
+  grid-area: icon-bar;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--icon-bar-padding);
+  border-right: 1px solid var(--icon-bar-line-color);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--icon-bar-gap);
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: var(--entry-gap);
+  height: var(--entry-height);
+  padding: var(--entry-padding);
+  border: none;
+  border-radius: var(--entry-corner-radius);
+  background: none;
+  color: var(--entry-color);
+  font: inherit;
+}
+
+.entry[aria-current="page"] {
+  background-color: var(--current-entry-background-color);
+  color: var(--current-entry-color);
+}
+
+.entry svg {
+  flex: none;
+  width: var(--entry-icon-size);
+  height: var(--entry-icon-size);
+  stroke-width: var(--entry-icon-stroke);
+}
