@@ -1,4 +1,14 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  closeSync,
+  constants,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { fileURLToPath } from "node:url";
 import { browser, expect } from "@wdio/globals";
 
@@ -157,6 +167,31 @@ describe("the page Files", () => {
     await expect(line()).toHaveText(
       "This file cannot be created. No such file or directory (os error 2)",
     );
+  });
+
+  it("shows an answer that arrives after the page was left and shown again", async () => {
+    // Rust waits at a pipe until somebody writes into it, so the test decides when it answers.
+    const slow = `${work}/slow.pgn`;
+    execFileSync("mkfifo", [slow]);
+    await open(slow);
+    await browser.$("nav").$("aria/Home").click();
+    await expect(heading()).toHaveText("Home");
+    await browser.$("nav").$("aria/Files").click();
+    await expect(field()).toHaveValue(slow);
+
+    // Without a reader this open fails, and with a blocking open the test could hang.
+    const pipe = await browser.waitUntil(async () => {
+      try {
+        return openSync(slow, constants.O_WRONLY | constants.O_NONBLOCK);
+      } catch {
+        return false;
+      }
+    });
+    writeSync(pipe, '[White "Late"]\n\n1. e4 *\n');
+    closeSync(pipe);
+
+    await expect(rows()).toBeElementsArrayOfSize(1);
+    expect(await cellTexts()).toEqual([["1", "Late", "?", "*", "?", "?"]]);
   });
 
   it("keeps its file while another page and a tab are shown", async () => {

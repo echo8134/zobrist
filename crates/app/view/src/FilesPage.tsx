@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useSyncExternalStore } from "react";
 import styles from "./FilesPage.module.css";
 import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
 import type { RefusalReason } from "./generated/RefusalReason";
@@ -23,8 +23,30 @@ type Kept = {
   answer: PgnFileAnswer | undefined;
 };
 
-// The page leaves the window while another page or a tab is shown. Its file stays here.
+// The page leaves the window while another page or a tab is shown. Its file stays here, and
+// the page that is in the window hears of every change, also of an answer to a request that
+// an earlier page sent.
 let kept: Kept = { typed: "", answer: undefined };
+const pagesInTheWindow = new Set<() => void>();
+
+function keep(next: Kept) {
+  kept = next;
+  for (const hear of pagesInTheWindow) {
+    hear();
+  }
+}
+
+function subscribe(hear: () => void) {
+  pagesInTheWindow.add(hear);
+  return () => {
+    pagesInTheWindow.delete(hear);
+  };
+}
+
+async function send(type: "OpenPgnFile" | "CreatePgnFile") {
+  const response = await ask({ type, path: kept.typed });
+  keep({ ...kept, answer: response.answer });
+}
 
 const refusals: Record<RefusalReason, string> = {
   cannotRead: "This file cannot be opened.",
@@ -50,15 +72,7 @@ function lineOf(answer: PgnFileAnswer): string | undefined {
 }
 
 export function FilesPage() {
-  const [{ typed, answer }, setShown] = useState(kept);
-  const keep = (next: Kept) => {
-    kept = next;
-    setShown(next);
-  };
-  const send = async (type: "OpenPgnFile" | "CreatePgnFile") => {
-    const response = await ask({ type, path: kept.typed });
-    keep({ ...kept, answer: response.answer });
-  };
+  const { typed, answer } = useSyncExternalStore(subscribe, () => kept);
   const text = answer === undefined ? undefined : lineOf(answer);
   return (
     <>
