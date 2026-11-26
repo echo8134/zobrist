@@ -65,13 +65,25 @@ type Props = {
 
 export function AnnotationPanel({ picture, onAnnotate }: Props) {
   const field = useRef<HTMLTextAreaElement>(null);
+  const commentInField = useRef("");
+  const sentText = useRef<string>(undefined);
   useLayoutEffect(() => {
-    if (field.current !== null) {
-      field.current.value = commentOfCurrentPlace(picture);
+    const comment = commentOfCurrentPlace(picture);
+    // The field takes the comment of a new picture while it holds the comment of the picture
+    // before or the text that it sent. A text that the player typed on while Rust answered
+    // stays, because no picture has it.
+    if (
+      field.current !== null &&
+      [commentInField.current, sentText.current].includes(field.current.value)
+    ) {
+      field.current.value = comment;
     }
+    commentInField.current = comment;
+    sentText.current = undefined;
   }, [picture]);
   const sendComment = (text: string) => {
     if (text !== commentOfCurrentPlace(picture)) {
+      sentText.current = text;
       onAnnotate({ type: "SetComment", text });
     }
   };
