@@ -1,12 +1,12 @@
 import { PanelLeft, Plus, X } from "lucide-react";
-import { tabName } from "./PageArea";
+import { IconButton } from "./IconButton";
 import styles from "./TopBar.module.css";
+import { tabName } from "./tabs";
 
 const {
   topBar,
   leftPart,
   collapsed,
-  iconButton,
   name,
   tabStrip,
   tabList,
@@ -37,16 +37,11 @@ export function TopBar({
   return (
     <header className={topBar}>
       <div className={iconBarOpen ? leftPart : `${leftPart} ${collapsed}`}>
-        <button
-          type="button"
-          className={iconButton}
-          aria-label={
-            iconBarOpen ? "Collapse the icon bar" : "Open the icon bar"
-          }
+        <IconButton
+          name={iconBarOpen ? "Collapse the icon bar" : "Open the icon bar"}
+          icon={PanelLeft}
           onClick={onToggleIconBar}
-        >
-          <PanelLeft />
-        </button>
+        />
         {iconBarOpen && <span className={name}>zobrist</span>}
       </div>
       <div className={tabStrip}>
@@ -75,14 +70,7 @@ export function TopBar({
             ))}
           </div>
         )}
-        <button
-          type="button"
-          className={iconButton}
-          aria-label="New board"
-          onClick={onOpenTab}
-        >
-          <Plus />
-        </button>
+        <IconButton name="New board" icon={Plus} onClick={onOpenTab} />
       </div>
     </header>
   );

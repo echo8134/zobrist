@@ -1,0 +1,30 @@
+.board {
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+/* The stylesheet of the board component places the coordinates for a layout that zobrist does
+   not have, and they leave their squares on a small board. The class of the component in each
+   selector lets these rules win over its own rules. */
+.board:global(.cg-wrap) :global(.ranks),
+.board:global(.cg-wrap) :global(.files) {
+  inset: 0;
+  width: auto;
+  height: auto;
+  opacity: 1;
+  font: var(--coordinate-weight) var(--coordinate-size) / 1 var(--text-font);
+  text-align: right;
+  text-transform: none;
+}
+
+.board:global(.cg-wrap) :global(.ranks) > *,
+.board:global(.cg-wrap) :global(.files) > * {
+  flex: 1 1 0;
+  padding: var(--coordinate-padding);
+  transform: none;
+}
+
+.board:global(.cg-wrap) :global(.files) > * {
+  display: flex;
+  align-items: flex-end;
+}
