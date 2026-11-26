@@ -6,35 +6,3 @@
     / auto 1fr;
   height: 100vh;
 }
-
-.topBar {
-  grid-area: top-bar;
-  display: flex;
-  align-items: center;
-  gap: var(--top-bar-gap);
-  padding-left: var(--top-bar-padding);
-  border-bottom: 1px solid var(--top-bar-line-color);
-  background-color: var(--top-bar-background-color);
-}
-
-.toggle {
-  display: grid;
-  place-items: center;
-  width: var(--toggle-width);
-  height: var(--toggle-height);
-  padding: 0;
-  border: none;
-  border-radius: var(--toggle-corner-radius);
-  background: none;
-  color: var(--toggle-color);
-}
-
-.toggle svg {
-  width: var(--toggle-icon-size);
-  height: var(--toggle-icon-size);
-  stroke-width: var(--toggle-icon-stroke);
-}
-
-.name {
-  font-weight: var(--top-bar-name-weight);
-}
