@@ -135,6 +135,22 @@ pub fn replace_pgn_game(target: &Path, number: NonZeroU64, game: &Game) -> io::R
     staged.publish()
 }
 
+/// Reads game `number` of a PGN file, counting from 1. `None` when the file holds fewer games.
+/// A game with a problem comes as the part that the reader kept.
+pub fn read_pgn_game(source: &Path, number: NonZeroU64) -> io::Result<Option<Game>> {
+    let mut games = 0;
+    let mut found = None;
+    pgn::read_games(File::open(source)?, |entry| {
+        if let Entry::Game { game, .. } = entry {
+            games += 1;
+            if games == number.get() {
+                found = Some(*game);
+            }
+        }
+    })?;
+    Ok(found)
+}
+
 /// What a list shows of one game of a PGN file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PgnGameRow {
