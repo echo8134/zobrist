@@ -145,12 +145,16 @@ async function dragPiece(
 }
 
 async function playMoves(moves: string, bottomSide: BottomSide = "white") {
+  const writtenMoves = () => browser.$$("main aside li").length;
+  let expectedMoves = await writtenMoves();
   for (const move of moves.split(" ")) {
-    const movesBefore = await browser.$$("main aside li").length;
     await clickSquare(move.slice(0, 2), bottomSide);
     await clickSquare(move.slice(2), bottomSide);
-    await expect(browser.$$("main aside li")).toBeElementsArrayOfSize(
-      movesBefore + 1,
+    expectedMoves += 1;
+    // The other side can move only after the answer of Rust, and the written move shows it.
+    await browser.waitUntil(
+      async () => (await writtenMoves()) === expectedMoves,
+      { interval: 10, timeoutMsg: `the notation did not get the move ${move}` },
     );
   }
 }
@@ -852,4 +856,34 @@ describe("the window", () => {
       currentMoves: ["d6"],
     });
   });
+
+  // The icon bar needs 268 px, so the window is no lower than that and the top bar. Sixty moves
+  // fill ten lines, which is more than the notation area holds in that window.
+  it("lets a notation that is longer than its area scroll, and keeps the window as it is", async () => {
+    await openTabAndWait();
+    await playMoves(Array(15).fill("g1f3 g8f6 f3g1 f6g8").join(" "));
+
+    await browser.setWindowSize(1280, 40 + 268);
+
+    await expect(browser.$("main aside")).toHaveSize({
+      width: 320,
+      height: 268,
+    });
+    expect(
+      await browser.execute(`
+        const notationArea = document.querySelector("main aside");
+        return {
+          heightOfThePage: document.documentElement.scrollHeight,
+          notationCanScroll: notationArea.scrollHeight > notationArea.clientHeight,
+        };
+      `),
+    ).toEqual({ heightOfThePage: 40 + 268, notationCanScroll: true });
+
+    await browser.setWindowSize(1280, 800);
+
+    await expect(browser.$("main cg-board")).toHaveSize({
+      width: 672,
+      height: 672,
+    });
+  }).timeout(60_000);
 });
