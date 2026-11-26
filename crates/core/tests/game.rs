@@ -1,4 +1,4 @@
-//! The game model, built move by move through the builder, the only way to make a game.
+//! The game model, built move by move through the builder.
 
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
