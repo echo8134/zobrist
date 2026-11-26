@@ -161,7 +161,7 @@ async function playMoves(moves: string, bottomSide: BottomSide = "white") {
 
 const readNotation = `
   const notationText = (currentInBrackets) => {
-    const texts = document.createTreeWalker(document.querySelector("main aside"), NodeFilter.SHOW_TEXT);
+    const texts = document.createTreeWalker(document.querySelector("main aside ol"), NodeFilter.SHOW_TEXT);
     const parts = [];
     while (texts.nextNode()) {
       const text = texts.currentNode.textContent;

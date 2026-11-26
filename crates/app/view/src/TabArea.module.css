@@ -30,12 +30,15 @@
   height: var(--button-row-height);
 }
 
+/* In a window that is too low for the parts above the notation, the area scrolls as a whole
+   and does not make the page higher. */
 .notationArea {
   display: flex;
   flex: none;
   flex-direction: column;
   width: var(--notation-area-width);
   border-left: 1px solid var(--notation-area-line-color);
+  overflow-y: auto;
   background-color: var(--notation-area-background-color);
 }
 

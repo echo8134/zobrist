@@ -11,7 +11,8 @@ type Name = (typeof names)[number];
 
 const board = () => browser.$("main cg-board");
 const form = () => browser.$("main aside form");
-const field = (name: Name | "Result") => form().$(`aria/${name}`);
+const field = (name: Name) => form().$(`aria/${name}`);
+const choice = () => form().$("select");
 const tab = (positionFromLeft: number) =>
   browser.$(
     `header [role="tablist"] > :nth-child(${positionFromLeft}) [role="tab"]`,
@@ -29,11 +30,10 @@ async function chosenResult() {
 
 /** The text of every field and of the choice, as the form shows them. */
 async function shownData() {
-  const texts: Record<string, unknown> = {};
+  const texts: Record<string, unknown> = { Result: await chosenResult() };
   for (const name of names) {
     texts[name] = await field(name).getValue();
   }
-  texts["Result"] = await chosenResult();
   return texts;
 }
 
@@ -72,7 +72,9 @@ async function choose(result: string) {
 
 const lineColor = async (name: Name) =>
   (await field(name).getCSSProperty("border-top-color")).parsed.hex;
-const hintUnder = (name: Name) => field(name).parentElement().$("span");
+// A field that Rust refused points at the text under it.
+const hintOf = async (name: Name) =>
+  browser.$(`[id="${await field(name).getAttribute("aria-describedby")}"]`);
 
 describe("the data of a game", () => {
   before(async () => {
@@ -121,14 +123,14 @@ describe("the data of a game", () => {
     );
     const eventName = form().$("label=Event");
     expect((await eventName.getLocation("y")) - (white.y + 28)).toBeCloseTo(8);
-    expect(await field("Result").getSize()).toEqual(whiteSize);
+    expect(await choice().getSize()).toEqual(whiteSize);
     expect(await lineColor("White")).toBe("#e2e2e2");
     expect(
       (await form().getCSSProperty("border-bottom-color")).parsed.hex,
     ).toBe("#e6e6e6");
     const formBottom =
       (await form().getLocation("y")) + (await form().getSize("height"));
-    const resultBottom = (await field("Result").getLocation("y")) + 28;
+    const resultBottom = (await choice().getLocation("y")) + 28;
     expect(formBottom - resultBottom).toBeCloseTo(12 + 1);
   });
 
@@ -146,18 +148,23 @@ describe("the data of a game", () => {
   it("keeps a date that Rust refuses, marks its field, and says how to write it", async () => {
     await typeAndPressEnter("Date", "26.11.2026");
 
-    await expect(hintUnder("Date")).toHaveText(
+    await expect(field("Date")).toHaveAttribute("aria-invalid", "true");
+    const hint = await hintOf("Date");
+    await expect(hint).toHaveText(
       "Write the date as 2026.11.26. Use ?? for a part that is unknown.",
     );
     await expect(field("Date")).toHaveValue("26.11.2026");
     expect(await lineColor("Date")).toBe("#b3261e");
-    const hint = hintUnder("Date");
     expect((await hint.getCSSProperty("font-size")).value).toBe("11px");
     expect((await hint.getCSSProperty("color")).parsed.hex).toBe("#b3261e");
+    const date = await field("Date").getLocation();
+    expect(await hint.getLocation("x")).toBe(date.x);
+    expect((await hint.getLocation("y")) - (date.y + 28)).toBeCloseTo(2);
 
     await typeAndPressEnter("Date", "2026.11.26");
 
-    await expect(hintUnder("Date")).not.toExist();
+    await expect(field("Date")).toHaveAttribute("aria-invalid", "false");
+    await expect(form().$("span")).not.toExist();
     await expect(field("Date")).toHaveValue("2026.11.26");
     expect(await lineColor("Date")).toBe("#e2e2e2");
   });
@@ -189,6 +196,8 @@ describe("the data of a game", () => {
     await expect(browser.$$("main aside li")).toBeElementsArrayOfSize(1);
     expect(await chosenResult()).toBe("1-0");
 
+    // The board lets the pawn glide to its square, and the picture waits for it.
+    await expect(board().$("piece.anim")).not.toExist();
     const picture = await browser.saveScreenshot(
       `${screenshots}/game-data.png`,
     );
@@ -197,6 +206,21 @@ describe("the data of a game", () => {
       width: picture.readUInt32BE(16),
       height: picture.readUInt32BE(20),
     }).toEqual({ width: 1280, height: 800 });
+  });
+
+  it("keeps a key from the game while a field of the form has the focus", async () => {
+    const currentMoves = () => browser.$$("main aside [aria-current]");
+    await field("Site").click();
+    await browser.keys("ArrowLeft");
+    // Nothing is to happen, so there is nothing to wait for but time.
+    await browser.pause(300);
+    await expect(currentMoves()).toBeElementsArrayOfSize(1);
+
+    await clickOnTheBoard();
+    await browser.keys("ArrowLeft");
+    await expect(currentMoves()).toBeElementsArrayOfSize(0);
+    await browser.keys("ArrowRight");
+    await expect(currentMoves()).toBeElementsArrayOfSize(1);
   });
 
   it("gives each tab a form of its own", async () => {
