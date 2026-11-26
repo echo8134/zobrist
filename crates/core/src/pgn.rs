@@ -634,13 +634,14 @@ impl Trail {
             }
             self.kept.drain(..dropped);
             self.kept_start += dropped as u64;
-            let current = self
-                .leads
-                .iter()
-                .rposition(|(from, _)| *from <= self.kept_start);
-            self.leads.drain(..current.unwrap_or(0));
+            let passed = self.leads_up_to(self.kept_start);
+            self.leads.drain(..passed.saturating_sub(1));
         }
         self.kept.extend_from_slice(bytes);
+    }
+
+    fn leads_up_to(&self, handed: u64) -> usize {
+        self.leads.partition_point(|(from, _)| *from <= handed)
     }
 
     /// The source holds this many bytes here that pgn-reader does not get.
@@ -650,7 +651,7 @@ impl Trail {
     }
 
     fn in_source(&self, handed: u64) -> u64 {
-        let lead = self.leads.iter().rev().find(|(from, _)| *from <= handed);
+        let lead = self.leads[..self.leads_up_to(handed)].last();
         handed + lead.map_or(0, |(_, lead)| *lead)
     }
 
