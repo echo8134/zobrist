@@ -11,6 +11,7 @@ import {
   placeToAskFor,
   playMove,
   type Shown,
+  setShapes,
 } from "./tabs";
 
 vi.mock("./ipc", () => ({ ask: vi.fn() }));
@@ -196,4 +197,36 @@ test("End leads from the start to the last move of the main line", () => {
 
 test("another key leads nowhere", () => {
   expect(placeToAskFor("a", { place: [0], notation })).toBeUndefined();
+});
+
+test("all shapes of the board go to Rust, and the tab takes the picture of the answer", async () => {
+  const { change, shown } = tabState({
+    tabs: [
+      { game: 7, picture, bottomSide: "white" },
+      { game: 8, picture, bottomSide: "white" },
+    ],
+    page: "Home",
+    shownTab: 7,
+  });
+  const squares = [{ color: "green", square: "d4" }] as const;
+  const arrows = [{ color: "red", from: "d1", to: "h5" }] as const;
+  const withShapes = { ...picture, squares, arrows } as unknown as GamePicture;
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SetShapes",
+    picture: withShapes,
+  });
+
+  await setShapes(7, { squares: [...squares], arrows: [...arrows] }, change);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "SetShapes", game: 7, squares, arrows }],
+  ]);
+  expect(shown().tabs).toEqual([
+    { game: 7, picture: withShapes, bottomSide: "white" },
+    { game: 8, picture, bottomSide: "white" },
+  ]);
+
+  vi.mocked(ask).mockResolvedValueOnce({ type: "SetShapes", picture: null });
+  await setShapes(9, { squares: [], arrows: [] }, change);
+  expect(shown().tabs[0]?.picture).toBe(withShapes);
 });

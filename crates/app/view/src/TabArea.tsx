@@ -4,7 +4,7 @@ import { Board } from "./Board";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
 import styles from "./TabArea.module.css";
-import { type Move, placeToAskFor, type Tab } from "./tabs";
+import { type Move, placeToAskFor, type Shapes, type Tab } from "./tabs";
 
 const { area, boardPart, boardColumn, buttonRow, notationArea } = styles;
 
@@ -13,9 +13,10 @@ type Props = {
   onTurnBoard: () => void;
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
+  onShapes: (shapes: Shapes) => void;
 };
 
-export function TabArea({ tab, onTurnBoard, onMove, onGoTo }: Props) {
+export function TabArea({ tab, onTurnBoard, onMove, onGoTo, onShapes }: Props) {
   const { picture } = tab;
   // A layout effect, so that a key right after a new picture is drawn starts from that picture.
   // A plain effect runs later, and until then the key would start from the picture before.
@@ -44,6 +45,7 @@ export function TabArea({ tab, onTurnBoard, onMove, onGoTo }: Props) {
             picture={picture}
             bottomSide={tab.bottomSide}
             onMove={onMove}
+            onShapes={onShapes}
           />
           <div className={buttonRow}>
             <IconButton

@@ -2,6 +2,7 @@
 import type { GamePicture } from "./GamePicture";
 import type { OpenedGame } from "./OpenedGame";
 import type { PgnExport } from "./PgnExport";
+import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
 
 /**
@@ -79,4 +80,12 @@ picture: GamePicture | null, } | { "type": "DeleteRest",
 /**
  * Absent when the game is no longer open.
  */
-picture: GamePicture | null, } | { "type": "CloseGame" };
+picture: GamePicture | null, } | { "type": "CloseGame" } | { "type": "OpenPgnFile", 
+/**
+ * What the page Files shows next.
+ */
+answer: PgnFileAnswer, } | { "type": "CreatePgnFile", 
+/**
+ * What the page Files shows next.
+ */
+answer: PgnFileAnswer, };

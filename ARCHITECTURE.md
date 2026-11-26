@@ -16,7 +16,7 @@ The chess domain model. Pure. No IO and no framework dependencies.
 
 ### `crates/store` (zobrist-store)
 
-Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. It also adds games to a PGN file and replaces one game of a PGN file, and both keep every other byte of the file. Search over games and positions is planned.
+Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. It also adds games to a PGN file and replaces one game of a PGN file, and both keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Search over games and positions is planned.
 
 ### `crates/engine` (zobrist-engine, planned)
 
@@ -28,7 +28,7 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for the games and on `store` for the row of a game in the list of a PGN file.
 
 ### `scripts/`
 

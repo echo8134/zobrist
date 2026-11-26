@@ -92,6 +92,36 @@
 
   --promotion-chooser-line-color: #e2e2e2;
   --promotion-chooser-background-color: #ffffff;
+
+  --path-row-gap-above: 16px;
+  --path-row-gap: 8px;
+
+  --field-width: 480px;
+  --field-height: 28px;
+  --field-padding: 0 8px;
+  --field-line-color: #e2e2e2;
+  --field-corner-radius: 5px;
+
+  --button-height: 28px;
+  --button-padding: 0 12px;
+  --button-line-color: #e2e2e2;
+  --button-corner-radius: 5px;
+  --button-background-color: #ffffff;
+  --button-color: #222222;
+
+  --file-line-gap-above: 8px;
+  --file-line-color: #6b6b6b;
+  --refusal-color: #b3261e;
+
+  --list-gap-above: 16px;
+  --list-head-color: #6b6b6b;
+  --list-head-weight: 400;
+  --list-row-height: 28px;
+  --list-line-color: #e6e6e6;
+  --list-cell-padding: 0 8px;
+  --list-number-width: 48px;
+  --list-result-width: 72px;
+  --list-date-width: 104px;
 }
 
 /* A size in this file is the outer size of its part, with the line at its edge. */

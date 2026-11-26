@@ -135,6 +135,45 @@ pub fn replace_pgn_game(target: &Path, number: NonZeroU64, game: &Game) -> io::R
     staged.publish()
 }
 
+/// What a list shows of one game of a PGN file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PgnGameRow {
+    /// The number of the game in its file, counting from 1.
+    pub number: u64,
+    /// The `White` tag.
+    pub white: String,
+    /// The `Black` tag.
+    pub black: String,
+    /// The result of the game, as its result marker gives it.
+    pub result: String,
+    /// The `Date` tag.
+    pub date: String,
+    /// The `Event` tag.
+    pub event: String,
+}
+
+impl PgnGameRow {
+    /// Builds the row of a game. A missing tag is `?`. A line break or a tab in a tag becomes a
+    /// space, so that every value stays in one field.
+    #[must_use]
+    pub fn new(number: u64, game: &Game) -> Self {
+        let tag = |name| {
+            game.tag(name)
+                .unwrap_or("?")
+                .replace("\r\n", " ")
+                .replace(['\r', '\n', '\t'], " ")
+        };
+        Self {
+            number,
+            white: tag("White"),
+            black: tag("Black"),
+            result: game.result().to_string(),
+            date: tag("Date"),
+            event: tag("Event"),
+        }
+    }
+}
+
 /// Follows symbolic links to the file that a target names.
 fn destination(target: &Path) -> io::Result<PathBuf> {
     let mut target = std::path::absolute(target)?;

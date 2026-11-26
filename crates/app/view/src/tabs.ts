@@ -21,6 +21,9 @@ export type Shown = {
 
 export type Move = { from: string; to: string; promotion: Promotion | null };
 
+/** The marked squares and the arrows of one place of a game. */
+export type Shapes = Pick<GamePicture, "squares" | "arrows">;
+
 export type Change =
   | { type: "openTab"; game: number; picture: GamePicture }
   | { type: "showTab"; game: number }
@@ -149,6 +152,18 @@ export function placeToAskFor(
     }
     default:
       return undefined;
+  }
+}
+
+/** Sends all shapes that the board shows at the current place and draws the answer. */
+export async function setShapes(
+  game: number,
+  shapes: Shapes,
+  change: (change: Change) => void,
+) {
+  const { picture } = await ask({ type: "SetShapes", game, ...shapes });
+  if (picture !== null) {
+    change({ type: "drawPicture", game, picture });
   }
 }
 
