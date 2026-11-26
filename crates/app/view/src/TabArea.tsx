@@ -1,5 +1,5 @@
 import { ArrowUpDown } from "lucide-react";
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { AnnotationPanel } from "./AnnotationPanel";
 import { Board } from "./Board";
 import { GameDataForm } from "./GameDataForm";
@@ -77,6 +77,25 @@ export function TabArea({
     document.addEventListener("keydown", act);
     return () => document.removeEventListener("keydown", act);
   }, [picture, onGoTo, onTool]);
+
+  // The board keeps the window from moving the focus when the player clicks on it. So a
+  // press of the mouse outside the field or the choice that has the focus takes the focus
+  // from it here, and a field sends its text.
+  useEffect(() => {
+    const leaveField = ({ target }: MouseEvent) => {
+      const focused = document.activeElement;
+      if (
+        (focused instanceof HTMLInputElement ||
+          focused instanceof HTMLTextAreaElement ||
+          focused instanceof HTMLSelectElement) &&
+        focused !== target
+      ) {
+        focused.blur();
+      }
+    };
+    document.addEventListener("mousedown", leaveField, true);
+    return () => document.removeEventListener("mousedown", leaveField, true);
+  }, []);
 
   return (
     <main className={area}>
