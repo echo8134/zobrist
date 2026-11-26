@@ -4,6 +4,7 @@ import type { NotationMove } from "./generated/NotationMove";
 import { ask } from "./ipc";
 import {
   apply,
+  askForTool,
   type Change,
   closeTab,
   goTo,
@@ -12,6 +13,7 @@ import {
   playMove,
   type Shown,
   setShapes,
+  toolForKey,
 } from "./tabs";
 
 vi.mock("./ipc", () => ({ ask: vi.fn() }));
@@ -229,4 +231,53 @@ test("all shapes of the board go to Rust, and the tab takes the picture of the a
   vi.mocked(ask).mockResolvedValueOnce({ type: "SetShapes", picture: null });
   await setShapes(9, { squares: [], arrows: [] }, change);
   expect(shown().tabs[0]?.picture).toBe(withShapes);
+});
+
+test.each([
+  "Undo",
+  "Redo",
+  "PromoteVariation",
+  "DeleteVariation",
+  "DeleteRest",
+] as const)(
+  "the tool %s goes to Rust, and its tab takes the picture of the answer",
+  async (tool) => {
+    const { change, shown } = tabState({
+      tabs: [{ game: 7, picture, bottomSide: "white" }],
+      page: "Home",
+      shownTab: 7,
+    });
+    vi.mocked(ask).mockResolvedValueOnce({
+      type: tool,
+      picture: pictureAfterE4,
+    });
+
+    await askForTool(7, tool, change);
+
+    expect(vi.mocked(ask).mock.calls).toEqual([[{ type: tool, game: 7 }]]);
+    expect(shown().tabs).toEqual([
+      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+    ]);
+  },
+);
+
+test("Ctrl+Z is the key of Undo", () => {
+  expect(toolForKey({ key: "z", ctrlKey: true, shiftKey: false })).toBe("Undo");
+});
+
+test("Ctrl+Y and Ctrl+Shift+Z are the keys of Redo", () => {
+  expect(toolForKey({ key: "y", ctrlKey: true, shiftKey: false })).toBe("Redo");
+  expect(toolForKey({ key: "Z", ctrlKey: true, shiftKey: true })).toBe("Redo");
+});
+
+test("a key without Ctrl and another key with Ctrl are the key of no tool", () => {
+  expect(
+    toolForKey({ key: "z", ctrlKey: false, shiftKey: false }),
+  ).toBeUndefined();
+  expect(
+    toolForKey({ key: "a", ctrlKey: true, shiftKey: false }),
+  ).toBeUndefined();
+  expect(
+    toolForKey({ key: "Y", ctrlKey: true, shiftKey: true }),
+  ).toBeUndefined();
 });
