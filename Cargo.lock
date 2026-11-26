@@ -5130,10 +5130,13 @@ name = "zobrist-app"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "shakmaty",
  "tauri",
  "tauri-build",
  "tauri-plugin-wdio-webdriver",
  "ts-rs",
+ "zobrist-core",
 ]
 
 [[package]]
