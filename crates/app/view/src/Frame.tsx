@@ -4,7 +4,7 @@ import { IconBar } from "./IconBar";
 import { PageArea } from "./PageArea";
 import { TabArea } from "./TabArea";
 import { TopBar } from "./TopBar";
-import { apply, closeTab, openTab, playMove } from "./tabs";
+import { apply, closeTab, openTab, playMove, setShapes } from "./tabs";
 
 const { frame } = styles;
 
@@ -40,6 +40,7 @@ export function Frame() {
           tab={tab}
           onTurnBoard={() => change({ type: "turnBoard", game: tab.game })}
           onMove={(move) => playMove(tab.game, move, change)}
+          onShapes={(shapes) => setShapes(tab.game, shapes, change)}
         />
       )}
     </div>

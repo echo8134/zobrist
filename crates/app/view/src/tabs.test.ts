@@ -8,6 +8,7 @@ import {
   openTab,
   playMove,
   type Shown,
+  setShapes,
 } from "./tabs";
 
 vi.mock("./ipc", () => ({ ask: vi.fn() }));
@@ -122,4 +123,36 @@ test("an answer without a picture changes no tab", async () => {
   await playMove(7, { from: "e2", to: "e4", promotion: null }, change);
 
   expect(shown()).toEqual(atStart);
+});
+
+test("all shapes of the board go to Rust, and the tab takes the picture of the answer", async () => {
+  const { change, shown } = tabState({
+    tabs: [
+      { game: 7, picture, bottomSide: "white" },
+      { game: 8, picture, bottomSide: "white" },
+    ],
+    page: "Home",
+    shownTab: 7,
+  });
+  const squares = [{ color: "green", square: "d4" }] as const;
+  const arrows = [{ color: "red", from: "d1", to: "h5" }] as const;
+  const withShapes = { ...picture, squares, arrows } as unknown as GamePicture;
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SetShapes",
+    picture: withShapes,
+  });
+
+  await setShapes(7, { squares: [...squares], arrows: [...arrows] }, change);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "SetShapes", game: 7, squares, arrows }],
+  ]);
+  expect(shown().tabs).toEqual([
+    { game: 7, picture: withShapes, bottomSide: "white" },
+    { game: 8, picture, bottomSide: "white" },
+  ]);
+
+  vi.mocked(ask).mockResolvedValueOnce({ type: "SetShapes", picture: null });
+  await setShapes(9, { squares: [], arrows: [] }, change);
+  expect(shown().tabs[0]?.picture).toBe(withShapes);
 });
