@@ -7,7 +7,7 @@ use std::{env, fs, io, process};
 use shakmaty::{Chess, Outcome};
 use zobrist_core::game::{Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{add_pgn_games, replace_pgn_game};
+use zobrist_store::{PgnGameRow, add_pgn_games, replace_pgn_game};
 
 const OLD_GAME: &[u8] = b"[White \"Old\"]\n\n1. e4 e5 1-0";
 const NEW_GAME: &[u8] = b"[White \"New\"]\n\n1. d4 d5 *";
@@ -110,6 +110,25 @@ fn adding_through_a_symbolic_link_preserves_it_and_updates_its_destination() -> 
     assert_eq!(fs::read_to_string(&destination)?, "*\n");
     assert_eq!(fs::read_link(&link)?, relative);
     fs::remove_dir_all(directory)
+}
+
+#[test]
+fn a_row_holds_the_number_and_five_values_each_in_one_field() -> io::Result<()> {
+    let game = game(
+        b"[White \"First\tLast\"]\n[Event \"two\\\nlines\"]\n[Result \"1-0\"]\n\n1. d4 1/2-1/2\n",
+    )?;
+    assert_eq!(
+        PgnGameRow::new(7, &game),
+        PgnGameRow {
+            number: 7,
+            white: "First Last".to_owned(),
+            black: "?".to_owned(),
+            result: "1/2-1/2".to_owned(),
+            date: "?".to_owned(),
+            event: "two\\ lines".to_owned(),
+        }
+    );
+    Ok(())
 }
 
 #[test]

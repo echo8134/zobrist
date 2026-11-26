@@ -50,7 +50,7 @@
 mod codec;
 mod pgn_file;
 
-pub use pgn_file::{add_pgn_games, replace_pgn_game};
+pub use pgn_file::{PgnGameRow, add_pgn_games, replace_pgn_game};
 
 use std::error::Error;
 use std::fmt;
