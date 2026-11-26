@@ -12,6 +12,11 @@ use shakmaty::{
 use ts_rs::TS;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
 use zobrist_core::game::{GameBuilder, MainLine, Move};
+use zobrist_core::shapes;
+
+mod drawing;
+use drawing::BoardShapes;
+pub use drawing::ShapeEdit;
 
 /// What the view can ask for.
 #[derive(Clone, Deserialize, TS)]
@@ -64,9 +69,11 @@ pub enum Request {
     SetComment {
         /// The number from the new-game answer.
         game: usize,
-        /// The comment text. Empty text removes it.
+        /// The new text. Empty text leaves just the shapes.
         text: String,
     },
+    /// Replace the colored squares and arrows at the current place.
+    SetShapes(#[ts(as = "drawing::ShapeEditFields")] ShapeEdit),
     /// Replace the symbol that annotates the current move.
     SetMoveSymbol {
         /// The number from the new-game answer.
@@ -316,6 +323,11 @@ pub enum Response {
         /// Absent when the game is no longer open.
         picture: Option<GamePicture>,
     },
+    /// The game after setting or refusing the shapes.
+    SetShapes {
+        /// Absent when the game is no longer open.
+        picture: Option<GamePicture>,
+    },
     /// The game after setting or refusing a move symbol.
     SetMoveSymbol {
         /// Absent when the game is no longer open.
@@ -367,6 +379,8 @@ pub struct GamePicture {
     legal_moves: Vec<LegalMove>,
     #[serde(flatten)]
     current: CurrentPlace,
+    #[serde(flatten)]
+    shapes: BoardShapes,
     can_undo: bool,
     can_redo: bool,
     start_comments: Vec<String>,
@@ -441,6 +455,14 @@ struct NotationMove {
     variations: Vec<Vec<Self>>,
 }
 
+fn comment_texts(comments: &[String]) -> Vec<String> {
+    comments
+        .iter()
+        .map(|comment| shapes::split(comment).0)
+        .filter(|text| !text.is_empty())
+        .collect()
+}
+
 impl NotationMove {
     fn from_step(
         placed: &PlacedStep<'_>,
@@ -476,13 +498,19 @@ impl NotationMove {
         }
         symbols.extend(position_symbols);
         symbols.extend(other_symbols);
+        // The first main-line move holds the comment for the starting position.
+        let comments_before = if place.0 == [0] {
+            comment_texts(node.comments_before())
+        } else {
+            node.comments_before().to_vec()
+        };
         Self {
             place: place.0,
             number: before.fullmoves().get(),
             side: before.turn().into(),
             text: placed.step().notation().to_string(),
-            comments_before: node.comments_before().to_vec(),
-            comments_after: node.comments_after().to_vec(),
+            comments_before,
+            comments_after: comment_texts(node.comments_after()),
             symbols,
             variations: placed
                 .variations()
@@ -539,10 +567,11 @@ impl GamePicture {
             in_check: position.is_check(),
             legal_moves,
             current,
+            shapes: BoardShapes::from(&editor.comment().1),
             can_undo: editor.can_undo(),
             can_redo: editor.can_redo(),
             start_comments: match editor.game().main_line() {
-                MainLine::Empty { comments } => comments.clone(),
+                MainLine::Empty { comments } => comment_texts(comments),
                 MainLine::Moves(_) => Vec::new(),
             },
             place: editor.place().0.clone(),
@@ -617,6 +646,9 @@ impl Games {
             Request::SetComment { game, text } => Response::SetComment {
                 picture: self.edit(game, |editor| editor.set_comment(&text)),
             },
+            Request::SetShapes(edit) => Response::SetShapes {
+                picture: self.edit(edit.game, |editor| editor.set_shapes(&edit.shapes)),
+            },
             Request::SetMoveSymbol { game, symbol } => Response::SetMoveSymbol {
                 picture: self.edit(game, |editor| {
                     editor.set_move_symbol(symbol.map(Into::into))
@@ -658,6 +690,58 @@ mod tests {
     use zobrist_core::pgn::{self, Entry};
 
     use super::*;
+
+    fn import(source: &[u8]) -> io::Result<GameEditor> {
+        let mut imported = None;
+        pgn::read_games(source, |entry| {
+            if let Entry::Game { game, problem, .. } = entry {
+                assert_eq!(problem, None);
+                imported = Some(GameEditor::new(*game));
+            }
+        })?;
+        Ok(imported.unwrap())
+    }
+
+    #[test]
+    fn imported_shapes_follow_their_place_and_leave_midgame_prefaces_intact() -> io::Result<()> {
+        let mut editor = import(b"{Start [%cal Rd1h5]} 1. e4 {Plan [%csl Gd4]} {more} {[%cal Ge2e4]} (1. d4 {[%csl Ba1]}) {Before [%csl Yb2]} e5 *")?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        assert_eq!(
+            picture["arrows"],
+            json!([{ "color": "red", "from": "d1", "to": "h5" }])
+        );
+        assert_eq!(picture["squares"], json!([]));
+        let notation = &picture["notation"];
+        assert_eq!(notation[0]["commentsBefore"], json!(["Start"]));
+        assert_eq!(notation[0]["commentsAfter"], json!(["Plan", "more"]));
+        assert_eq!(notation[0]["variations"][0][0]["commentsAfter"], json!([]));
+        assert_eq!(notation[1]["commentsBefore"], json!(["Before [%csl Yb2]"]));
+
+        editor.go_to(Place(vec![1])).unwrap();
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        assert_eq!(
+            picture["squares"],
+            json!([{ "color": "blue", "square": "a1" }])
+        );
+        assert_eq!(picture["arrows"], json!([]));
+        Ok(())
+    }
+
+    #[test]
+    fn the_empty_game_shows_only_text_in_its_start_comments() -> io::Result<()> {
+        let editor = import(b"{[%csl Gd4]} {Plan [%cal Ge2e4]} {[%clk 0:15]} *")?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        assert_eq!(picture["startComments"], json!(["Plan", "[%clk 0:15]"]));
+        assert_eq!(
+            picture["squares"],
+            json!([{ "color": "green", "square": "d4" }])
+        );
+        assert_eq!(
+            picture["arrows"],
+            json!([{ "color": "green", "from": "e2", "to": "e4" }])
+        );
+        Ok(())
+    }
 
     #[test]
     fn pictures_keep_imported_tag_order_and_read_the_result_from_the_marker() -> io::Result<()> {

@@ -36,6 +36,10 @@ picture: GamePicture | null, } | { "type": "SetComment",
 /**
  * Absent when the game is no longer open.
  */
+picture: GamePicture | null, } | { "type": "SetShapes", 
+/**
+ * Absent when the game is no longer open.
+ */
 picture: GamePicture | null, } | { "type": "SetMoveSymbol", 
 /**
  * Absent when the game is no longer open.
