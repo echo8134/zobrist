@@ -51,8 +51,18 @@ describe("the window", () => {
     await expect(heading()).toHaveText("Home");
     expect(
       await browser.$$("nav button").map((button) => button.getText()),
-    ).toEqual(["Home", "Files", "Databases", "Engines", "Settings"]);
+    ).toEqual([
+      "Home",
+      "Files",
+      "Databases",
+      "Events",
+      "Engines",
+      "User",
+      "Settings",
+    ]);
     expect(await entryNamesAreDisplayed()).toEqual([
+      true,
+      true,
       true,
       true,
       true,
@@ -86,12 +96,25 @@ describe("the window", () => {
     });
   });
 
-  for (const name of ["Files", "Databases", "Engines", "Settings", "Home"]) {
+  for (const name of [
+    "Files",
+    "Databases",
+    "Events",
+    "Engines",
+    "User",
+    "Settings",
+    "Home",
+  ]) {
     it(`shows the page ${name} after a click on its entry`, async () => {
       await entry(name).click();
 
       await expect(heading()).toHaveText(name);
       expect(await currentEntries()).toEqual([name]);
+
+      if (name === "Events" || name === "User") {
+        await expect(browser.$("main")).toHaveText(name);
+        expect(await browser.$$("main > *").length).toBe(1);
+      }
     });
   }
 
@@ -109,8 +132,18 @@ describe("the window", () => {
     await expect(browser.$("header")).toHaveText("");
     expect(
       await browser.$$("nav button").map((button) => button.getComputedLabel()),
-    ).toEqual(["Home", "Files", "Databases", "Engines", "Settings"]);
+    ).toEqual([
+      "Home",
+      "Files",
+      "Databases",
+      "Events",
+      "Engines",
+      "User",
+      "Settings",
+    ]);
     expect(await entryNamesAreDisplayed()).toEqual([
+      false,
+      false,
       false,
       false,
       false,
@@ -121,11 +154,13 @@ describe("the window", () => {
     expect(await currentEntries()).toEqual(["Settings"]);
   });
 
-  it("shows a page after a click on its icon in the collapsed bar", async () => {
-    await entry("Databases").click();
+  it("shows pages after clicks on their icons in the collapsed bar", async () => {
+    for (const name of ["Databases", "User", "Events"]) {
+      await entry(name).click();
 
-    await expect(heading()).toHaveText("Databases");
-    expect(await currentEntries()).toEqual(["Databases"]);
+      await expect(heading()).toHaveText(name);
+      expect(await currentEntries()).toEqual([name]);
+    }
 
     expect(await screenshot("collapsed")).toEqual({ width: 1280, height: 800 });
   });
@@ -140,8 +175,10 @@ describe("the window", () => {
       true,
       true,
       true,
+      true,
+      true,
     ]);
     expect(await browser.$("nav").getSize("width")).toBe(208);
-    expect(await currentEntries()).toEqual(["Databases"]);
+    expect(await currentEntries()).toEqual(["Events"]);
   });
 });
