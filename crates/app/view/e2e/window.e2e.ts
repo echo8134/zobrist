@@ -19,11 +19,16 @@ if (version === undefined) {
   throw new Error("[workspace.package] of the root manifest sets no version");
 }
 
-const entry = (name: string) => browser.$("nav").$(`button=${name}`);
+// An entry and the toggle are found by the name that assistive technology reads, because a
+// collapsed entry shows no text.
+const toggle = (name: string) => browser.$("header").$(`aria/${name}`);
+const entry = (name: string) => browser.$("nav").$(`aria/${name}`);
+const entryNamesAreDisplayed = () =>
+  browser.$$("nav button span").map((name) => name.isDisplayed());
 const currentEntries = () =>
   browser
     .$$('nav button[aria-current="page"]')
-    .map((button) => button.getText());
+    .map((button) => button.getComputedLabel());
 const heading = () => browser.$("main").$("h1");
 
 /** Saves a picture of the window and returns its size in pixels. */
@@ -47,6 +52,13 @@ describe("the window", () => {
     expect(
       await browser.$$("nav button").map((button) => button.getText()),
     ).toEqual(["Home", "Files", "Databases", "Engines", "Settings"]);
+    expect(await entryNamesAreDisplayed()).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
     expect(await currentEntries()).toEqual(["Home"]);
 
     expect(await screenshot("home")).toEqual({ width: 1280, height: 800 });
@@ -89,5 +101,47 @@ describe("the window", () => {
     await expect(browser.$("main").$("p")).toHaveText(`zobrist ${version}`);
 
     expect(await screenshot("settings")).toEqual({ width: 1280, height: 800 });
+  });
+
+  it("collapses the icon bar to a strip of icons", async () => {
+    await toggle("Collapse the icon bar").click();
+
+    await expect(browser.$("header")).toHaveText("");
+    expect(
+      await browser.$$("nav button").map((button) => button.getComputedLabel()),
+    ).toEqual(["Home", "Files", "Databases", "Engines", "Settings"]);
+    expect(await entryNamesAreDisplayed()).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(await browser.$("nav").getSize("width")).toBe(48);
+    expect(await currentEntries()).toEqual(["Settings"]);
+  });
+
+  it("shows a page after a click on its icon in the collapsed bar", async () => {
+    await entry("Databases").click();
+
+    await expect(heading()).toHaveText("Databases");
+    expect(await currentEntries()).toEqual(["Databases"]);
+
+    expect(await screenshot("collapsed")).toEqual({ width: 1280, height: 800 });
+  });
+
+  it("opens the icon bar again and keeps the current page", async () => {
+    await toggle("Open the icon bar").click();
+
+    await expect(browser.$("header")).toHaveText("zobrist");
+    expect(await entryNamesAreDisplayed()).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(await browser.$("nav").getSize("width")).toBe(208);
+    expect(await currentEntries()).toEqual(["Databases"]);
   });
 });
