@@ -9,7 +9,7 @@ import {
 import styles from "./IconBar.module.css";
 import { lowerPages, type Page, upperPages } from "./PageArea";
 
-const { iconBar, group, entry } = styles;
+const { iconBar, collapsed, group, entry, name } = styles;
 
 const icons: Record<Page, LucideIcon> = {
   Home: House,
@@ -20,11 +20,12 @@ const icons: Record<Page, LucideIcon> = {
 };
 
 type Props = {
+  open: boolean;
   currentPage: Page;
   onChoose: (page: Page) => void;
 };
 
-export function IconBar({ currentPage, onChoose }: Props) {
+export function IconBar({ open, currentPage, onChoose }: Props) {
   const entries = (pages: readonly Page[]) => (
     <div className={group}>
       {pages.map((page) => {
@@ -34,18 +35,19 @@ export function IconBar({ currentPage, onChoose }: Props) {
             key={page}
             type="button"
             className={entry}
+            aria-label={page}
             aria-current={page === currentPage ? "page" : undefined}
             onClick={() => onChoose(page)}
           >
             <Icon />
-            {page}
+            <span className={name}>{page}</span>
           </button>
         );
       })}
     </div>
   );
   return (
-    <nav className={iconBar}>
+    <nav className={open ? iconBar : `${iconBar} ${collapsed}`}>
       {entries(upperPages)}
       {entries(lowerPages)}
     </nav>

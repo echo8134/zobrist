@@ -9,8 +9,16 @@
   --top-bar-height: 40px;
   --top-bar-background-color: #f6f6f6;
   --top-bar-line-color: #e2e2e2;
+  --top-bar-padding: 8px;
+  --top-bar-gap: 8px;
   --top-bar-name-weight: 600;
-  --top-bar-name-offset: 17px;
+
+  --toggle-width: 32px;
+  --toggle-height: 28px;
+  --toggle-corner-radius: 4px;
+  --toggle-color: #555555;
+  --toggle-icon-size: 16px;
+  --toggle-icon-stroke: 1.6;
 
   --icon-bar-width: 208px;
   --icon-bar-padding: 10px 8px;
@@ -26,6 +34,12 @@
   --entry-icon-stroke: 1.6;
   --current-entry-background-color: #efefef;
   --current-entry-color: #222222;
+
+  --collapsed-icon-bar-width: 48px;
+  /* With the line at the right, an entry has 7 px at both sides, so its middle is the middle of
+     the toggle above it. */
+  --collapsed-icon-bar-padding: 10px 6px 10px 7px;
+  --collapsed-entry-size: 34px;
 
   --area-padding: 26px 40px 32px 32px;
   --heading-size: 18px;
