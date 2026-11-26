@@ -1,10 +1,12 @@
 import {
+  Calendar,
   Cpu,
   Database,
   Folder,
   House,
   type LucideIcon,
   Settings,
+  User,
 } from "lucide-react";
 import styles from "./IconBar.module.css";
 import { lowerPages, type Page, upperPages } from "./PageArea";
@@ -15,7 +17,9 @@ const icons: Record<Page, LucideIcon> = {
   Home: House,
   Files: Folder,
   Databases: Database,
+  Events: Calendar,
   Engines: Cpu,
+  User,
   Settings,
 };
 

@@ -5,9 +5,15 @@ import styles from "./PageArea.module.css";
 const { area, heading, versionLine } = styles;
 
 /** The pages in the order of their entries in the icon bar. */
-export const upperPages = ["Home", "Files", "Databases", "Engines"] as const;
+export const upperPages = [
+  "Home",
+  "Files",
+  "Databases",
+  "Events",
+  "Engines",
+] as const;
 /** The pages whose entries stand at the bottom of the icon bar. */
-export const lowerPages = ["Settings"] as const;
+export const lowerPages = ["User", "Settings"] as const;
 
 export type Page = (typeof upperPages)[number] | (typeof lowerPages)[number];
 
@@ -21,7 +27,9 @@ const contents: Record<Page, ReactNode> = {
   Home: null,
   Files: null,
   Databases: null,
+  Events: null,
   Engines: null,
+  User: null,
   Settings: (
     <Suspense>
       <VersionLine />
