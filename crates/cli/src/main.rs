@@ -3,13 +3,14 @@
 use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Seek, Write};
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::process::{self, ExitCode};
 
 use clap::{Parser, Subcommand};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{Database, DatabaseWriter, add_pgn_games};
+use zobrist_store::{Database, DatabaseWriter, add_pgn_games, replace_pgn_game};
 
 /// A personal chess database.
 #[derive(Parser)]
@@ -57,6 +58,15 @@ enum PgnCommand {
         /// The PGN file to read.
         source: PathBuf,
     },
+    /// Replace one game of a target PGN file with the one game of a source PGN file.
+    Replace {
+        /// The PGN file to change.
+        target: PathBuf,
+        /// The number of the game to replace, as `list` prints it.
+        number: NonZeroU64,
+        /// The PGN file that holds the new game.
+        source: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -90,6 +100,8 @@ enum Failure {
     Read(io::Error),
     Create(PathBuf, io::Error),
     Add(PathBuf, io::Error),
+    Replace(PathBuf, io::Error),
+    Source(String),
     Diagnostic(io::Error),
     Write(io::Error),
 }
@@ -108,6 +120,11 @@ fn main() -> ExitCode {
             PgnCommand::Write { file } => exit_code(&file, write_games(&file)),
             PgnCommand::List { file } => exit_code(&file, list_games(&file)),
             PgnCommand::Add { target, source } => exit_code(&source, add_games(&target, &source)),
+            PgnCommand::Replace {
+                target,
+                number,
+                source,
+            } => exit_code(&source, replace_game(&target, number, &source)),
         },
         Command::Database { command } => match command {
             DatabaseCommand::Create { pgn, database } => exit_code(&pgn, create(&pgn, &database)),
@@ -147,6 +164,24 @@ fn exit_code(path: &Path, result: Result<usize, Failure>) -> ExitCode {
                 io::stderr(),
                 "zobrist: cannot add games to {}: {error}",
                 target.display()
+            )
+            .ok();
+            ExitCode::from(2)
+        }
+        Err(Failure::Replace(target, error)) => {
+            writeln!(
+                io::stderr(),
+                "zobrist: cannot replace a game of {}: {error}",
+                target.display()
+            )
+            .ok();
+            ExitCode::from(2)
+        }
+        Err(Failure::Source(reason)) => {
+            writeln!(
+                io::stderr(),
+                "zobrist: cannot replace a game with {}: {reason}",
+                path.display()
             )
             .ok();
             ExitCode::from(2)
@@ -329,6 +364,31 @@ fn add_games(target: &Path, source: &Path) -> Result<usize, Failure> {
     })?;
     writeln!(io::stdout().lock(), "games added: {added}").map_err(Failure::Write)?;
     Ok(problems)
+}
+
+fn replace_game(target: &Path, number: NonZeroU64, source: &Path) -> Result<usize, Failure> {
+    let file = File::open(source).map_err(Failure::Read)?;
+    let mut games = 0_u64;
+    let mut first = None;
+    let problems = for_each_game(file, |game| {
+        games += 1;
+        first.get_or_insert_with(|| game.clone());
+        Ok(())
+    })?;
+    let game = match (first, games, problems) {
+        (Some(game), 1, 0) => game,
+        (None, ..) => return Err(Failure::Source("it holds no game".to_owned())),
+        (Some(_), 1, _) => return Err(Failure::Source("it has a problem".to_owned())),
+        (Some(_), ..) => {
+            return Err(Failure::Source(format!(
+                "it holds {games} games, and a replacement is one game"
+            )));
+        }
+    };
+    replace_pgn_game(target, number, &game)
+        .map_err(|error| Failure::Replace(target.to_owned(), error))?;
+    writeln!(io::stdout().lock(), "game replaced: {number}").map_err(Failure::Write)?;
+    Ok(0)
 }
 
 fn create(source: &Path, database: &Path) -> Result<usize, Failure> {
