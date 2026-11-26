@@ -4,7 +4,10 @@ use std::mem;
 
 use shakmaty::{Chess, Color, Position, Role, Square};
 
-use crate::game::{Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps};
+use crate::game::{
+    AnnotationSymbol, Game, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step, Steps,
+};
+use crate::pgn::validate_comment;
 
 /// Each choice plays one move from the start of the game. An empty place is the start.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -105,6 +108,89 @@ pub enum EditVariationError {
     NoVariation,
     /// Demoting the outer line would exceed [`MAX_VARIATION_DEPTH`].
     TooDeep,
+}
+
+/// A judgement of a move, numbered by its PGN annotation glyph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MoveSymbol {
+    /// A good move (`!`).
+    Good = 1,
+    /// A mistake (`?`).
+    Mistake = 2,
+    /// A brilliant move (`!!`).
+    Brilliant = 3,
+    /// A blunder (`??`).
+    Blunder = 4,
+    /// An interesting move (`!?`).
+    Interesting = 5,
+    /// A dubious move (`?!`).
+    Dubious = 6,
+}
+
+impl MoveSymbol {
+    /// The move judgement represented by this glyph, if any.
+    #[must_use]
+    pub fn from_glyph(glyph: AnnotationSymbol) -> Option<Self> {
+        match glyph.0 {
+            1 => Some(Self::Good),
+            2 => Some(Self::Mistake),
+            3 => Some(Self::Brilliant),
+            4 => Some(Self::Blunder),
+            5 => Some(Self::Interesting),
+            6 => Some(Self::Dubious),
+            _ => None,
+        }
+    }
+}
+
+/// An assessment of a position, numbered by its PGN annotation glyph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PositionSymbol {
+    /// An equal position.
+    Equal = 10,
+    /// An unclear position.
+    Unclear = 13,
+    /// White has a slight advantage.
+    WhiteSlight = 14,
+    /// Black has a slight advantage.
+    BlackSlight = 15,
+    /// White has a clear advantage.
+    WhiteClear = 16,
+    /// Black has a clear advantage.
+    BlackClear = 17,
+    /// White has a decisive advantage.
+    WhiteDecisive = 18,
+    /// Black has a decisive advantage.
+    BlackDecisive = 19,
+}
+
+impl PositionSymbol {
+    /// The position assessment represented by this glyph, if any.
+    #[must_use]
+    pub fn from_glyph(glyph: AnnotationSymbol) -> Option<Self> {
+        match glyph.0 {
+            10 => Some(Self::Equal),
+            13 => Some(Self::Unclear),
+            14 => Some(Self::WhiteSlight),
+            15 => Some(Self::BlackSlight),
+            16 => Some(Self::WhiteClear),
+            17 => Some(Self::BlackClear),
+            18 => Some(Self::WhiteDecisive),
+            19 => Some(Self::BlackDecisive),
+            _ => None,
+        }
+    }
+}
+
+/// Why the editor refused to change a comment or symbol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnnotationError {
+    /// There is no move to annotate at the start of the game.
+    NoMove,
+    /// The trimmed comment cannot be written as PGN.
+    InvalidComment,
 }
 
 /// Owns a game and a current place in it.
@@ -241,6 +327,65 @@ impl GameEditor {
         self.place.0.push(choice);
         self.position.play_unchecked(chess_move);
         Ok(())
+    }
+
+    /// Replaces the comments at the current place with the trimmed text. Empty text clears them.
+    pub fn set_comment(&mut self, text: &str) -> Result<(), AnnotationError> {
+        let text = text.trim();
+        validate_comment(text).map_err(|_| AnnotationError::InvalidComment)?;
+        let comments = if self.place.0.is_empty() {
+            match &mut self.game.main_line {
+                MainLine::Empty { comments } => comments,
+                MainLine::Moves(line) => &mut line.first.comments_before,
+            }
+        } else {
+            &mut self.current_node()?.comments_after
+        };
+        comments.clear();
+        if !text.is_empty() {
+            comments.push(text.to_owned());
+        }
+        Ok(())
+    }
+
+    /// Replaces all move judgements at the current move, keeping the other glyphs in order.
+    pub fn set_move_symbol(&mut self, symbol: Option<MoveSymbol>) -> Result<(), AnnotationError> {
+        let glyphs = &mut self.current_node()?.annotation_symbols;
+        glyphs.retain(|&glyph| MoveSymbol::from_glyph(glyph).is_none());
+        if let Some(symbol) = symbol {
+            glyphs.insert(0, AnnotationSymbol(symbol as u8));
+        }
+        Ok(())
+    }
+
+    /// Replaces all position assessments at the current move, keeping the other glyphs in order.
+    pub fn set_position_symbol(
+        &mut self,
+        symbol: Option<PositionSymbol>,
+    ) -> Result<(), AnnotationError> {
+        let glyphs = &mut self.current_node()?.annotation_symbols;
+        glyphs.retain(|&glyph| PositionSymbol::from_glyph(glyph).is_none());
+        if let Some(symbol) = symbol {
+            let after_moves = glyphs
+                .iter()
+                .rposition(|&glyph| MoveSymbol::from_glyph(glyph).is_some())
+                .map_or(0, |last_move| last_move + 1);
+            glyphs.insert(after_moves, AnnotationSymbol(symbol as u8));
+        }
+        Ok(())
+    }
+
+    fn current_node(&mut self) -> Result<&mut Node, AnnotationError> {
+        let MainLine::Moves(line) = &mut self.game.main_line else {
+            return Err(AnnotationError::NoMove);
+        };
+        let next = Continuation::at(line, &self.place.0, |_| {})
+            .map_err(|NoSuchPlace| AnnotationError::NoMove)?;
+        let index = next.index.checked_sub(1).ok_or(AnnotationError::NoMove)?;
+        next.line
+            .nodes_mut()
+            .nth(index)
+            .ok_or(AnnotationError::NoMove)
     }
 
     /// Promotes the current variation one level and stays on the same move.

@@ -22,8 +22,7 @@ pub struct Tag {
 /// The most variations that can be open inside each other. No [`Game`] exceeds it.
 pub const MAX_VARIATION_DEPTH: usize = 255;
 
-/// A numeric annotation glyph: 1 is `!`, 2 is `?`, 3 is `!!`, 4 is `??`, 5 is `!?`, 6 is `?!`,
-/// and every other value is written `$n`.
+/// A numeric annotation glyph as stored in PGN, such as `$1` for a good move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AnnotationSymbol(pub u8);
 
@@ -80,9 +79,9 @@ pub struct Line {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     played: Played,
-    annotation_symbols: Vec<AnnotationSymbol>,
-    comments_before: Vec<String>,
-    comments_after: Vec<String>,
+    pub(super) annotation_symbols: Vec<AnnotationSymbol>,
+    pub(super) comments_before: Vec<String>,
+    pub(super) comments_after: Vec<String>,
     pub(super) variations: Vec<Line>,
 }
 

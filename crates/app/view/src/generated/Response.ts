@@ -24,4 +24,16 @@ picture: GamePicture | null, } | { "type": "GoTo",
 /**
  * Absent when the game is no longer open.
  */
+picture: GamePicture | null, } | { "type": "SetComment", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "SetMoveSymbol", 
+/**
+ * Absent when the game is no longer open.
+ */
+picture: GamePicture | null, } | { "type": "SetPositionSymbol", 
+/**
+ * Absent when the game is no longer open.
+ */
 picture: GamePicture | null, } | { "type": "CloseGame" };

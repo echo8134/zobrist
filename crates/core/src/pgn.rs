@@ -166,19 +166,19 @@ fn write_comments(
     after: &str,
 ) -> io::Result<()> {
     for comment in comments {
-        if comment.contains('}') || comment.trim() != comment || comment.contains(MARKED_TAG_LINE) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "PGN comment cannot be read back unchanged",
-            ));
-        }
-        if comment.len() > MAX_COMMENT_LENGTH {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "PGN comment exceeds 1 MiB in UTF-8",
-            ));
-        }
+        validate_comment(comment)
+            .map_err(|reason| io::Error::new(io::ErrorKind::InvalidData, reason))?;
         write!(output, "{before}{{{comment}}}{after}")?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_comment(comment: &str) -> Result<(), &'static str> {
+    if comment.contains('}') || comment.trim() != comment || comment.contains(MARKED_TAG_LINE) {
+        return Err("PGN comment cannot be read back unchanged");
+    }
+    if comment.len() > MAX_COMMENT_LENGTH {
+        return Err("PGN comment exceeds 1 MiB in UTF-8");
     }
     Ok(())
 }
