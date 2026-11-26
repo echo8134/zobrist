@@ -1,13 +1,22 @@
 .board {
+  position: relative;
   width: 100%;
   aspect-ratio: 1;
+}
+
+.ground {
+  width: 100%;
+  height: 100%;
+  /* The pieces have a place in the order of layers. This keeps that order inside the board, so
+     the promotion chooser lies over a piece. */
+  isolation: isolate;
 }
 
 /* The stylesheet of the board component places the coordinates for a layout that zobrist does
    not have, and they leave their squares on a small board. The class of the component in each
    selector lets these rules win over its own rules. */
-.board:global(.cg-wrap) :global(.ranks),
-.board:global(.cg-wrap) :global(.files) {
+.ground:global(.cg-wrap) :global(.ranks),
+.ground:global(.cg-wrap) :global(.files) {
   inset: 0;
   width: auto;
   height: auto;
@@ -17,14 +26,14 @@
   text-transform: none;
 }
 
-.board:global(.cg-wrap) :global(.ranks) > *,
-.board:global(.cg-wrap) :global(.files) > * {
+.ground:global(.cg-wrap) :global(.ranks) > *,
+.ground:global(.cg-wrap) :global(.files) > * {
   flex: 1 1 0;
   padding: var(--coordinate-padding);
   transform: none;
 }
 
-.board:global(.cg-wrap) :global(.files) > * {
+.ground:global(.cg-wrap) :global(.files) > * {
   display: flex;
   align-items: flex-end;
 }

@@ -78,6 +78,17 @@
   --notation-area-width: 320px;
   --notation-area-line-color: #e6e6e6;
   --notation-area-background-color: #ffffff;
+  --notation-area-padding: 20px 16px 16px;
+
+  --move-gap: 2px;
+  --move-line-height: 24px;
+  --move-padding: 1px 4px;
+  --move-corner-radius: 4px;
+  --move-number-color: #6b6b6b;
+  --current-move-background-color: #efefef;
+
+  --promotion-chooser-line-color: #e2e2e2;
+  --promotion-chooser-background-color: #ffffff;
 
   --path-row-gap-above: 16px;
   --path-row-gap: 8px;
