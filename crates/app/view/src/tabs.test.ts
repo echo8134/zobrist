@@ -5,15 +5,11 @@ import { apply, type Change, closeTab, openTab, type Shown } from "./tabs";
 
 vi.mock("./ipc", () => ({ ask: vi.fn() }));
 
-const picture: GamePicture = {
+// The tab state hands a picture on and reads none of its fields. With one field here, a new
+// field of the picture in Rust does not break this test.
+const picture = {
   fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-  turn: "white",
-  inCheck: false,
-  legalMoves: [],
-  lastMove: null,
-  place: [],
-  notation: [],
-};
+} as GamePicture;
 
 test("a tab opens with the game that Rust answered and closes that game with itself", async () => {
   let shown: Shown = { tabs: [], page: "Home", shownTab: undefined };
