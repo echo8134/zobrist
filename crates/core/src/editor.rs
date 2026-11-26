@@ -623,7 +623,7 @@ mod tests {
     fn walk_games(source: &[u8]) -> io::Result<Vec<Vec<WalkedMove>>> {
         let mut games = Vec::new();
         pgn::read_games(source, |entry| {
-            if let Entry::Game { game, problem } = entry {
+            if let Entry::Game { game, problem, .. } = entry {
                 assert_eq!(problem, None);
                 let mut follower = GameEditor::new((*game).clone());
                 let editor = GameEditor::new(*game);
