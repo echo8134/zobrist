@@ -159,10 +159,28 @@ async function playMoves(moves: string, bottomSide: BottomSide = "white") {
   }
 }
 
+const readNotation = `
+  const notationText = (currentInBrackets) => {
+    const texts = document.createTreeWalker(document.querySelector("main aside"), NodeFilter.SHOW_TEXT);
+    const parts = [];
+    while (texts.nextNode()) {
+      const text = texts.currentNode.textContent;
+      const isCurrent = texts.currentNode.parentElement.hasAttribute("aria-current");
+      parts.push(currentInBrackets && isCurrent ? "[" + text + "]" : text);
+    }
+    return parts.join(" ").replaceAll("( ", "(").replaceAll(" )", ")");
+  };
+`;
+const markedNotation = () =>
+  browser.execute(`${readNotation} return notationText(true);`);
+const moveInNotation = (name: string) =>
+  browser.$("main aside").$(`aria/${name}`);
+
 // A mark of the board counts only while it is drawn, because the board component keeps the
 // element of a mark that is gone.
 const game = (squares: string, bottomSide: BottomSide = "white") =>
   browser.execute(`
+    ${readNotation}
     const board = document.querySelector("main cg-board").getBoundingClientRect();
     const squareOf = (element) => {
       const { x, y } = element.getBoundingClientRect();
@@ -187,16 +205,16 @@ const game = (squares: string, bottomSide: BottomSide = "white") =>
         .map(squareOf)
         .sort()
         .join(" ");
-    const texts = (selector) =>
-      [...document.querySelectorAll(selector)].map((element) => element.textContent);
     return {
       pieces,
       lastMove: marked("last-move"),
       targets: marked("move-dest"),
       selected: marked("selected"),
       check: marked("check"),
-      notation: texts("main aside li span").join(" "),
-      currentMoves: texts("main aside [aria-current]"),
+      notation: notationText(false),
+      currentMoves: [...document.querySelectorAll("main aside [aria-current]")].map(
+        (move) => move.textContent,
+      ),
     };
   `);
 
@@ -886,4 +904,252 @@ describe("the window", () => {
       height: 672,
     });
   }).timeout(60_000);
+
+  it("goes to a move after a click on it in the notation", async () => {
+    await openTabAndWait();
+    await playMoves("e2e4 e7e5 g1f3");
+
+    expect(await moveInNotation("e4").getComputedRole()).toBe("button");
+    await moveInNotation("e4").click();
+
+    await expectSoon(() => game("e2 e4 e7 e5 g1 f3"), {
+      pieces: { e2: ".", e4: "P", e7: "p", e5: ".", g1: "N", f3: "." },
+      lastMove: "e2 e4",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3",
+      currentMoves: ["e4"],
+    });
+  });
+
+  it("walks through the game with the arrow keys, Home, and End", async () => {
+    const atTheStart = {
+      pieces: { e2: "P", e4: ".", e7: "p", e5: ".", g1: "N", f3: "." },
+      lastMove: "",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3",
+      currentMoves: [],
+    };
+    const afterTheLastMove = {
+      pieces: { e2: ".", e4: "P", e7: ".", e5: "p", g1: ".", f3: "N" },
+      lastMove: "f3 g1",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3",
+      currentMoves: ["Nf3"],
+    };
+
+    await browser.keys("ArrowRight");
+
+    await expectSoon(() => game("e2 e4 e7 e5 g1 f3"), {
+      pieces: { e2: ".", e4: "P", e7: ".", e5: "p", g1: "N", f3: "." },
+      lastMove: "e5 e7",
+      targets: "",
+      selected: "",
+      check: "",
+      notation: "1. e4 e5 2. Nf3",
+      currentMoves: ["e5"],
+    });
+
+    await browser.keys("ArrowLeft");
+    await expectSoon(markedNotation, "1. [e4] e5 2. Nf3");
+    await browser.keys("ArrowLeft");
+
+    await expectSoon(() => game("e2 e4 e7 e5 g1 f3"), atTheStart);
+
+    await browser.keys("ArrowLeft");
+    await browser.keys("End");
+
+    await expectSoon(() => game("e2 e4 e7 e5 g1 f3"), afterTheLastMove);
+
+    await browser.keys("ArrowRight");
+    await browser.keys("ArrowLeft");
+
+    await expectSoon(markedNotation, "1. e4 [e5] 2. Nf3");
+
+    await browser.keys("Home");
+
+    await expectSoon(() => game("e2 e4 e7 e5 g1 f3"), atTheStart);
+  });
+
+  it("starts a variation with a move in the middle of the game", async () => {
+    await moveInNotation("e4").click();
+    await expectSoon(markedNotation, "1. [e4] e5 2. Nf3");
+
+    await playMoves("c7c5");
+
+    await expectSoon(markedNotation, "1. e4 e5 (1... [c5]) 2. Nf3");
+
+    await playMoves("b1c3");
+
+    await expectSoon(markedNotation, "1. e4 e5 (1... c5 2. [Nc3]) 2. Nf3");
+  });
+
+  it("starts a variation inside a variation", async () => {
+    await browser.keys("ArrowLeft");
+    await expectSoon(markedNotation, "1. e4 e5 (1... [c5] 2. Nc3) 2. Nf3");
+
+    await playMoves("g1f3");
+
+    await expectSoon(
+      markedNotation,
+      "1. e4 e5 (1... c5 2. Nc3 (2. [Nf3])) 2. Nf3",
+    );
+    await expect(
+      browser.$$("main cg-board piece.anim"),
+    ).toBeElementsArrayOfSize(0);
+    expect(await screenshot("variations")).toEqual({
+      width: 1280,
+      height: 800,
+    });
+
+    await browser.keys("End");
+    await browser.keys("ArrowLeft");
+
+    await expectSoon(
+      markedNotation,
+      "1. e4 e5 (1... [c5] 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+  });
+
+  it("writes a variation of the main line on a line of its own", async () => {
+    expect(
+      await browser.execute(`
+        const notation = document.querySelector("main aside ol").getBoundingClientRect();
+        const variation = document.querySelector("main aside ol > li > span + span");
+        const innerVariation = variation.querySelector("span + span");
+        const isOnTheLineOfItsMove = (written) => {
+          const { y } = written.getBoundingClientRect();
+          const move = written.previousElementSibling.getBoundingClientRect();
+          return y >= move.y && y < move.y + move.height;
+        };
+        return {
+          fromLeft: variation.getBoundingClientRect().x - notation.x,
+          isOnTheLineOfItsMove: isOnTheLineOfItsMove(variation),
+          innerVariationIsOnTheLineOfItsMove: isOnTheLineOfItsMove(innerVariation),
+        };
+      `),
+    ).toEqual({
+      fromLeft: 16,
+      isOnTheLineOfItsMove: false,
+      innerVariationIsOnTheLineOfItsMove: true,
+    });
+  });
+
+  it("goes to a move that the game has when that move is played again", async () => {
+    await moveInNotation("e4").click();
+    await expectSoon(
+      markedNotation,
+      "1. [e4] e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+
+    await clickSquare("e7");
+    await clickSquare("e5");
+
+    await expectSoon(
+      markedNotation,
+      "1. e4 [e5] (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+  });
+
+  it("starts a variation of the first move", async () => {
+    await browser.keys("Home");
+    await expectSoon(
+      markedNotation,
+      "1. e4 e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+
+    await playMoves("d2d4");
+
+    await expectSoon(
+      markedNotation,
+      "1. e4 (1. [d4]) 1... e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+  });
+
+  it("takes the keys only while its tab is shown", async () => {
+    await entry("Files").click();
+    await browser.keys("ArrowLeft");
+    await tab(6).click();
+
+    await expectSoon(
+      markedNotation,
+      "1. e4 (1. [d4]) 1... e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+
+    await browser.keys("ArrowLeft");
+
+    await expectSoon(
+      markedNotation,
+      "1. e4 (1. d4) 1... e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+  });
+
+  it("leaves the keys to a field for text that has the focus", async () => {
+    await browser.keys("Home");
+    await expectSoon(
+      markedNotation,
+      "1. e4 (1. d4) 1... e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+    await browser.execute(`
+      const field = document.createElement("input");
+      document.body.append(field);
+      field.focus();
+    `);
+
+    await browser.keys("End");
+
+    await browser.execute(`document.querySelector("body > input").remove();`);
+    await browser.keys("ArrowRight");
+
+    await expectSoon(
+      markedNotation,
+      "1. [e4] (1. d4) 1... e5 (1... c5 2. Nc3 (2. Nf3)) 2. Nf3",
+    );
+  });
+
+  it("drops a waiting promotion when the game goes to another move", async () => {
+    await tab(3).click();
+    await browser.keys("ArrowLeft");
+    await expectSoon(
+      markedNotation,
+      "1. h4 g5 2. hxg5 h6 3. gxh6 a6 4. h7 [a5] 5. hxg8=N",
+    );
+    await dragPiece("h7", "g8", "black");
+    await expect(browser.$("main fieldset")).toBeDisplayed();
+
+    await browser.keys("ArrowLeft");
+
+    await expect(browser.$("main fieldset")).not.toBeExisting();
+    await expectSoon(
+      markedNotation,
+      "1. h4 g5 2. hxg5 h6 3. gxh6 a6 4. [h7] a5 5. hxg8=N",
+    );
+  });
+
+  it("starts a key from the move that the key before it reached, also in the same moment", async () => {
+    // The second key comes at once when the notation marks the move of the first key.
+    await browser.execute(`
+      const pressLeftArrow = () =>
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+      new MutationObserver((changes, observer) => {
+        observer.disconnect();
+        pressLeftArrow();
+      }).observe(document.querySelector("main aside"), {
+        attributes: true,
+        subtree: true,
+        attributeFilter: ["aria-current"],
+      });
+      pressLeftArrow();
+    `);
+
+    await expectSoon(
+      markedNotation,
+      "1. h4 g5 2. hxg5 h6 3. [gxh6] a6 4. h7 a5 5. hxg8=N",
+    );
+  });
 });
