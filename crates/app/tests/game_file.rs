@@ -429,6 +429,29 @@ fn saving_a_game_of_a_file_as_a_new_game_moves_it_to_the_new_place() -> io::Resu
     Ok(())
 }
 
+#[test]
+fn refuses_to_add_a_game_behind_a_comment_that_is_still_open() -> io::Result<()> {
+    let open = folder("save-as-open")?.join("open.pgn");
+    let old: &[u8] = b"1. d4 {unfinished";
+    fs::write(&open, old)?;
+    let games = SharedGames::default();
+    new_game_with_e4(&games)?;
+
+    assert_eq!(
+        save_as(&games, 1, &open)?,
+        refusal(
+            "SaveGameAs",
+            "cannotWrite",
+            Some("the file would not read back with the new game as its last game")
+        )
+    );
+    assert_eq!(fs::read(&open)?, old);
+    let picture = ask(&games, json!({"type": "GoTo", "game": 1, "place": [0]}))?;
+    assert_eq!(picture["picture"]["file"], json!(null));
+    assert_eq!(picture["picture"]["unsaved"], json!(true));
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn says_why_a_game_cannot_be_saved_as_a_new_game() -> io::Result<()> {

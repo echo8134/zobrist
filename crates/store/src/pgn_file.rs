@@ -17,6 +17,48 @@ pub fn add_pgn_games<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<u64, E> {
+    let (staged, games) = stage_with_added(target, supply)?;
+    staged.publish()?;
+    Ok(games)
+}
+
+/// Adds one game as the last game of a PGN file, creating the target if necessary, and returns
+/// the number of that game in the file. Follows symbolic links and stages the new file beside
+/// the destination.
+///
+/// Refuses, and leaves the target as it was, when the staged file does not read back with the
+/// game as its last game. A comment or a tag line that is still open at the end of the target
+/// would take the new game in.
+pub fn add_pgn_game(target: &Path, game: &Game) -> io::Result<NonZeroU64> {
+    let (staged, _) = stage_with_added(target, |add| add(game))?;
+    (&staged.file).rewind()?;
+    let mut games = 0;
+    let mut last_is_the_game = false;
+    pgn::read_games(&staged.file, |entry| {
+        if let Entry::Game {
+            game: read,
+            problem,
+            ..
+        } = entry
+        {
+            games += 1;
+            last_is_the_game = problem.is_none() && *read == *game;
+        }
+    })?;
+    let number = NonZeroU64::new(games)
+        .filter(|_| last_is_the_game)
+        .ok_or_else(|| {
+            refusal("the file would not read back with the new game as its last game".to_owned())
+        })?;
+    staged.publish()?;
+    Ok(number)
+}
+
+/// Stages the target with the supplied games behind its old bytes, and counts those games.
+fn stage_with_added<E: From<io::Error>>(
+    target: &Path,
+    supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
+) -> Result<(Staged, u64), E> {
     let destination = destination(target)?;
     let old = match open(&destination) {
         Ok(old) => Some(old),
@@ -57,8 +99,7 @@ pub fn add_pgn_games<E: From<io::Error>>(
     separator.ok_or_else(failed_write)?;
     output.flush()?;
     drop(output);
-    staged.publish()?;
-    Ok(games)
+    Ok((staged, games))
 }
 
 /// Replaces game `number` of a PGN file, counting from 1, and keeps every other byte of the

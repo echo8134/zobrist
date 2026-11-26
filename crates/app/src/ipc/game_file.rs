@@ -1,6 +1,5 @@
 //! A game of a PGN file as an open game of the app: opening it, and saving it into a file.
 
-use std::fs::File;
 use std::io;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -9,8 +8,7 @@ use serde::Serialize;
 use ts_rs::TS;
 use zobrist_core::editor::GameEditor;
 use zobrist_core::game::{Game, MainLine};
-use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{add_pgn_games, read_pgn_game, replace_pgn_game};
+use zobrist_store::{add_pgn_game, read_pgn_game, replace_pgn_game};
 
 use super::{FirstStep, GamePicture, Games, Response, pgn_file};
 
@@ -281,24 +279,16 @@ pub(super) fn save_as(games: &Games, game: usize, typed: String) -> FirstStep {
     })
 }
 
-/// Adds the game to the file and counts the games that the file then has, because that count
-/// is the number of the new game.
+/// Adds the game as the last game of the file. Its number is the number of games that the
+/// file then has.
 fn write_as_last(typed: &str, game: &Game) -> Result<(PathBuf, NonZeroU64), Refused> {
     let path = pgn_file::resolve(typed);
-    add_pgn_games(&path, |add| add(game)).map_err(|error: io::Error| Refused {
+    let number = add_pgn_game(&path, game).map_err(|error| Refused {
         reason: GameFileRefusal::CannotWrite,
         system: Some(error.to_string()),
     })?;
-    let cannot_read = |error: io::Error| Refused::cannot_read(&error);
-    let path = path.canonicalize().map_err(cannot_read)?;
-    let mut games = 0;
-    pgn::read_games(File::open(&path).map_err(cannot_read)?, |entry| {
-        if matches!(entry, Entry::Game { .. }) {
-            games += 1;
-        }
-    })
-    .map_err(cannot_read)?;
-    let number = NonZeroU64::new(games)
-        .ok_or_else(|| Refused::without_text(GameFileRefusal::FileChanged))?;
+    let path = path
+        .canonicalize()
+        .map_err(|error| Refused::cannot_read(&error))?;
     Ok((path, number))
 }
