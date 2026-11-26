@@ -31,5 +31,6 @@
   flex: none;
   width: var(--notation-area-width);
   border-left: 1px solid var(--notation-area-line-color);
+  padding: var(--notation-area-padding);
   background-color: var(--notation-area-background-color);
 }
