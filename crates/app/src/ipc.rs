@@ -4,6 +4,7 @@
 //! TypeScript types of the view are generated from these two types.
 
 use std::collections::HashMap;
+use std::io;
 
 use serde::{Deserialize, Serialize};
 use shakmaty::{
@@ -11,7 +12,8 @@ use shakmaty::{
 };
 use ts_rs::TS;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
-use zobrist_core::game::{GameBuilder, MainLine, Move};
+use zobrist_core::game::{Game, GameBuilder, MainLine, Move};
+use zobrist_core::pgn::{self, Entry};
 use zobrist_core::shapes;
 
 mod drawing;
@@ -27,6 +29,25 @@ pub enum Request {
     Version,
     /// Open a game at the starting position.
     NewGame,
+    /// Start the open game again from a FEN position.
+    SetStartPosition {
+        /// The open game's number.
+        game: usize,
+        /// The requested position. An invalid FEN leaves the game as it was.
+        #[serde(with = "start_position")]
+        #[ts(as = "String")]
+        fen: Option<Chess>,
+    },
+    /// Open the first game in PGN text.
+    OpenPgnText {
+        /// The PGN to read.
+        text: String,
+    },
+    /// Get the current game as PGN text.
+    GamePgn {
+        /// The open game's number.
+        game: usize,
+    },
     /// Set or clear one field of the game data.
     SetTag {
         /// The number from the new-game answer.
@@ -118,6 +139,20 @@ pub enum Request {
         /// The number from the new-game answer.
         game: usize,
     },
+}
+
+mod start_position {
+    use serde::{Deserialize, Deserializer};
+    use shakmaty::{CastlingMode, Chess, fen::Fen};
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Chess>, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Ok(Fen::from_ascii(text.as_bytes())
+            .ok()
+            .and_then(|fen| fen.into_position(CastlingMode::Standard).ok()))
+    }
 }
 
 mod square {
@@ -298,6 +333,18 @@ pub enum Response {
         /// The picture at the starting position.
         picture: GamePicture,
     },
+    /// The position after accepting or refusing the FEN.
+    SetStartPosition {
+        /// Absent when the game is no longer open.
+        change: Option<PositionChange>,
+    },
+    /// The first game read from the supplied text.
+    OpenPgnText {
+        /// Absent when the text contains no game.
+        opened: Option<OpenedGame>,
+    },
+    /// The PGN text or the reason it could not be written.
+    GamePgn(PgnExport),
     /// The game after the editor accepts or refuses the tag edit.
     SetTag {
         /// Absent when the game is no longer open.
@@ -365,6 +412,54 @@ pub enum Response {
     },
     /// The game is closed.
     CloseGame,
+}
+
+/// The complete picture after a request to set the start position.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PositionChange {
+    picture: GamePicture,
+    refused: bool,
+}
+
+/// A newly opened game and the reader's first problem, if any.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+pub struct OpenedGame {
+    game: usize,
+    picture: GamePicture,
+    problem: Option<String>,
+}
+
+/// The result of writing an open game to PGN.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(untagged)]
+pub enum PgnExport {
+    /// The game as PGN, including its final newline.
+    Text {
+        /// Absent when the game is no longer open.
+        text: Option<String>,
+    },
+    /// The game could not be written as PGN.
+    Error {
+        /// The writer's explanation.
+        error: String,
+    },
+}
+
+impl PgnExport {
+    fn from_editor(editor: Option<&GameEditor>) -> Self {
+        let Some(editor) = editor else {
+            return Self::Text { text: None };
+        };
+        let mut bytes = Vec::new();
+        match pgn::write_game(editor.game(), &mut bytes)
+            .and_then(|()| String::from_utf8(bytes).map_err(io::Error::other))
+        {
+            Ok(text) => Self::Text { text: Some(text) },
+            Err(error) => Self::Error {
+                error: error.to_string(),
+            },
+        }
+    }
 }
 
 /// Everything the view draws for one game, taken from the same editor position.
@@ -596,6 +691,39 @@ impl Default for Games {
 }
 
 impl Games {
+    fn open(&mut self, game: Game) -> (usize, GamePicture) {
+        let number = self.next_number;
+        self.next_number = number.strict_add(1);
+        let editor = GameEditor::new(game);
+        let picture = GamePicture::from_editor(&editor);
+        self.editors.insert(number, editor);
+        (number, picture)
+    }
+
+    fn open_pgn(&mut self, text: &str) -> Option<OpenedGame> {
+        let mut first = None;
+        pgn::read_games(text.as_bytes(), |entry| {
+            if first.is_none()
+                && let Entry::Game { game, problem, .. } = entry
+            {
+                first = Some((game, problem));
+            }
+        })
+        .ok()?;
+        let (game, problem) = first?;
+        let problem = problem.map(|problem| {
+            let moves = game.counts().main_line_moves;
+            let noun = if moves == 1 { "move" } else { "moves" };
+            format!("{}, {moves} {noun} kept", problem.reason)
+        });
+        let (game, picture) = self.open(*game);
+        Some(OpenedGame {
+            game,
+            picture,
+            problem,
+        })
+    }
+
     fn edit<T>(
         &mut self,
         game: usize,
@@ -615,14 +743,25 @@ impl Games {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             },
             Request::NewGame => {
-                let game = self.next_number;
-                self.next_number = game.strict_add(1);
-                let editor = GameEditor::new(
-                    GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown),
-                );
-                let picture = GamePicture::from_editor(&editor);
-                self.editors.insert(game, editor);
+                let (game, picture) = self
+                    .open(GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown));
                 Response::NewGame { game, picture }
+            }
+            Request::SetStartPosition { game, fen } => Response::SetStartPosition {
+                change: self.editors.get_mut(&game).map(|editor| {
+                    let refused =
+                        fen.is_none_or(|position| editor.set_start_position(position).is_err());
+                    PositionChange {
+                        picture: GamePicture::from_editor(editor),
+                        refused,
+                    }
+                }),
+            },
+            Request::OpenPgnText { text } => Response::OpenPgnText {
+                opened: self.open_pgn(&text),
+            },
+            Request::GamePgn { game } => {
+                Response::GamePgn(PgnExport::from_editor(self.editors.get(&game)))
             }
             Request::SetTag { game, tag, text } => Response::SetTag {
                 picture: self.edit(game, |editor| editor.set_tag(tag.into(), &text)),

@@ -7,7 +7,7 @@ use shakmaty::Square::{
     G1, H1, H5,
 };
 use shakmaty::fen::Fen;
-use shakmaty::{Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role};
+use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role};
 use zobrist_core::editor::{
     AnnotationError, EditVariationError, EditableTag, GameEditor, MoveSymbol, NoSuchPlace, Place,
     PlayError, PositionSymbol, TagError,
@@ -40,6 +40,98 @@ fn assert_state(editor: &GameEditor, choices: &[usize], expected: &str) -> io::R
     let mut bytes = Vec::new();
     pgn::write_game(editor.game(), &mut bytes)?;
     assert_eq!(std::str::from_utf8(&bytes), Ok(expected));
+    Ok(())
+}
+
+fn start_position(fen: &str) -> io::Result<Chess> {
+    fen.parse::<Fen>()
+        .map_err(io::Error::other)?
+        .into_position(CastlingMode::Standard)
+        .map_err(io::Error::other)
+}
+
+#[test]
+fn resetting_the_start_position_replaces_the_moves_and_undo_restores_them() -> io::Result<()> {
+    let original = "[White \"Alpha\"]\n\n1. e4 e5 *\n";
+    let mut editor = open(original)?;
+    editor.go_to(Place(vec![0, 0])).unwrap();
+    let previous = editor.position().clone();
+    let fen = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1";
+    let tags = format!("[White \"Alpha\"]\n[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n");
+    editor.set_start_position(start_position(fen)?).unwrap();
+    assert_state(&editor, &[], &format!("{tags}*\n"))?;
+    assert_eq!(
+        Fen::from_position(editor.position(), EnPassantMode::Always).to_string(),
+        fen
+    );
+    assert!(editor.undo());
+    assert_state(&editor, &[0, 0], original)?;
+    assert_eq!(editor.position(), &previous);
+    assert!(editor.redo());
+    assert_state(&editor, &[], &format!("{tags}*\n"))?;
+    editor.play(E2, E4, None).unwrap();
+    assert_state(&editor, &[0], &format!("{tags}1. e4 *\n"))?;
+    editor.set_start_position(Chess::default()).unwrap();
+    assert_state(&editor, &[], "[White \"Alpha\"]\n\n*\n")?;
+    assert_eq!(editor.position(), &Chess::default());
+    Ok(())
+}
+
+#[test]
+fn setting_the_start_keeps_fullmove_numbers_and_en_passant_targets() -> io::Result<()> {
+    let mut editor = open("*")?;
+    let fen = "4k3/4p3/8/8/8/8/8/4K3 b - - 0 12";
+    editor.set_start_position(start_position(fen)?).unwrap();
+    editor.play(E7, E5, None).unwrap();
+    assert_state(
+        &editor,
+        &[0],
+        &format!("[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n12... e5 *\n"),
+    )?;
+
+    for fen in [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 4 12",
+        "4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1",
+    ] {
+        editor.set_start_position(start_position(fen)?).unwrap();
+        assert_state(
+            &editor,
+            &[],
+            &format!("[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n*\n"),
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn resetting_the_start_clears_annotations_and_updates_an_existing_result_in_place() -> io::Result<()>
+{
+    let original = "[White \"A\"]\n[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n[Result \"1-0\"]\n[SetUp \"1\"]\n[Annotator \"N\"]\n[Result \"1-0\"]\n\n{Plan [%csl Gd4]} 1-0\n";
+    let mut editor = open(original)?;
+    let fen = "4k3/4p3/8/8/8/8/8/4K3 b - - 0 12";
+    editor.set_start_position(start_position(fen)?).unwrap();
+    assert_state(
+        &editor,
+        &[],
+        &format!(
+            "[White \"A\"]\n[Result \"*\"]\n[Annotator \"N\"]\n[SetUp \"1\"]\n[FEN \"{fen}\"]\n\n*\n"
+        ),
+    )?;
+    assert!(editor.undo());
+    assert_state(&editor, &[], original)
+}
+
+#[test]
+fn refuses_a_setup_edit_that_would_split_the_game_on_export() -> io::Result<()> {
+    let original = "[SetUp \"1\"]\n[Annotator \"A\"]\n[Annotator \"B\"]\n\n1. e4 *\n";
+    let mut editor = open(original)?;
+    assert!(editor.forward());
+    assert_eq!(
+        editor.set_start_position(Chess::default()),
+        Err(TagError::RepeatedFirstTag)
+    );
+    assert_state(&editor, &[0], original)?;
+    assert!(!editor.can_undo());
     Ok(())
 }
 

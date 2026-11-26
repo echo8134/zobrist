@@ -9,7 +9,23 @@ import type { ShapeEdit } from "./ShapeEdit";
 /**
  * What the view can ask for.
  */
-export type Request = { "type": "Version" } | { "type": "NewGame" } | { "type": "SetTag", 
+export type Request = { "type": "Version" } | { "type": "NewGame" } | { "type": "SetStartPosition", 
+/**
+ * The open game's number.
+ */
+game: number, 
+/**
+ * The requested position. An invalid FEN leaves the game as it was.
+ */
+fen: string, } | { "type": "OpenPgnText", 
+/**
+ * The PGN to read.
+ */
+text: string, } | { "type": "GamePgn", 
+/**
+ * The open game's number.
+ */
+game: number, } | { "type": "SetTag", 
 /**
  * The number from the new-game answer.
  */
