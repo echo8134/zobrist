@@ -78,4 +78,12 @@ game: number, } | { "type": "CloseGame",
 /**
  * The number from the new-game answer.
  */
-game: number, };
+game: number, } | { "type": "OpenPgnFile", 
+/**
+ * The path as it was typed.
+ */
+path: string, } | { "type": "CreatePgnFile", 
+/**
+ * The path as it was typed.
+ */
+path: string, };
