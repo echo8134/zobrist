@@ -24,9 +24,12 @@ type Props = {
 export function Board({ picture, bottomSide, onMove }: Props) {
   const groundElement = useRef<HTMLDivElement>(null);
   const groundApi = useRef<Api>(null);
-  const [waitingPromotion, setWaitingPromotion] = useState<MoveSquares | null>(
-    null,
-  );
+  const [promotionInPicture, setPromotionInPicture] = useState<{
+    picture: GamePicture;
+    squares: MoveSquares;
+  } | null>(null);
+  const waitingPromotion =
+    promotionInPicture?.picture === picture ? promotionInPicture.squares : null;
 
   useLayoutEffect(() => {
     if (groundElement.current === null) {
@@ -62,7 +65,7 @@ export function Board({ picture, bottomSide, onMove }: Props) {
               (legal) => legal.from === from && legal.to === to,
             );
             if (played?.promotion) {
-              setWaitingPromotion({ from, to });
+              setPromotionInPicture({ picture, squares: { from, to } });
             } else {
               onMove({ from, to, promotion: null });
             }
@@ -101,10 +104,10 @@ export function Board({ picture, bottomSide, onMove }: Props) {
           targetSquare={waitingPromotion.to}
           bottomSide={bottomSide}
           onChoose={(promotion) => {
-            setWaitingPromotion(null);
+            setPromotionInPicture(null);
             onMove({ ...waitingPromotion, promotion });
           }}
-          onCancel={() => setWaitingPromotion(null)}
+          onCancel={() => setPromotionInPicture(null)}
         />
       )}
     </div>

@@ -1,15 +1,23 @@
-.notation {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--move-gap);
+.notation,
+.line {
   margin: 0;
   padding: 0;
-  line-height: var(--move-line-height);
   list-style: none;
 }
 
-.entry {
-  display: flex;
+.notation {
+  line-height: var(--move-line-height);
+}
+
+.line,
+.notation li {
+  display: inline;
+}
+
+.step {
+  display: inline-block;
+  margin-right: var(--move-gap);
+  white-space: nowrap;
 }
 
 .moveNumber {
@@ -18,9 +26,24 @@
 
 .moveText {
   padding: var(--move-padding);
+  border: none;
   border-radius: var(--move-corner-radius);
+  background: none;
+  color: inherit;
+  font: inherit;
 }
 
 .moveText[aria-current] {
   background-color: var(--current-move-background-color);
+  color: var(--current-move-color);
+}
+
+.variation {
+  margin-right: var(--move-gap);
+  color: var(--variation-color);
+}
+
+.notation > li > .variation {
+  display: block;
+  margin-left: var(--variation-indent);
 }

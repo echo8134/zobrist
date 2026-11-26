@@ -86,6 +86,9 @@
   --move-corner-radius: 4px;
   --move-number-color: #6b6b6b;
   --current-move-background-color: #efefef;
+  --current-move-color: #222222;
+  --variation-color: #6b6b6b;
+  --variation-indent: 16px;
 
   --promotion-chooser-line-color: #e2e2e2;
   --promotion-chooser-background-color: #ffffff;
