@@ -13,6 +13,13 @@ export const config: WebdriverIO.Config = {
   // The caller provides the display. Without this line the runner would start one of its own.
   autoXvfb: false,
   specs: ["./e2e/*.e2e.ts"],
+  // The service starts one app for the whole run, so the spec files use it one after the other.
+  maxInstances: 1,
+  // A reload gives each spec file the view in its first state. What Rust holds stays.
+  before: async (_capabilities, _specs, browser) => {
+    await browser.switchToWindow("main");
+    await browser.refresh();
+  },
   framework: "mocha",
   reporters: ["spec"],
   logLevel: "warn",
