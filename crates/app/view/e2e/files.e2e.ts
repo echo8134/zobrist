@@ -166,7 +166,11 @@ describe("the page Files", () => {
     await browser.$("nav").$("aria/Home").click();
     await expect(heading()).toHaveText("Home");
     await browser.$("header").$("aria/New board").click();
-    await expect(heading()).toHaveText("New game");
+    await expect(browser.$('header [role="tab"]')).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(heading()).not.toExist();
     await browser.$("nav").$("aria/Files").click();
 
     await expect(heading()).toHaveText("Files");
