@@ -10,7 +10,7 @@ use std::process::{self, ExitCode};
 use clap::{Parser, Subcommand};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{Database, DatabaseWriter, add_pgn_games, replace_pgn_game};
+use zobrist_store::{Database, DatabaseWriter, PgnGameRow, add_pgn_games, replace_pgn_game};
 
 /// A personal chess database.
 #[derive(Parser)]
@@ -328,20 +328,11 @@ fn list_games(path: &Path) -> Result<usize, Failure> {
     let mut number = 0_u64;
     let read = for_each_game(file, |game| {
         number += 1;
-        let tag = |name| {
-            game.tag(name)
-                .unwrap_or("?")
-                .replace("\r\n", " ")
-                .replace(['\r', '\n', '\t'], " ")
-        };
+        let row = PgnGameRow::new(number, game);
         writeln!(
             output,
             "{number}\t{}\t{}\t{}\t{}\t{}",
-            tag("White"),
-            tag("Black"),
-            game.result(),
-            tag("Date"),
-            tag("Event")
+            row.white, row.black, row.result, row.date, row.event
         )
     });
     output.flush().map_err(Failure::Write)?;

@@ -3,6 +3,10 @@
 //! The view sends a [`Request`] and gets back the [`Response`] case with the same name. The
 //! TypeScript types of the view are generated from these two types.
 
+mod pgn_file;
+
+pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
+
 use std::collections::HashMap;
 use std::io;
 
@@ -138,6 +142,16 @@ pub enum Request {
     CloseGame {
         /// The number from the new-game answer.
         game: usize,
+    },
+    /// List the games of a PGN file.
+    OpenPgnFile {
+        /// The path as it was typed.
+        path: String,
+    },
+    /// Create a new, empty PGN file where nothing is yet.
+    CreatePgnFile {
+        /// The path as it was typed.
+        path: String,
     },
 }
 
@@ -412,6 +426,16 @@ pub enum Response {
     },
     /// The game is closed.
     CloseGame,
+    /// The file with its games, or the refusal.
+    OpenPgnFile {
+        /// What the page Files shows next.
+        answer: PgnFileAnswer,
+    },
+    /// The new file without games, or the refusal.
+    CreatePgnFile {
+        /// What the page Files shows next.
+        answer: PgnFileAnswer,
+    },
 }
 
 /// The complete picture after a request to set the start position.
@@ -817,6 +841,12 @@ impl Games {
                 self.editors.remove(&game);
                 Response::CloseGame
             }
+            Request::OpenPgnFile { path } => Response::OpenPgnFile {
+                answer: pgn_file::open(&path),
+            },
+            Request::CreatePgnFile { path } => Response::CreatePgnFile {
+                answer: pgn_file::create(&path),
+            },
         }
     }
 }
