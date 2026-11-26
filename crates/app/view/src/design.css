@@ -149,6 +149,17 @@
   --list-number-width: 48px;
   --list-result-width: 72px;
   --list-date-width: 104px;
+
+  --game-data-padding: 12px 16px;
+  --game-data-gap: 8px;
+  --game-data-line-color: #e6e6e6;
+  --game-data-name-size: 11px;
+  --game-data-name-color: #6b6b6b;
+  --game-data-name-gap: 2px;
+  --game-data-chevron-size: 14px;
+  --game-data-chevron-inset: 8px;
+  --game-data-chevron-color: #555555;
+  --game-data-chevron-stroke: 1.6;
 }
 
 /* A size in this file is the outer size of its part, with the line at its edge. */

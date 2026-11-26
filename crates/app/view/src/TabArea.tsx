@@ -2,6 +2,9 @@ import { ArrowUpDown } from "lucide-react";
 import { useLayoutEffect } from "react";
 import { AnnotationPanel } from "./AnnotationPanel";
 import { Board } from "./Board";
+import { GameDataForm } from "./GameDataForm";
+import type { EditableTag } from "./generated/EditableTag";
+import type { GameResult } from "./generated/GameResult";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
@@ -33,6 +36,8 @@ type Props = {
   onTool: (tool: NotationTool) => void;
   onAnnotate: (annotation: Annotation) => void;
   onShapes: (shapes: Shapes) => void;
+  onSetTag: (tag: EditableTag, text: string) => Promise<boolean>;
+  onSetResult: (result: GameResult) => void;
 };
 
 export function TabArea({
@@ -43,6 +48,8 @@ export function TabArea({
   onTool,
   onAnnotate,
   onShapes,
+  onSetTag,
+  onSetResult,
 }: Props) {
   const { picture } = tab;
   // A layout effect, so that a key right after a new picture is drawn starts from that picture.
@@ -92,6 +99,11 @@ export function TabArea({
       </div>
       <aside className={notationArea}>
         <NotationTools picture={picture} onUse={onTool} />
+        <GameDataForm
+          picture={picture}
+          onSetTag={onSetTag}
+          onSetResult={onSetResult}
+        />
         <div className={notationScroller}>
           <Notation
             mainLine={picture.notation}
