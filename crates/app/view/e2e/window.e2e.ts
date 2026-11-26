@@ -956,6 +956,7 @@ describe("the window", () => {
     });
 
     await browser.keys("ArrowLeft");
+    await expectSoon(markedNotation, "1. [e4] e5 2. Nf3");
     await browser.keys("ArrowLeft");
 
     await expectSoon(() => game("e2 e4 e7 e5 g1 f3"), atTheStart);
