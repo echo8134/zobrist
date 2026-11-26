@@ -7,7 +7,10 @@ use shakmaty::Square::{
 };
 use shakmaty::fen::Fen;
 use shakmaty::{Chess, Color, EnPassantMode, Position, Role};
-use zobrist_core::editor::{EditVariationError, GameEditor, NoSuchPlace, Place, PlayError};
+use zobrist_core::editor::{
+    AnnotationError, EditVariationError, GameEditor, MoveSymbol, NoSuchPlace, Place, PlayError,
+    PositionSymbol,
+};
 use zobrist_core::game::{Game, MAX_VARIATION_DEPTH};
 use zobrist_core::pgn::{self, Entry};
 
@@ -449,4 +452,127 @@ fn a_sibling_at_the_depth_limit_keeps_its_place_during_promotion() -> io::Result
     editor.go_to(Place(vec![MAX_VARIATION_DEPTH + 1])).unwrap();
     editor.promote().unwrap();
     assert_state(&editor, &[0], &format!("1. d4{nested} (1. e4) *\n"))
+}
+
+const ANNOTATION_GAME: &str = "1. e4 e5 (1... c5) 2. Nf3 *\n";
+
+#[test]
+fn sets_replaces_and_removes_the_comment_at_a_place() -> io::Result<()> {
+    let mut editor = open(ANNOTATION_GAME)?;
+    editor.go_to(Place(vec![0])).unwrap();
+    for (text, expected) in [
+        (
+            "Best by test",
+            "1. e4 {Best by test} 1... e5 (1... c5) 2. Nf3 *\n",
+        ),
+        (
+            "  King's pawn\t",
+            "1. e4 {King's pawn} 1... e5 (1... c5) 2. Nf3 *\n",
+        ),
+        ("", ANNOTATION_GAME),
+    ] {
+        editor.set_comment(text).unwrap();
+        assert_state(&editor, &[0], expected)?;
+    }
+    for (place, text, expected) in [
+        (&[][..], "Start", "{Start} 1. e4 e5 (1... c5) 2. Nf3 *\n"),
+        (&[0, 1], "Sharp", "1. e4 e5 (1... c5 {Sharp}) 2. Nf3 *\n"),
+    ] {
+        let mut editor = open(ANNOTATION_GAME)?;
+        editor.go_to(Place(place.to_vec())).unwrap();
+        editor.set_comment(text).unwrap();
+        assert_state(&editor, place, expected)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_game_without_moves_can_keep_and_clear_a_comment() -> io::Result<()> {
+    let mut editor = open("*")?;
+    editor.set_comment("Only a comment").unwrap();
+    assert_state(&editor, &[], "{Only a comment} *\n")?;
+    editor.set_comment(" \t\n ").unwrap();
+    assert_state(&editor, &[], "*\n")
+}
+
+#[test]
+fn replacing_comments_leaves_those_before_the_next_move_intact() -> io::Result<()> {
+    for (game, place, text, expected) in [
+        (
+            "1. e4 {one} {two} *",
+            &[0][..],
+            "three",
+            "1. e4 {three} *\n",
+        ),
+        (
+            "1. e4 e5 (1... c5) {After the variation} 2. Nf3 *",
+            &[0, 0],
+            "x",
+            "1. e4 e5 {x} (1... c5) {After the variation} 2. Nf3 *\n",
+        ),
+    ] {
+        let mut editor = open(game)?;
+        editor.go_to(Place(place.to_vec())).unwrap();
+        editor.set_comment(text).unwrap();
+        assert_state(&editor, place, expected)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn move_and_position_symbols_can_be_set_and_removed_independently() -> io::Result<()> {
+    let mut editor = open(ANNOTATION_GAME)?;
+    editor.go_to(Place(vec![0])).unwrap();
+    editor.set_move_symbol(Some(MoveSymbol::Good)).unwrap();
+    assert_state(&editor, &[0], "1. e4 $1 1... e5 (1... c5) 2. Nf3 *\n")?;
+    editor.set_move_symbol(Some(MoveSymbol::Blunder)).unwrap();
+    assert_state(&editor, &[0], "1. e4 $4 1... e5 (1... c5) 2. Nf3 *\n")?;
+
+    let mut editor = open(ANNOTATION_GAME)?;
+    editor.go_to(Place(vec![0, 0])).unwrap();
+    editor.set_move_symbol(Some(MoveSymbol::Dubious)).unwrap();
+    assert_state(&editor, &[0, 0], "1. e4 e5 $6 (1... c5) 2. Nf3 *\n")?;
+    editor
+        .set_position_symbol(Some(PositionSymbol::WhiteSlight))
+        .unwrap();
+    assert_state(&editor, &[0, 0], "1. e4 e5 $6 $14 (1... c5) 2. Nf3 *\n")?;
+    editor.set_move_symbol(None).unwrap();
+    assert_state(&editor, &[0, 0], "1. e4 e5 $14 (1... c5) 2. Nf3 *\n")
+}
+
+#[test]
+fn replacing_imported_symbols_preserves_every_glyph_of_other_kinds_in_order() -> io::Result<()> {
+    let mut editor = open("1. e4 $1 $3 $10 $16 $7 *")?;
+    editor.go_to(Place(vec![0])).unwrap();
+    editor.set_move_symbol(Some(MoveSymbol::Mistake)).unwrap();
+    assert_state(&editor, &[0], "1. e4 $2 $10 $16 $7 *\n")?;
+    editor.set_position_symbol(None).unwrap();
+    assert_state(&editor, &[0], "1. e4 $2 $7 *\n")
+}
+
+#[test]
+fn refused_annotations_preserve_the_place_and_the_game() -> io::Result<()> {
+    let original = "{before} 1. e4 {after} *\n";
+    let mut editor = open(original)?;
+    assert_eq!(
+        editor.set_move_symbol(Some(MoveSymbol::Good)),
+        Err(AnnotationError::NoMove)
+    );
+    assert_state(&editor, &[], original)?;
+    assert_eq!(
+        editor.set_position_symbol(None),
+        Err(AnnotationError::NoMove)
+    );
+    assert_state(&editor, &[], original)?;
+
+    editor.go_to(Place(vec![0])).unwrap();
+    let too_long = "x".repeat((1 << 20) + 1);
+    for text in ["contains }", "contains \u{feff}[", &too_long] {
+        assert_eq!(
+            editor.set_comment(text),
+            Err(AnnotationError::InvalidComment)
+        );
+        assert_state(&editor, &[0], original)?;
+    }
+    Ok(())
 }
