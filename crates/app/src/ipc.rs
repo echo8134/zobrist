@@ -5,7 +5,7 @@
 
 mod pgn_file;
 
-pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
+pub use pgn_file::{FileRequest, GameRow, PgnFileAnswer, RefusalReason};
 
 use std::collections::HashMap;
 
@@ -670,12 +670,8 @@ impl Games {
                 self.editors.remove(&game);
                 Response::CloseGame
             }
-            Request::OpenPgnFile { path } => Response::OpenPgnFile {
-                answer: pgn_file::open(&path),
-            },
-            Request::CreatePgnFile { path } => Response::CreatePgnFile {
-                answer: pgn_file::create(&path),
-            },
+            Request::OpenPgnFile { path } => FileRequest::Open(path).answer(),
+            Request::CreatePgnFile { path } => FileRequest::Create(path).answer(),
         }
     }
 }

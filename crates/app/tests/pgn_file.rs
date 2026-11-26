@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::{env, fs, io, process};
 
 use serde_json::{Value, json};
-use zobrist_app::ipc::{Games, Request};
+use zobrist_app::ipc::{FileRequest, Games, Request};
 
 fn ask(request: Value) -> serde_json::Result<Value> {
     let request: Request = serde_json::from_value(request)?;
@@ -61,6 +61,34 @@ fn opens_the_damaged_file_and_counts_its_game_with_a_problem() -> serde_json::Re
             "problems": 1,
         }})
     );
+    Ok(())
+}
+
+#[test]
+fn answers_a_request_about_a_file_without_the_games_of_the_app() -> io::Result<()> {
+    let open = json!({"type": "OpenPgnFile", "path": fixture("clean.pgn")});
+    let file = FileRequest::try_from(serde_json::from_value::<Request>(open.clone())?);
+    assert_eq!(
+        serde_json::to_value(file.ok().unwrap().answer())?,
+        ask(open)?
+    );
+
+    let path = temporary_path("create-without-games.pgn");
+    let create = json!({"type": "CreatePgnFile", "path": path.to_string_lossy()});
+    let file = FileRequest::try_from(serde_json::from_value::<Request>(create)?);
+    assert_eq!(
+        serde_json::to_value(file.ok().unwrap().answer())?,
+        json!({"type": "CreatePgnFile", "answer": {
+            "type": "File", "path": path.to_string_lossy(), "rows": [], "problems": 0,
+        }})
+    );
+    fs::remove_file(path)?;
+
+    let new_game = serde_json::from_value::<Request>(json!({"type": "NewGame"}))?;
+    assert!(matches!(
+        FileRequest::try_from(new_game),
+        Err(Request::NewGame)
+    ));
     Ok(())
 }
 

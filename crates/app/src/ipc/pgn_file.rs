@@ -10,6 +10,47 @@ use ts_rs::TS;
 use zobrist_core::pgn::{self, Entry};
 use zobrist_store::PgnGameRow;
 
+use super::{Request, Response};
+
+/// A request that works on a file and on no open game. Its answer takes as long as the file
+/// takes, so the app answers it without the lock on its games.
+pub enum FileRequest {
+    /// List the games of the PGN file at the typed path.
+    Open(String),
+    /// Create a new, empty PGN file at the typed path.
+    Create(String),
+}
+
+impl TryFrom<Request> for FileRequest {
+    type Error = Request;
+
+    /// Gives a request back that works on a game.
+    fn try_from(request: Request) -> Result<Self, Request> {
+        if let Request::OpenPgnFile { path } = request {
+            return Ok(Self::Open(path));
+        }
+        if let Request::CreatePgnFile { path } = request {
+            return Ok(Self::Create(path));
+        }
+        Err(request)
+    }
+}
+
+impl FileRequest {
+    /// Reads or creates the file and builds the answer.
+    #[must_use]
+    pub fn answer(self) -> Response {
+        match self {
+            Self::Open(path) => Response::OpenPgnFile {
+                answer: open(&path),
+            },
+            Self::Create(path) => Response::CreatePgnFile {
+                answer: create(&path),
+            },
+        }
+    }
+}
+
 /// A PGN file with the list of its games, or why there is none.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "type")]
@@ -70,7 +111,7 @@ impl From<PgnGameRow> for GameRow {
     }
 }
 
-pub(super) fn open(typed: &str) -> PgnFileAnswer {
+fn open(typed: &str) -> PgnFileAnswer {
     let path = resolve(typed);
     match list(&path) {
         Ok((rows, problems)) => PgnFileAnswer::File {
@@ -85,7 +126,7 @@ pub(super) fn open(typed: &str) -> PgnFileAnswer {
     }
 }
 
-pub(super) fn create(typed: &str) -> PgnFileAnswer {
+fn create(typed: &str) -> PgnFileAnswer {
     let path = resolve(typed);
     // `create_new` fails when anything is at the path, so it never replaces a file.
     match File::create_new(&path) {
