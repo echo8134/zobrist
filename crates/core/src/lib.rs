@@ -5,9 +5,9 @@
 //! The dependency rule is enforced by `scripts/check-deps.sh`.
 //!
 //! [`game`] holds the game model: tags, start position, a tree of legal moves with variations,
-//! comments, and annotation symbols, and the result. [`pgn`] reads PGN bytes into games and
-//! never drops one: a game that cannot be read completely keeps every move before its first
-//! problem and comes with a [`pgn::Problem`].
+//! comments, and annotation symbols, and the result. [`editor`] navigates and edits those games.
+//! [`pgn`] reads PGN bytes into games and never drops one: a game that cannot be read completely
+//! keeps every move before its first problem and comes with a [`pgn::Problem`].
 //!
 //! ```
 //! use zobrist_core::pgn::{self, Entry};
@@ -25,5 +25,6 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 
+pub mod editor;
 pub mod game;
 pub mod pgn;

@@ -1,9 +1,8 @@
 //! The game model: tags, start position, a tree of legal moves, and the result.
 //!
-//! A [`Game`] is immutable. The only way to make one is a [`GameBuilder`], and the only way to
-//! add a move to it is to play that move on the position before it. So every move in a game is
-//! legal, every variation starts from the position before the move it replaces, and no line is
-//! empty. Positions are not stored in the tree. [`Game::steps`] replays them.
+//! A [`GameBuilder`] makes a game, and a [`GameEditor`](crate::editor::GameEditor) can edit it.
+//! Both add moves by playing them on the position before them. Every variation starts from the
+//! position before the move it replaces, and no line is empty. [`Game::steps`] replays the moves.
 
 use std::{iter, mem, slice};
 
@@ -42,7 +41,7 @@ pub enum Move {
 pub struct Game {
     tags: Vec<Tag>,
     start: Chess,
-    main_line: MainLine,
+    pub(super) main_line: MainLine,
     result: Outcome,
 }
 
@@ -84,7 +83,7 @@ pub struct Node {
     annotation_symbols: Vec<AnnotationSymbol>,
     comments_before: Vec<String>,
     comments_after: Vec<String>,
-    variations: Vec<Line>,
+    pub(super) variations: Vec<Line>,
 }
 
 /// shakmaty has no null move that cannot fail, so a null move keeps the position after it and a
@@ -232,6 +231,21 @@ impl Line {
         iter::once(&self.first).chain(&self.rest)
     }
 
+    pub(super) fn new(first: Node) -> Self {
+        Self {
+            first,
+            rest: Vec::new(),
+        }
+    }
+
+    pub(super) fn push(&mut self, node: Node) {
+        self.rest.push(node);
+    }
+
+    pub(super) fn nodes_mut(&mut self) -> impl Iterator<Item = &mut Node> {
+        iter::once(&mut self.first).chain(&mut self.rest)
+    }
+
     fn steps_from(&self, position: Chess) -> Steps<'_> {
         Steps {
             first: Some(&self.first),
@@ -279,6 +293,27 @@ impl Node {
     pub fn variations(&self) -> &[Line] {
         &self.variations
     }
+
+    pub(super) fn legal(chess_move: shakmaty::Move, comments_before: Vec<String>) -> Self {
+        Self::new(Played::Legal(chess_move), comments_before)
+    }
+
+    fn new(played: Played, comments_before: Vec<String>) -> Self {
+        Self {
+            played,
+            annotation_symbols: Vec::new(),
+            comments_before,
+            comments_after: Vec::new(),
+            variations: Vec::new(),
+        }
+    }
+
+    pub(super) fn replay(&self, position: &mut Chess) {
+        match &self.played {
+            Played::Legal(chess_move) => position.play_unchecked(*chess_move),
+            Played::Null { after } => *position = Chess::clone(after),
+        }
+    }
 }
 
 impl<'game> Iterator for Steps<'game> {
@@ -287,10 +322,7 @@ impl<'game> Iterator for Steps<'game> {
     fn next(&mut self) -> Option<Step<'game>> {
         let node = self.first.take().or_else(|| self.rest.next())?;
         let before = self.position.clone();
-        match &node.played {
-            Played::Legal(chess_move) => self.position.play_unchecked(*chess_move),
-            Played::Null { after } => self.position = Chess::clone(after),
-        }
+        node.replay(&mut self.position);
         Some(Step { node, before })
     }
 }
@@ -455,23 +487,14 @@ impl GameBuilder {
 
     fn append_move(&mut self, chess_move: Move) -> Result<(), MoveError> {
         let line = self.innermost();
-        let (played, after) = match chess_move {
-            Move::Legal(legal) => {
-                let mut after = line.position.clone();
-                after.play_unchecked(legal);
-                (Played::Legal(legal), after)
-            }
-            Move::Null => {
-                let after = play_null(&line.position).ok_or(MoveError::IllegalMove)?;
-                (
-                    Played::Null {
-                        after: Box::new(after.clone()),
-                    },
-                    after,
-                )
-            }
+        let played = match chess_move {
+            Move::Legal(legal) => Played::Legal(legal),
+            Move::Null => Played::Null {
+                after: Box::new(play_null(&line.position).ok_or(MoveError::IllegalMove)?),
+            },
         };
-        line.push(played, after);
+        let node = Node::new(played, mem::take(&mut line.waiting_comments));
+        line.push(node);
         Ok(())
     }
 }
@@ -489,27 +512,13 @@ impl OpenLine {
         self.moves.as_mut().map(|(line, _)| line.last_mut())
     }
 
-    fn push(&mut self, played: Played, after: Chess) {
-        let node = Node {
-            played,
-            annotation_symbols: Vec::new(),
-            comments_before: mem::take(&mut self.waiting_comments),
-            comments_after: Vec::new(),
-            variations: Vec::new(),
-        };
-        let before = mem::replace(&mut self.position, after);
+    fn push(&mut self, node: Node) {
+        let before = self.position.clone();
+        node.replay(&mut self.position);
         match &mut self.moves {
-            None => {
-                self.moves = Some((
-                    Line {
-                        first: node,
-                        rest: Vec::new(),
-                    },
-                    before,
-                ));
-            }
+            None => self.moves = Some((Line::new(node), before)),
             Some((line, before_last)) => {
-                line.rest.push(node);
+                line.push(node);
                 *before_last = before;
             }
         }
