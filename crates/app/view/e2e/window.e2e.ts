@@ -1129,4 +1129,26 @@ describe("the window", () => {
       "1. h4 g5 2. hxg5 h6 3. gxh6 a6 4. [h7] a5 5. hxg8=N",
     );
   });
+
+  it("starts a key from the move that the key before it reached, also in the same moment", async () => {
+    // The second key comes at once when the notation marks the move of the first key.
+    await browser.execute(`
+      const pressLeftArrow = () =>
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
+      new MutationObserver((changes, observer) => {
+        observer.disconnect();
+        pressLeftArrow();
+      }).observe(document.querySelector("main aside"), {
+        attributes: true,
+        subtree: true,
+        attributeFilter: ["aria-current"],
+      });
+      pressLeftArrow();
+    `);
+
+    await expectSoon(
+      markedNotation,
+      "1. h4 g5 2. hxg5 h6 3. [gxh6] a6 4. h7 a5 5. hxg8=N",
+    );
+  });
 });
