@@ -84,6 +84,7 @@ fn start_picture() -> Value {
                                   e2e3 e2e4 f2f3 f2f4 g1f3 g1h3 g2g3 g2g4 h2h3 h2h4"),
         "canUndo": false, "canRedo": false, "inVariation": false, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
+        "file": null, "unsaved": false,
         "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": null, "place": [], "notation": []
     })
@@ -97,6 +98,7 @@ fn after_e4() -> Value {
                                   e7e5 e7e6 f7f5 f7f6 g7g5 g7g6 g8f6 g8h6 h7h5 h7h6"),
         "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
+        "file": null, "unsaved": true,
         "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": {"from": "e2", "to": "e4"}, "place": [0],
         "notation": [{"place": [0], "number": 1, "side": "white", "text": "e4",
@@ -112,6 +114,7 @@ fn after_c5_in_variation() -> Value {
                                   e1e2 e4e5 f1a6 f1b5 f1c4 f1d3 f1e2 f2f3 f2f4 g1e2 g1f3 g1h3 g2g3 g2g4 h2h3 h2h4"),
         "canUndo": true, "canRedo": false, "inVariation": true, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
+        "file": null, "unsaved": true,
         "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": {"from": "c7", "to": "c5"}, "place": [0, 1],
         "notation": [
@@ -247,6 +250,7 @@ fn setting_game_data_returns_the_ordered_tags_and_result() -> serde_json::Result
     let mut expected = start_picture();
     expected["canUndo"] = json!(true);
     expected["tags"] = json!([{"name": "White", "value": "Alpha"}]);
+    expected["unsaved"] = json!(true);
     assert_picture(
         &mut games,
         json!({"type": "SetTag", "game": 1, "tag": "White", "text": "Alpha"}),
@@ -288,6 +292,7 @@ fn each_editable_tag_sets_its_own_field() -> serde_json::Result<()> {
     ask(&mut games, json!({"type": "NewGame"}))?;
     let mut expected = start_picture();
     expected["canUndo"] = json!(true);
+    expected["unsaved"] = json!(true);
     let mut tags = Vec::new();
     for (name, text) in [
         ("Event", "Example"),
@@ -341,6 +346,7 @@ fn comments_and_symbols_follow_the_current_move() -> serde_json::Result<()> {
     start["canUndo"] = json!(true);
     start["hasNextMove"] = json!(true);
     start["notation"] = expected["notation"].clone();
+    start["unsaved"] = json!(true);
     assert_picture(
         &mut games,
         json!({"type": "GoTo", "game": 1, "place": []}),
@@ -406,6 +412,7 @@ fn shapes_follow_the_current_place_and_leave_the_move_comment_readable() -> serd
     start["canUndo"] = json!(true);
     start["hasNextMove"] = json!(true);
     start["notation"] = expected["notation"].clone();
+    start["unsaved"] = json!(true);
     assert_picture(
         &mut games,
         json!({"type": "GoTo", "game": 1, "place": []}),
@@ -441,6 +448,7 @@ fn the_start_of_an_empty_game_has_a_comment_and_refuses_symbols() -> serde_json:
     let mut start = start_picture();
     start["canUndo"] = json!(true);
     start["startComments"] = json!(["Start"]);
+    start["unsaved"] = json!(true);
     assert_picture(
         &mut games,
         json!({"type": "SetComment", "game": 1, "text": "Start"}),
@@ -472,6 +480,7 @@ fn the_board_offers_one_promotion_and_the_player_chooses_the_piece() -> serde_js
                                   f2f3 f2f4 g1f3 g1h3 g2g3 g2g4 h1h2 h1h3 h1h4 h1h5 h1h6 h7g8="),
         "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
+        "file": null, "unsaved": true,
         "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": {"from": "a6", "to": "a5"}, "place": [0, 0, 0, 0, 0, 0, 0, 0],
         "notation": main_line("h4 g5 hxg5 h6 gxh6 a6 h7 a5")
@@ -490,6 +499,7 @@ fn the_board_offers_one_promotion_and_the_player_chooses_the_piece() -> serde_js
                                       f7f5 f7f6 f8g7 f8h6 h8g8 h8h1 h8h2 h8h3 h8h4 h8h5 h8h6 h8h7"),
             "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
             "tags": [], "result": "unknown", "squares": [], "arrows": [],
+            "file": null, "unsaved": true,
             "startComments": [], "moveSymbol": null, "positionSymbol": null,
             "lastMove": {"from": "h7", "to": "g8"}, "place": [0, 0, 0, 0, 0, 0, 0, 0, 0],
             "notation": main_line("h4 g5 hxg5 h6 gxh6 a6 h7 a5 hxg8=N")
@@ -513,6 +523,7 @@ fn both_castling_gestures_give_the_same_picture_and_the_board_offers_one() -> se
                                           f3h4 g2g3 g2g4 h1f1 h1g1 h2h3 h2h4"),
                 "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
                 "tags": [], "result": "unknown", "squares": [], "arrows": [],
+                "file": null, "unsaved": true,
                 "startComments": [], "moveSymbol": null, "positionSymbol": null,
                 "lastMove": {"from": "f8", "to": "c5"}, "place": [0, 0, 0, 0, 0, 0],
                 "notation": main_line("e4 e5 Nf3 Nc6 Bc4 Bc5")
@@ -528,6 +539,7 @@ fn both_castling_gestures_give_the_same_picture_and_the_board_offers_one() -> se
                                           e8e7 e8f8 f7f5 f7f6 g7g5 g7g6 g8e7 g8f6 g8h6 h7h5 h7h6"),
                 "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
                 "tags": [], "result": "unknown", "squares": [], "arrows": [],
+                "file": null, "unsaved": true,
                 "startComments": [], "moveSymbol": null, "positionSymbol": null,
                 "lastMove": {"from": "e1", "to": "g1"}, "place": [0, 0, 0, 0, 0, 0, 0],
                 "notation": main_line("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O")
@@ -547,6 +559,7 @@ fn a_mated_side_is_in_check_and_has_no_legal_move() -> serde_json::Result<()> {
             "turn": "black", "inCheck": true, "legalMoves": [],
             "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
             "tags": [], "result": "unknown", "squares": [], "arrows": [],
+            "file": null, "unsaved": true,
             "startComments": [], "moveSymbol": null, "positionSymbol": null,
             "lastMove": {"from": "h5", "to": "f7"}, "place": [0, 0, 0, 0, 0, 0, 0],
             "notation": main_line("e4 e5 Qh5 Nc6 Bc4 Nf6 Qxf7#")
@@ -605,6 +618,7 @@ fn undo_and_redo_restore_the_board_and_report_the_available_history() -> serde_j
 
     let mut start = start_picture();
     start["notation"] = json!(main_line("e4"));
+    start["unsaved"] = json!(true);
     start["canUndo"] = json!(true);
     start["hasNextMove"] = json!(true);
     assert_picture(
@@ -669,6 +683,7 @@ fn setting_a_start_position_reports_the_board_or_the_refusal() -> serde_json::Re
     setup["legalMoves"] = json!(legal_moves("e1d1 e1d2 e1f1 e1f2 e2e3 e2e4"));
     setup["canUndo"] = json!(true);
     setup["tags"] = json!([{"name": "SetUp", "value": "1"}, {"name": "FEN", "value": fen}]);
+    setup["unsaved"] = json!(true);
     assert_eq!(
         ask(
             &mut games,
@@ -713,6 +728,7 @@ fn opening_pgn_text_gives_the_first_game_and_export_keeps_its_variation() -> ser
     let mut imported = start_picture();
     imported["hasNextMove"] = json!(true);
     imported["tags"] = json!([{"name": "White", "value": "Alpha"}]);
+    imported["unsaved"] = json!(true);
     imported["notation"] = json!(main_line("e4 e5 Nf3"));
     imported["notation"][1]["variations"] = json!([[{
         "place": [0, 1], "number": 1, "side": "black", "text": "c5",
@@ -764,6 +780,7 @@ fn opening_pgn_text_reports_the_first_problem_and_keeps_the_moves_before_it()
         let mut picture = start_picture();
         picture["hasNextMove"] = json!(true);
         picture["notation"] = json!(main_line(moves));
+        picture["unsaved"] = json!(true);
         assert_eq!(
             ask(
                 &mut Games::default(),
@@ -781,6 +798,7 @@ fn exporting_an_open_game_reports_a_writer_error() -> serde_json::Result<()> {
     let tags = json!([{"name": "FEN", "value": "broken"}]);
     let mut picture = start_picture();
     picture["tags"] = tags.clone();
+    picture["unsaved"] = json!(true);
     assert_eq!(
         ask(
             &mut games,

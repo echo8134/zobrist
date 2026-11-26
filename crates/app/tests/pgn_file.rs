@@ -4,11 +4,17 @@ use std::path::PathBuf;
 use std::{env, fs, io, process};
 
 use serde_json::{Value, json};
-use zobrist_app::ipc::{Games, Request};
+use tauri::async_runtime::block_on;
+use zobrist_app::ipc::{Request, SharedGames};
 
 fn ask(request: Value) -> serde_json::Result<Value> {
+    ask_games(&SharedGames::default(), request)
+}
+
+fn ask_games(games: &SharedGames, request: Value) -> serde_json::Result<Value> {
     let request: Request = serde_json::from_value(request)?;
-    serde_json::to_value(Games::default().answer(request))
+    let response = block_on(games.answer(request)).map_err(serde::ser::Error::custom)?;
+    serde_json::to_value(response)
 }
 
 fn fixture(name: &str) -> String {
@@ -62,6 +68,41 @@ fn opens_the_damaged_file_and_counts_its_game_with_a_problem() -> serde_json::Re
         }})
     );
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn answers_a_game_request_while_a_file_is_still_read() -> io::Result<()> {
+    use std::fs::File;
+    use std::io::Write as _;
+    use std::process::Command;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let pipe = temporary_path("held.pgn");
+    assert!(Command::new("mkfifo").arg(&pipe).status()?.success());
+    let games = SharedGames::default();
+    let open = json!({"type": "OpenPgnFile", "path": pipe.to_string_lossy()});
+    let (opened, new_game) = thread::scope(|scope| {
+        let reading = scope.spawn(|| ask_games(&games, open));
+        // This returns when Rust has the pipe open. From then on Rust waits there for a game.
+        let mut writer = File::options().write(true).open(&pipe)?;
+        let (sender, receiver) = mpsc::channel();
+        let shared = &games;
+        scope.spawn(move || sender.send(ask_games(shared, json!({"type": "NewGame"}))));
+        let new_game = receiver.recv_timeout(Duration::from_secs(10));
+        writer.write_all(b"[White \"Late\"]\n\n1. e4 *\n")?;
+        drop(writer);
+        io::Result::Ok((reading.join(), new_game))
+    })?;
+    assert_eq!(new_game.unwrap()?["game"], json!(1));
+    assert_eq!(
+        opened.unwrap()?["answer"]["rows"],
+        json!([{"number": 1, "white": "Late", "black": "?", "result": "*",
+                "date": "?", "event": "?"}])
+    );
+    fs::remove_file(pipe)
 }
 
 #[test]

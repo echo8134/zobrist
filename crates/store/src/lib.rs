@@ -1,5 +1,5 @@
-//! Reads and creates game databases, adds games to PGN files, and replaces one game of a PGN
-//! file.
+//! Reads and creates game databases, reads one game of a PGN file, adds games to PGN files, and
+//! replaces one game of a PGN file.
 //!
 //! # File format, version 1
 //!
@@ -50,7 +50,7 @@
 mod codec;
 mod pgn_file;
 
-pub use pgn_file::{PgnGameRow, add_pgn_games, replace_pgn_game};
+pub use pgn_file::{PgnGameRow, add_pgn_game, add_pgn_games, read_pgn_game, replace_pgn_game};
 
 use std::error::Error;
 use std::fmt;

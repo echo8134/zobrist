@@ -42,10 +42,32 @@ async function cellTexts() {
   return texts;
 }
 const lineColor = async () => (await line().getCSSProperty("color")).parsed.hex;
+const tabs = () => browser.$$('header [role="tab"]');
 
 async function open(path: string) {
   await field().setValue(path);
   await button("Open").click();
+}
+
+/**
+ * Opens a pipe on the page. Rust waits at the pipe until the returned function writes a game
+ * into it, so the test decides when Rust answers. Returns when Rust waits.
+ */
+async function openHeldBack(path: string) {
+  execFileSync("mkfifo", [path]);
+  await open(path);
+  // Without a reader this open fails, and with a blocking open the test could hang.
+  const pipe = await browser.waitUntil(async () => {
+    try {
+      return openSync(path, constants.O_WRONLY | constants.O_NONBLOCK);
+    } catch {
+      return false;
+    }
+  });
+  return () => {
+    writeSync(pipe, '[White "Late"]\n\n1. e4 *\n');
+    closeSync(pipe);
+  };
 }
 
 describe("the page Files", () => {
@@ -170,28 +192,33 @@ describe("the page Files", () => {
   });
 
   it("shows an answer that arrives after the page was left and shown again", async () => {
-    // Rust waits at a pipe until somebody writes into it, so the test decides when it answers.
     const slow = `${work}/slow.pgn`;
-    execFileSync("mkfifo", [slow]);
-    await open(slow);
+    const letRustAnswer = await openHeldBack(slow);
     await browser.$("nav").$("aria/Home").click();
     await expect(heading()).toHaveText("Home");
     await browser.$("nav").$("aria/Files").click();
     await expect(field()).toHaveValue(slow);
 
-    // Without a reader this open fails, and with a blocking open the test could hang.
-    const pipe = await browser.waitUntil(async () => {
-      try {
-        return openSync(slow, constants.O_WRONLY | constants.O_NONBLOCK);
-      } catch {
-        return false;
-      }
-    });
-    writeSync(pipe, '[White "Late"]\n\n1. e4 *\n');
-    closeSync(pipe);
+    letRustAnswer();
 
     await expect(rows()).toBeElementsArrayOfSize(1);
     expect(await cellTexts()).toEqual([["1", "Late", "?", "*", "?", "?"]]);
+  });
+
+  it("opens a board while Rust still reads a file", async () => {
+    const letRustAnswer = await openHeldBack(`${work}/held.pgn`);
+    try {
+      await browser.$("header").$("aria/New board").click();
+      await expect(tabs()).toBeElementsArrayOfSize(1);
+    } finally {
+      // A failed test must not leave Rust at the pipe, where it would hold up every later test.
+      letRustAnswer();
+    }
+
+    await browser.$("nav").$("aria/Files").click();
+    await expect(rows()).toBeElementsArrayOfSize(1);
+    await browser.$("header").$("aria/Close New game").click();
+    await expect(tabs()).toBeElementsArrayOfSize(0);
   });
 
   it("keeps its file while another page and a tab are shown", async () => {

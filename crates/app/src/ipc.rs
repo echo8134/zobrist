@@ -3,8 +3,11 @@
 //! The view sends a [`Request`] and gets back the [`Response`] case with the same name. The
 //! TypeScript types of the view are generated from these two types.
 
+mod game_file;
 mod pgn_file;
 
+pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
+use game_file::{InFile, OpenGame, SavedState};
 pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
 
 use std::collections::HashMap;
@@ -14,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use shakmaty::{
     Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role, Square, fen::Fen,
 };
+use tauri::async_runtime::{Mutex, spawn_blocking};
 use ts_rs::TS;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
 use zobrist_core::game::{Game, GameBuilder, MainLine, Move};
@@ -151,6 +155,26 @@ pub enum Request {
     /// Create a new, empty PGN file where nothing is yet.
     CreatePgnFile {
         /// The path as it was typed.
+        path: String,
+    },
+    /// Open one game of a PGN file as an open game of the app.
+    OpenGame {
+        /// The path of the file.
+        path: String,
+        /// The number of the game in the file, counting from 1.
+        #[ts(type = "number")]
+        number: u64,
+    },
+    /// Save an open game into its place in its file.
+    SaveGame {
+        /// The open game's number.
+        game: usize,
+    },
+    /// Save an open game as the last game of a file.
+    SaveGameAs {
+        /// The open game's number.
+        game: usize,
+        /// The path of the file. Rust creates the file when nothing is there.
         path: String,
     },
 }
@@ -436,6 +460,21 @@ pub enum Response {
         /// What the page Files shows next.
         answer: PgnFileAnswer,
     },
+    /// The open game, or the refusal.
+    OpenGame {
+        /// The game and its picture, or why there is none.
+        answer: OpenGameAnswer,
+    },
+    /// The game after it was saved into its place, or the refusal.
+    SaveGame {
+        /// Absent when the game is no longer open.
+        answer: Option<SaveGameAnswer>,
+    },
+    /// The game after it was saved as the last game of a file, or the refusal.
+    SaveGameAs {
+        /// Absent when the game is no longer open.
+        answer: Option<SaveGameAnswer>,
+    },
 }
 
 /// The complete picture after a request to set the start position.
@@ -505,6 +544,8 @@ pub struct GamePicture {
     start_comments: Vec<String>,
     place: Vec<usize>,
     notation: Vec<NotationMove>,
+    #[serde(flatten)]
+    saved: SavedState,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -643,7 +684,7 @@ impl NotationMove {
 }
 
 impl GamePicture {
-    fn from_editor(editor: &GameEditor) -> Self {
+    fn from_editor(editor: &GameEditor, file: Option<&InFile>) -> Self {
         let position = editor.position();
         let mut current = CurrentPlace {
             in_variation: editor.in_variation(),
@@ -695,32 +736,36 @@ impl GamePicture {
             },
             place: editor.place().0.clone(),
             notation,
+            saved: SavedState::of(editor.game(), file),
         }
     }
 }
 
 /// The open games of one run of the app.
 pub struct Games {
-    editors: HashMap<usize, GameEditor>,
+    open_games: HashMap<usize, OpenGame>,
     next_number: usize,
 }
 
 impl Default for Games {
     fn default() -> Self {
         Self {
-            editors: HashMap::new(),
+            open_games: HashMap::new(),
             next_number: 1,
         }
     }
 }
 
 impl Games {
-    fn open(&mut self, game: Game) -> (usize, GamePicture) {
+    fn open(&mut self, game: Game, file: Option<InFile>) -> (usize, GamePicture) {
         let number = self.next_number;
         self.next_number = number.strict_add(1);
-        let editor = GameEditor::new(game);
-        let picture = GamePicture::from_editor(&editor);
-        self.editors.insert(number, editor);
+        let open = OpenGame {
+            editor: GameEditor::new(game),
+            file,
+        };
+        let picture = open.picture();
+        self.open_games.insert(number, open);
         (number, picture)
     }
 
@@ -740,7 +785,7 @@ impl Games {
             let noun = if moves == 1 { "move" } else { "moves" };
             format!("{}, {moves} {noun} kept", problem.reason)
         });
-        let (game, picture) = self.open(*game);
+        let (game, picture) = self.open(*game, None);
         Some(OpenedGame {
             game,
             picture,
@@ -753,30 +798,41 @@ impl Games {
         game: usize,
         change: impl FnOnce(&mut GameEditor) -> T,
     ) -> Option<GamePicture> {
-        let editor = self.editors.get_mut(&game)?;
+        let open = self.open_games.get_mut(&game)?;
         // A refused edit leaves the editor at the position the view should draw.
-        let _result = change(editor);
-        Some(GamePicture::from_editor(editor))
+        let _result = change(&mut open.editor);
+        Some(open.picture())
     }
 
-    /// Applies the view's request and builds its answer before another request can edit the game.
+    /// Answers a request one step after the other. The app does not call this, because it
+    /// would hold the lock on its games while a file is read. It calls
+    /// [`SharedGames::answer`].
     #[must_use]
     pub fn answer(&mut self, request: Request) -> Response {
-        match request {
+        match self.begin(request) {
+            FirstStep::Answer(response) => *response,
+            FirstStep::FileWork(work) => work()(self),
+        }
+    }
+
+    /// Applies the view's request and builds its answer before another request can edit the
+    /// game. A request that works on a file only starts here.
+    fn begin(&mut self, request: Request) -> FirstStep {
+        let response = match request {
             Request::Version => Response::Version {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             },
             Request::NewGame => {
-                let (game, picture) = self
-                    .open(GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown));
+                let new = GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown);
+                let (game, picture) = self.open(new, None);
                 Response::NewGame { game, picture }
             }
             Request::SetStartPosition { game, fen } => Response::SetStartPosition {
-                change: self.editors.get_mut(&game).map(|editor| {
-                    let refused =
-                        fen.is_none_or(|position| editor.set_start_position(position).is_err());
+                change: self.open_games.get_mut(&game).map(|open| {
+                    let refused = fen
+                        .is_none_or(|position| open.editor.set_start_position(position).is_err());
                     PositionChange {
-                        picture: GamePicture::from_editor(editor),
+                        picture: open.picture(),
                         refused,
                     }
                 }),
@@ -785,7 +841,8 @@ impl Games {
                 opened: self.open_pgn(&text),
             },
             Request::GamePgn { game } => {
-                Response::GamePgn(PgnExport::from_editor(self.editors.get(&game)))
+                let open = self.open_games.get(&game);
+                Response::GamePgn(PgnExport::from_editor(open.map(|open| &open.editor)))
             }
             Request::SetTag { game, tag, text } => Response::SetTag {
                 picture: self.edit(game, |editor| editor.set_tag(tag.into(), &text)),
@@ -838,15 +895,67 @@ impl Games {
                 picture: self.edit(game, GameEditor::delete_rest),
             },
             Request::CloseGame { game } => {
-                self.editors.remove(&game);
+                self.open_games.remove(&game);
                 Response::CloseGame
             }
-            Request::OpenPgnFile { path } => Response::OpenPgnFile {
-                answer: pgn_file::open(&path),
-            },
-            Request::CreatePgnFile { path } => Response::CreatePgnFile {
-                answer: pgn_file::create(&path),
-            },
+            Request::OpenPgnFile { path } => return pgn_file::open(path),
+            Request::CreatePgnFile { path } => return pgn_file::create(path),
+            Request::OpenGame { path, number } => return game_file::open(path, number),
+            Request::SaveGame { game } => return game_file::save(self, game),
+            Request::SaveGameAs { game, path } => return game_file::save_as(self, game, path),
+        };
+        FirstStep::Answer(Box::new(response))
+    }
+}
+
+/// How far a request got in its first step, which has the games.
+enum FirstStep {
+    Answer(Box<Response>),
+    /// Work on a file. It needs no game and can take long, so it runs without the lock on the
+    /// games. What it returns is the last step, which has the games again.
+    FileWork(Box<dyn FnOnce() -> LastStep + Send>),
+}
+
+type LastStep = Box<dyn FnOnce(&mut Games) -> Response + Send>;
+
+impl FirstStep {
+    fn file_work<Last>(work: impl FnOnce() -> Last + Send + 'static) -> Self
+    where
+        Last: FnOnce(&mut Games) -> Response + Send + 'static,
+    {
+        Self::FileWork(Box::new(move || Box::new(work())))
+    }
+}
+
+/// The open games behind their lock, as the requests of the view share them.
+#[derive(Default)]
+pub struct SharedGames {
+    games: Mutex<Games>,
+    one_save: Mutex<()>,
+}
+
+impl SharedGames {
+    /// Answers a request. It holds the lock on the games only for the steps that touch them.
+    /// Work on a file runs between those steps, on a thread that may wait.
+    pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
+        // A save publishes its file whole. Two saves into one file that overlap would each
+        // publish it without the game of the other, so a save waits for the save before it.
+        let saves = matches!(
+            request,
+            Request::SaveGame { .. } | Request::SaveGameAs { .. }
+        );
+        let _one_save = if saves {
+            Some(self.one_save.lock().await)
+        } else {
+            None
+        };
+        let first = self.games.lock().await.begin(request);
+        match first {
+            FirstStep::Answer(response) => Ok(*response),
+            FirstStep::FileWork(work) => {
+                let last = spawn_blocking(work).await?;
+                Ok(last(&mut *self.games.lock().await))
+            }
         }
     }
 }
@@ -874,7 +983,7 @@ mod tests {
     #[test]
     fn imported_shapes_follow_their_place_and_leave_midgame_prefaces_intact() -> io::Result<()> {
         let mut editor = import(b"{Start [%cal Rd1h5]} 1. e4 {Plan [%csl Gd4]} {more} {[%cal Ge2e4]} (1. d4 {[%csl Ba1]}) {Before [%csl Yb2]} e5 *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(
             picture["arrows"],
             json!([{ "color": "red", "from": "d1", "to": "h5" }])
@@ -887,7 +996,7 @@ mod tests {
         assert_eq!(notation[1]["commentsBefore"], json!(["Before [%csl Yb2]"]));
 
         editor.go_to(Place(vec![1])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(
             picture["squares"],
             json!([{ "color": "blue", "square": "a1" }])
@@ -899,7 +1008,7 @@ mod tests {
     #[test]
     fn the_empty_game_shows_only_text_in_its_start_comments() -> io::Result<()> {
         let editor = import(b"{[%csl Gd4]} {Plan [%cal Ge2e4]} {[%clk 0:15]} *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(picture["startComments"], json!(["Plan", "[%clk 0:15]"]));
         assert_eq!(
             picture["squares"],
@@ -921,7 +1030,7 @@ mod tests {
                 imported = Some(GameEditor::new(*game));
             }
         })?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap()))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap(), None))?;
         assert_eq!(
             picture["tags"],
             json!([
@@ -947,7 +1056,7 @@ mod tests {
         })?;
         let mut editor = GameEditor::new(imported.unwrap());
         editor.go_to(Place(vec![0])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
         assert_eq!(picture["moveSymbol"], "!");
         assert_eq!(picture["positionSymbol"], "=");
         assert_eq!(picture["startComments"], json!([]));

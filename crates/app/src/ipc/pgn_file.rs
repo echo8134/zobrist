@@ -10,6 +10,22 @@ use ts_rs::TS;
 use zobrist_core::pgn::{self, Entry};
 use zobrist_store::PgnGameRow;
 
+use super::{FirstStep, Games, Response};
+
+pub(super) fn open(typed: String) -> FirstStep {
+    FirstStep::file_work(move || {
+        let answer = opened(&typed);
+        move |_: &mut Games| Response::OpenPgnFile { answer }
+    })
+}
+
+pub(super) fn create(typed: String) -> FirstStep {
+    FirstStep::file_work(move || {
+        let answer = created(&typed);
+        move |_: &mut Games| Response::CreatePgnFile { answer }
+    })
+}
+
 /// A PGN file with the list of its games, or why there is none.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "type")]
@@ -70,7 +86,7 @@ impl From<PgnGameRow> for GameRow {
     }
 }
 
-pub(super) fn open(typed: &str) -> PgnFileAnswer {
+fn opened(typed: &str) -> PgnFileAnswer {
     let path = resolve(typed);
     match list(&path) {
         Ok((rows, problems)) => PgnFileAnswer::File {
@@ -85,7 +101,7 @@ pub(super) fn open(typed: &str) -> PgnFileAnswer {
     }
 }
 
-pub(super) fn create(typed: &str) -> PgnFileAnswer {
+fn created(typed: &str) -> PgnFileAnswer {
     let path = resolve(typed);
     // `create_new` fails when anything is at the path, so it never replaces a file.
     match File::create_new(&path) {
@@ -121,7 +137,7 @@ fn list(path: &Path) -> io::Result<(Vec<GameRow>, usize)> {
 
 /// The path as the maintainer typed it, without white space at its ends. `~/` at its start is
 /// the home folder.
-fn resolve(typed: &str) -> PathBuf {
+pub(super) fn resolve(typed: &str) -> PathBuf {
     let typed = typed.trim();
     match (typed.strip_prefix("~/"), env::home_dir()) {
         (Some(below_home), Some(home)) => home.join(below_home),

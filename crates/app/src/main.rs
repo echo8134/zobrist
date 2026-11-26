@@ -1,16 +1,16 @@
 //! The zobrist desktop app.
 
-use tauri::{State, async_runtime::Mutex};
-use zobrist_app::ipc::{Games, Request, Response};
+use tauri::State;
+use zobrist_app::ipc::{Request, Response, SharedGames};
 
 #[tauri::command]
-async fn answer(request: Request, games: State<'_, Mutex<Games>>) -> Result<Response, ()> {
-    Ok(games.lock().await.answer(request))
+async fn answer(request: Request, games: State<'_, SharedGames>) -> Result<Response, ()> {
+    games.answer(request).await.map_err(|_| ())
 }
 
 fn main() -> tauri::Result<()> {
     let builder = tauri::Builder::default()
-        .manage(Mutex::new(Games::default()))
+        .manage(SharedGames::default())
         .invoke_handler(tauri::generate_handler![answer]);
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
