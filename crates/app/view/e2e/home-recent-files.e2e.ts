@@ -1,4 +1,3 @@
-import { once } from "node:events";
 import {
   mkdirSync,
   mkdtempDisposableSync,
@@ -6,15 +5,12 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { cleanupWdioSession, startWdioSession } from "@wdio/tauri-service";
+import { target, withApp } from "./app-window";
 import { pick } from "./file-picker";
 
-const target = fileURLToPath(new URL("../../../../target", import.meta.url));
 const game = '[White "Ada"]\n[Black "Bo"]\n[Result "1-0"]\n\n1. e4 1-0\n';
 const recent = (app: WebdriverIO.Browser) =>
   app.$('main section[aria-label="Recent files"]');
@@ -22,36 +18,6 @@ const selection = (app: WebdriverIO.Browser) =>
   app.$('main section[aria-label="Selection"]');
 const choosePage = (app: WebdriverIO.Browser, page: "Home" | "Files") =>
   app.$("nav").$(`aria/${page}`).click();
-
-async function freePort() {
-  await using listener = createServer().listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const address = listener.address();
-  if (!address || typeof address === "string") throw new Error("No TCP port");
-  return address.port;
-}
-
-async function withApp(
-  work: string,
-  visit: (app: WebdriverIO.Browser) => Promise<void>,
-) {
-  const app = await startWdioSession({
-    "tauri:options": { application: join(target, "debug", "zobrist-app") },
-    "wdio:tauriServiceOptions": {
-      embeddedPort: await freePort(),
-      env: {
-        XDG_DATA_HOME: join(work, "data"),
-        XDG_CACHE_HOME: join(work, "cache"),
-      },
-    },
-  });
-  try {
-    await app.switchToWindow("main");
-    await visit(app);
-  } finally {
-    await cleanupWdioSession(app);
-  }
-}
 
 async function expectRecent(app: WebdriverIO.Browser, paths: string[]) {
   const entries = recent(app).$$("button");
@@ -72,7 +38,7 @@ describe("recent PGN files on Home", () => {
     writeFileSync(club, game);
     writeFileSync(league, '[White "Lea"]\n\n1. d4 *\n');
 
-    await withApp(work.path, async (app) => {
+    await withApp(join(work.path, "data"), async (app) => {
       await expect(app.$("main h1")).toHaveText("Home");
       await expect(recent(app).$("h2")).toHaveText("Recent files");
       await expect(recent(app).$("p")).toHaveText("No recent files yet.");
@@ -96,7 +62,7 @@ describe("recent PGN files on Home", () => {
       ).toEqual(["1", "Ada", "Bo", "1-0", "?", "?"]);
     });
 
-    await withApp(work.path, async (app) => {
+    await withApp(join(work.path, "data"), async (app) => {
       await expect(app.$("main h1")).toHaveText("Home");
       await expect(app.$("aria/Lichess game link")).toBeDisplayed();
       await expectRecent(app, [club, league]);
@@ -124,7 +90,7 @@ describe("recent PGN files on Home", () => {
       join(folder, `${String(index + 1).padStart(2, "0")}.pgn`),
     );
     for (const path of paths) writeFileSync(path, game);
-    await withApp(work.path, async (app) => {
+    await withApp(join(work.path, "data"), async (app) => {
       await choosePage(app, "Files");
       await pick("Folder", folder, app);
       for (const path of paths) {
@@ -173,7 +139,7 @@ describe("recent PGN files on Home", () => {
     mkdirSync(directory, { recursive: true });
     writeFileSync(list, "[[");
     writeFileSync(path, game);
-    await withApp(work.path, async (app) => {
+    await withApp(join(work.path, "data"), async (app) => {
       await expect(recent(app).$("p")).toHaveText(
         `Could not read the recent files list at ${list}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Home.`,
       );
