@@ -1,14 +1,13 @@
 //! The engine programs registered on this computer.
 
 use std::collections::HashSet;
-use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::file_collection::{lock_collection, publish_collection};
+use super::file_collection::{lock_collection, publish_collection, read_list};
 
 /// A change to the ordered inventory, or a request to read it.
 #[derive(Deserialize, TS)]
@@ -131,25 +130,28 @@ fn entry(path: PathBuf) -> io::Result<EngineEntry> {
 }
 
 fn read(inventory: &Path) -> io::Result<Vec<EngineEntry>> {
-    let bytes = match fs::read(inventory) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let paths: Vec<PathBuf> = serde_json::from_slice(&bytes)?;
-    let mut distinct = HashSet::new();
-    if paths.iter().any(|path| !distinct.insert(path)) {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "Duplicate path in the engine inventory.",
-        ));
-    }
-    paths.into_iter().map(entry).collect()
+    read_list(
+        inventory,
+        "engine list",
+        "engine programs",
+        "Engines",
+        |bytes| {
+            let paths: Vec<PathBuf> = serde_json::from_slice(bytes)?;
+            let mut distinct = HashSet::new();
+            if paths.iter().any(|path| !distinct.insert(path)) {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "Duplicate path in the engine inventory.",
+                ));
+            }
+            paths.into_iter().map(entry).collect()
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{env, process, thread};
+    use std::{env, fs, process, thread};
 
     use serde_json::json;
 

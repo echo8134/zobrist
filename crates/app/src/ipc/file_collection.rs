@@ -357,25 +357,42 @@ fn children(path: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
-    let list = directory.join("files.json");
-    let entries = fs::read(&list).and_then(|bytes| {
-        let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(&bytes)?;
-        paths
-            .into_iter()
-            .map(|(kind, path)| CollectionEntry::new(kind, path))
-            .collect()
-    });
-    match entries {
-        Ok(entries) => Ok(entries),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(io::Error::new(
+    read_list(
+        &directory.join("files.json"),
+        "file collection",
+        "existing PGN files",
+        "Files",
+        |bytes| {
+            let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(bytes)?;
+            paths
+                .into_iter()
+                .map(|(kind, path)| CollectionEntry::new(kind, path))
+                .collect()
+        },
+    )
+}
+
+pub(super) fn read_list<T: Default>(
+    path: &Path,
+    list: &str,
+    untouched: &str,
+    page: &str,
+    decode: impl FnOnce(&[u8]) -> io::Result<T>,
+) -> io::Result<T> {
+    let result = match fs::read(path) {
+        Ok(bytes) => decode(&bytes),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(T::default()),
+        Err(error) => Err(error),
+    };
+    result.map_err(|error| {
+        io::Error::new(
             error.kind(),
             format!(
-                "Could not read the file collection at {}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.",
-                list.display()
+                "Could not read the {list} at {}. Your {untouched} are untouched. Restore the list from a backup or move it aside, then reopen {page}.",
+                path.display()
             ),
-        )),
-    }
+        )
+    })
 }
 
 fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {

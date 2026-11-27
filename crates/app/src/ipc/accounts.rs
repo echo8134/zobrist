@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::Response;
+use super::file_collection::{publish_collection, read_list};
 
 /// Offline operations on the local account preference.
 #[derive(Deserialize, TS)]
@@ -24,7 +25,7 @@ pub enum AccountRequest {
     RemoveLichessName,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Accounts {
     lichess_username: Option<String>,
@@ -33,16 +34,10 @@ struct Accounts {
 impl AccountRequest {
     /// Reads or writes the preference in the app's local data directory.
     pub fn answer(self, directory: &Path) -> io::Result<Response> {
-        let path = directory.join("accounts.json");
         match self {
-            Self::GetLichessName => {
-                let name = match fs::read(&path) {
-                    Ok(bytes) => serde_json::from_slice::<Accounts>(&bytes)?.lichess_username,
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-                    Err(error) => return Err(error),
-                };
-                Ok(Response::GetLichessName { name })
-            }
+            Self::GetLichessName => Ok(Response::GetLichessName {
+                name: read(&directory.join("accounts.json"))?.lichess_username,
+            }),
             Self::SaveLichessName { name } => {
                 let name = name.trim();
                 if name.is_empty() {
@@ -64,6 +59,16 @@ impl AccountRequest {
     }
 }
 
+fn read(path: &Path) -> io::Result<Accounts> {
+    read_list(
+        path,
+        "account list",
+        "PGN files and online accounts",
+        "User",
+        |bytes| Ok(serde_json::from_slice(bytes)?),
+    )
+}
+
 fn save(directory: &Path, lichess_username: Option<String>) -> io::Result<()> {
     fs::create_dir_all(directory)?;
     // Serialize writers across windows and processes before opening their shared staging file.
@@ -73,12 +78,10 @@ fn save(directory: &Path, lichess_username: Option<String>) -> io::Result<()> {
         .truncate(false)
         .open(directory.join("accounts.lock"))?;
     lock.lock()?;
-    let staged = directory.join("accounts.tmp");
-    let mut file = File::create(&staged)?;
-    serde_json::to_writer(&mut file, &Accounts { lichess_username })?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(staged, directory.join("accounts.json"))
+    let path = directory.join("accounts.json");
+    let mut accounts = read(&path)?;
+    accounts.lichess_username = lichess_username;
+    publish_collection(&path, &accounts)
 }
 
 #[cfg(test)]

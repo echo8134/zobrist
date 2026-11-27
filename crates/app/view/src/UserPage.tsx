@@ -85,6 +85,12 @@ export function UserPage() {
       .finally(() => setWriting(false));
   }
 
+  const errorMessage = error && (
+    <span role="alert" className={refusal}>
+      {error}
+    </span>
+  );
+
   return (
     <div className={content}>
       <div className={profile}>
@@ -101,6 +107,7 @@ export function UserPage() {
           Chess accounts
         </h2>
         <p className={secondary}>Account linking is not available yet.</p>
+        {savedName === undefined && errorMessage}
         <div className={list}>
           {providers.map(({ name, icon: Icon, description }) => (
             <details key={name} className={provider}>
@@ -154,11 +161,7 @@ export function UserPage() {
                       </button>
                     )}
                   </div>
-                  {error && (
-                    <span role="alert" className={refusal}>
-                      {error}
-                    </span>
-                  )}
+                  {savedName !== undefined && errorMessage}
                 </form>
               )}
             </details>
