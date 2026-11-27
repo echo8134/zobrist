@@ -1,6 +1,6 @@
 //! The zobrist desktop app.
 
-use tauri::{State, Window, async_runtime::spawn_blocking};
+use tauri::{Manager as _, State, Window, async_runtime::spawn_blocking};
 use zobrist_app::ipc::{DesktopRequest, Response, SharedGames};
 
 #[tauri::command]
@@ -24,7 +24,11 @@ async fn answer(
 fn main() -> tauri::Result<()> {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(SharedGames::default())
+        .setup(|app| {
+            let directory = app.path().app_local_data_dir().map_err(|e| e.to_string());
+            app.manage(SharedGames::with_history(directory));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![answer]);
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());

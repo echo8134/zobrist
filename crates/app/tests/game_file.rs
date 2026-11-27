@@ -391,6 +391,24 @@ fn saves_a_new_game_as_the_last_game_of_a_file() -> io::Result<()> {
 }
 
 #[test]
+fn reports_a_saved_game_when_the_desktop_cannot_locate_its_data_folder() -> io::Result<()> {
+    let path = folder("save-no-data-folder")?.join("game.pgn");
+    fs::write(&path, b"1. d4 *\n")?;
+    let games = SharedGames::with_history(Err("Local data folder unavailable.".into()));
+    new_game_with_e4(&games)?;
+
+    let saved = save_as(&games, 1, &path)?;
+    assert_eq!(saved["answer"]["type"], "SavedWithWarning");
+    assert_eq!(
+        saved["answer"]["warning"],
+        "Game saved. Could not keep the earlier state. Local data folder unavailable."
+    );
+    assert_eq!(saved["answer"]["picture"]["unsaved"], false);
+    assert_eq!(fs::read(path)?, b"1. d4 *\n\n1. e4 *\n");
+    Ok(())
+}
+
+#[test]
 fn saving_as_a_new_game_creates_a_file_that_is_not_there() -> io::Result<()> {
     let new = folder("save-as-new")?.join("new.pgn");
     let games = SharedGames::default();

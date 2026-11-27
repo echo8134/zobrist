@@ -629,6 +629,33 @@ test("a refused first save keeps the form open to save and gives its reason", as
   ]);
 });
 
+test("a first save with a history warning closes the form and cannot append twice", async () => {
+  const { change, shown, tabNow } = oneTab(changedWithoutFile);
+  await save(7, "Save", "/games/club.pgn", tabNow, change);
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGameAs",
+    answer: {
+      type: "SavedWithWarning",
+      picture: savedInFile,
+      warning:
+        "Game saved. Could not keep the earlier state in /history/club. The history folder is read-only.",
+    },
+  });
+
+  expect(await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change)).toBe(
+    true,
+  );
+  expect(shown().tabs[0]?.picture.unsaved).toBe(false);
+  expect(shown().tabs[0]?.gameData).toBe("closed");
+  expect(shown().tabs[0]?.saveWarning).toBe(
+    "Game saved. Could not keep the earlier state in /history/club. The history folder is read-only.",
+  );
+  expect(await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change)).toBe(
+    false,
+  );
+  expect(vi.mocked(ask)).toHaveBeenCalledTimes(1);
+});
+
 test("two confirmations waiting on the same field save only one copy", async () => {
   const { change, tabNow } = oneTab(changedWithoutFile);
   const confirm = () =>

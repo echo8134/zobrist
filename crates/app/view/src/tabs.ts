@@ -42,6 +42,7 @@ export type Tab = {
   gameData: "closed" | "open" | "openToSave";
   /** The last save, when it was refused and the game has not changed since. */
   refusedSave?: SaveRefusal;
+  saveWarning?: string | undefined;
 };
 
 export type Shown = {
@@ -68,7 +69,12 @@ export type Change =
   | { type: "showTab"; game: number }
   | { type: "turnBoard"; game: number }
   | { type: "setGameData"; game: number; gameData: Tab["gameData"] }
-  | { type: "drawPicture"; game: number; picture: GamePicture }
+  | {
+      type: "drawPicture";
+      game: number;
+      picture: GamePicture;
+      saveWarning?: string | undefined;
+    }
   | { type: "drawPlace"; game: number; picture: GamePicture }
   | { type: "refuseSave"; game: number; refusal: SaveRefusal }
   | { type: "askToClose"; game: number }
@@ -135,12 +141,14 @@ export function apply(shown: Shown, change: Change): Shown {
         bottomSide: tab.bottomSide === "white" ? "black" : "white",
       }));
     case "drawPicture":
-      // This is the picture after a change of the game or after a save, and the line of a
-      // refused save goes with both.
       return withChangedTab(
         change.picture.unsaved ? shown : withoutQuestionOf(shown, change.game),
         change.game,
-        ({ refusedSave: _, ...tab }) => ({ ...tab, picture: change.picture }),
+        ({ refusedSave: _, ...tab }) => ({
+          ...tab,
+          picture: change.picture,
+          saveWarning: change.saveWarning,
+        }),
       );
     case "drawPlace":
       return withChangedTab(shown, change.game, (tab) => ({
@@ -151,6 +159,7 @@ export function apply(shown: Shown, change: Change): Shown {
       return withChangedTab(shown, change.game, (tab) => ({
         ...tab,
         refusedSave: change.refusal,
+        saveWarning: undefined,
       }));
     case "askToClose":
       return { ...shown, asksToClose: change.game };
@@ -421,12 +430,19 @@ export async function save(
   if (answer?.type === "Refusal") {
     change({ type: "refuseSave", game, refusal: answer });
   } else if (answer !== null) {
-    change({ type: "drawPicture", game, picture: answer.picture });
+    change({
+      type: "drawPicture",
+      game,
+      picture: answer.picture,
+      saveWarning:
+        answer.type === "SavedWithWarning" ? answer.warning : undefined,
+    });
     if (tool === "ConfirmSave") {
       change({ type: "setGameData", game, gameData: "closed" });
     }
+    return true;
   }
-  return answer?.type === "Saved";
+  return false;
 }
 
 const refusedSaves: Record<GameFileRefusal, string> = {

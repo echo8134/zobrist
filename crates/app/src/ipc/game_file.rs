@@ -8,9 +8,26 @@ use serde::Serialize;
 use ts_rs::TS;
 use zobrist_core::editor::GameEditor;
 use zobrist_core::game::{Game, MainLine};
-use zobrist_store::{add_pgn_game, read_pgn_game, replace_pgn_game};
+use zobrist_store::{PgnHistory, add_pgn_game, read_pgn_game, replace_pgn_game};
 
-use super::{FirstStep, GamePicture, Games, Response, pgn_file};
+use super::{FirstStep, GamePicture, Games, Response, file_collection::history_at, pgn_file};
+
+#[derive(Clone, Default)]
+pub(super) enum SaveHistory {
+    #[default]
+    Disabled,
+    Directory(PathBuf),
+    Unavailable(String),
+}
+
+impl SaveHistory {
+    fn capture(&self) -> Option<PgnHistory<'_>> {
+        match self {
+            Self::Directory(root) => Some(history_at(root)),
+            Self::Unavailable(_) | Self::Disabled => None,
+        }
+    }
+}
 
 /// A game that is open in the app.
 pub(super) struct OpenGame {
@@ -179,17 +196,30 @@ impl Games {
 
     /// The last step of a save. The game as the file holds it becomes the game that was
     /// written, which is not the game of the editor when a request changed that one meanwhile.
-    fn saved(&mut self, game: usize, written: Result<InFile, Refused>) -> Option<SaveGameAnswer> {
-        let file = match written {
-            Ok(file) => file,
+    fn saved(
+        &mut self,
+        game: usize,
+        written: Result<(InFile, Option<String>), Refused>,
+        history: &SaveHistory,
+    ) -> Option<SaveGameAnswer> {
+        let (file, warning) = match written {
+            Ok(saved) => saved,
             Err(Refused { reason, system }) => {
                 return Some(SaveGameAnswer::Refusal { reason, system });
             }
         };
         let open = self.open_games.get_mut(&game)?;
         open.file = Some(file);
-        Some(SaveGameAnswer::Saved {
-            picture: Box::new(open.picture()),
+        let picture = Box::new(open.picture());
+        let warning = match history {
+            SaveHistory::Unavailable(reason) => Some(format!(
+                "Game saved. Could not keep the earlier state. {reason}"
+            )),
+            SaveHistory::Directory(_) | SaveHistory::Disabled => warning,
+        };
+        Some(match warning {
+            Some(warning) => SaveGameAnswer::SavedWithWarning { picture, warning },
+            None => SaveGameAnswer::Saved { picture },
         })
     }
 }
@@ -203,6 +233,13 @@ pub enum SaveGameAnswer {
         /// The picture of the game, which names its file and its number there.
         picture: Box<GamePicture>,
     },
+    /// The PGN was saved but its earlier state could not be kept.
+    SavedWithWarning {
+        /// The picture of the saved game.
+        picture: Box<GamePicture>,
+        /// The reason history was unavailable.
+        warning: String,
+    },
     /// Rust did not save the game.
     Refusal {
         /// Why.
@@ -212,7 +249,7 @@ pub enum SaveGameAnswer {
     },
 }
 
-pub(super) fn save(games: &Games, game: usize) -> FirstStep {
+pub(super) fn save(games: &Games, game: usize, history: &SaveHistory) -> FirstStep {
     let Some(open) = games.open_games.get(&game) else {
         return FirstStep::Answer(Box::new(Response::SaveGame { answer: None }));
     };
@@ -226,14 +263,21 @@ pub(super) fn save(games: &Games, game: usize) -> FirstStep {
     };
     let (path, number, held) = (file.path.clone(), file.number, file.held.clone());
     let to_write = open.editor.game().clone();
+    let history = history.clone();
     FirstStep::blocking_work(move || {
-        let written = write_in_place(&path, number, &held, &to_write).map(|()| InFile {
-            path,
-            number,
-            held: to_write,
-        });
+        let written =
+            write_in_place(&path, number, &held, &to_write, history.capture()).map(|warning| {
+                (
+                    InFile {
+                        path,
+                        number,
+                        held: to_write,
+                    },
+                    warning,
+                )
+            });
         move |games: &mut Games| Response::SaveGame {
-            answer: games.saved(game, written),
+            answer: games.saved(game, written, &history),
         }
     })
 }
@@ -245,50 +289,68 @@ fn write_in_place(
     number: NonZeroU64,
     held: &Game,
     game: &Game,
-) -> Result<(), Refused> {
-    let in_file = read_pgn_game(path, number).map_err(|error| Refused::cannot_read(&error))?;
-    if in_file.as_ref() != Some(held) {
-        return Err(Refused::without_text(GameFileRefusal::FileChanged));
-    }
-    replace_pgn_game(path, number, game).map_err(|error| Refused {
-        // The function refuses with this kind when it cannot place the game or when the
-        // new file would not read back.
-        reason: if error.kind() == io::ErrorKind::InvalidInput {
-            GameFileRefusal::CannotReplace
-        } else {
-            GameFileRefusal::CannotWrite
-        },
-        system: Some(error.to_string()),
+    history: Option<PgnHistory<'_>>,
+) -> Result<Option<String>, Refused> {
+    replace_pgn_game(path, number, game, Some(held), history).map_err(|error| {
+        if error.kind() == io::ErrorKind::ResourceBusy {
+            return Refused::without_text(GameFileRefusal::FileChanged);
+        }
+        if let Err(read_error) = std::fs::File::open(path) {
+            return Refused::cannot_read(&read_error);
+        }
+        Refused {
+            // The function refuses with this kind when it cannot place the game or when the
+            // new file would not read back.
+            reason: if error.kind() == io::ErrorKind::InvalidInput {
+                GameFileRefusal::CannotReplace
+            } else {
+                GameFileRefusal::CannotWrite
+            },
+            system: Some(error.to_string()),
+        }
     })
 }
 
-pub(super) fn save_as(games: &Games, game: usize, typed: String) -> FirstStep {
+pub(super) fn save_as(
+    games: &Games,
+    game: usize,
+    typed: String,
+    history: &SaveHistory,
+) -> FirstStep {
     let Some(open) = games.open_games.get(&game) else {
         return FirstStep::Answer(Box::new(Response::SaveGameAs { answer: None }));
     };
     let to_write = open.editor.game().clone();
+    let history = history.clone();
     FirstStep::blocking_work(move || {
-        let written = write_as_last(&typed, &to_write).map(|(path, number)| InFile {
-            path,
-            number,
-            held: to_write,
-        });
+        let written = write_as_last(&typed, to_write, history.capture());
         move |games: &mut Games| Response::SaveGameAs {
-            answer: games.saved(game, written),
+            answer: games.saved(game, written, &history),
         }
     })
 }
 
 /// Adds the game as the last game of the file. Its number is the number of games that the
 /// file then has.
-fn write_as_last(typed: &str, game: &Game) -> Result<(PathBuf, NonZeroU64), Refused> {
+fn write_as_last(
+    typed: &str,
+    game: Game,
+    history: Option<PgnHistory<'_>>,
+) -> Result<(InFile, Option<String>), Refused> {
     let path = pgn_file::resolve(typed);
-    let number = add_pgn_game(&path, game).map_err(|error| Refused {
+    let (number, warning) = add_pgn_game(&path, &game, history).map_err(|error| Refused {
         reason: GameFileRefusal::CannotWrite,
         system: Some(error.to_string()),
     })?;
     let path = path
         .canonicalize()
         .map_err(|error| Refused::cannot_read(&error))?;
-    Ok((path, number))
+    Ok((
+        InFile {
+            path,
+            number,
+            held: game,
+        },
+        warning,
+    ))
 }

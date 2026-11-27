@@ -10,14 +10,16 @@ mod pgn_file;
 
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
-    AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
+    AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EarlierState, EntryKind,
+    PickerChoice,
 };
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
-use game_file::{InFile, OpenGame, SavedState};
+use game_file::{InFile, OpenGame, SaveHistory, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
 
 use std::collections::HashMap;
 use std::io;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use shakmaty::{
@@ -573,6 +575,18 @@ pub enum Response {
         /// The root entries of the collection.
         entries: Vec<CollectionEntry>,
     },
+    /// Earlier states of this PGN, most recent first.
+    ListPgnStates {
+        /// A damaged state still has its number.
+        states: Vec<EarlierState>,
+    },
+    /// The current file as seen when the player chose a state.
+    PreparePgnRestore {
+        /// Identifies the bytes the player is about to replace.
+        stamp: String,
+    },
+    /// The chosen state is now on disk.
+    RestorePgnState,
     /// The collection and the selected file or folder after applying the picker result.
     AddPgnPath {
         /// The new selection or the reason the file operation was refused.
@@ -960,7 +974,7 @@ impl Games {
     /// [`SharedGames::answer`].
     #[must_use]
     pub fn answer(&mut self, request: Request) -> Response {
-        match self.begin(request) {
+        match self.begin(request, &SaveHistory::default()) {
             FirstStep::Answer(response) => *response,
             FirstStep::BlockingWork(work) => work()(self),
         }
@@ -968,7 +982,7 @@ impl Games {
 
     /// Applies the view's request and builds its answer before another request can edit the
     /// game. A request that waits for I/O only starts here.
-    fn begin(&mut self, request: Request) -> FirstStep {
+    fn begin(&mut self, request: Request, history: &SaveHistory) -> FirstStep {
         let response = match request {
             Request::Version => Response::Version {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -1056,8 +1070,10 @@ impl Games {
             Request::OpenPgnFile { path } => return pgn_file::open(path),
             Request::CreatePgnFile { path } => return pgn_file::create(path),
             Request::OpenGame { path, number } => return game_file::open(path, number),
-            Request::SaveGame { game } => return game_file::save(self, game),
-            Request::SaveGameAs { game, path } => return game_file::save_as(self, game, path),
+            Request::SaveGame { game } => return game_file::save(self, game, history),
+            Request::SaveGameAs { game, path } => {
+                return game_file::save_as(self, game, path, history);
+            }
         };
         FirstStep::Answer(Box::new(response))
     }
@@ -1106,9 +1122,22 @@ impl FirstStep {
 pub struct SharedGames {
     games: Mutex<Games>,
     one_save: Mutex<()>,
+    history: SaveHistory,
 }
 
 impl SharedGames {
+    /// Enables PGN history for desktop saves, reporting a directory lookup failure at Save.
+    #[must_use]
+    pub fn with_history(directory: Result<PathBuf, String>) -> Self {
+        Self {
+            history: match directory {
+                Ok(path) => SaveHistory::Directory(path),
+                Err(reason) => SaveHistory::Unavailable(reason),
+            },
+            ..Self::default()
+        }
+    }
+
     /// Answers a request. It holds the lock on the games only for the steps that touch them.
     /// File and network I/O run between those steps, on a thread that may wait.
     pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
@@ -1123,7 +1152,7 @@ impl SharedGames {
         } else {
             None
         };
-        let first = self.games.lock().await.begin(request);
+        let first = self.games.lock().await.begin(request, &self.history);
         match first {
             FirstStep::Answer(response) => Ok(*response),
             FirstStep::BlockingWork(work) => {

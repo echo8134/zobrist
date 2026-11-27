@@ -6,6 +6,10 @@ import type { Response } from "./generated/Response";
 // came and their senders have handled them.
 const onTheirWay = new Map<number, Promise<void>>();
 
+export function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Asks Rust. The answer has the type of the response case that is named like the request. */
 export function ask<Asked extends Request>(
   request: Asked,

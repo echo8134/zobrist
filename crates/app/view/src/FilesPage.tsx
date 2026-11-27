@@ -4,6 +4,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  History,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -12,13 +13,14 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { EarlierStates } from "./EarlierStates";
 import styles from "./FilesPage.module.css";
 import type { CollectionEntry } from "./generated/CollectionEntry";
 import type { PgnFile } from "./generated/PgnFile";
 import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
 import type { PickerChoice } from "./generated/PickerChoice";
 import type { RefusalReason } from "./generated/RefusalReason";
-import { ask } from "./ipc";
+import { ask, errorText } from "./ipc";
 
 const {
   toolbar,
@@ -45,6 +47,11 @@ const {
 
 type Selection =
   | { kind: "Opening"; path: string }
+  | {
+      kind: "Unreadable";
+      path: string;
+      listed: { entry: CollectionEntry; root: string } | null;
+    }
   | { kind: "Folder"; entry: CollectionEntry; root: string }
   | { kind: "File"; entry: CollectionEntry; root: string; file: PgnFile };
 
@@ -93,10 +100,6 @@ function refusalText(answer: Extract<PgnFileAnswer, { type: "Refusal" }>) {
   return answer.system === null ? reason : `${reason} ${answer.system}`;
 }
 
-function errorText(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
 async function loadCollection() {
   const request = ++collectionRequest;
   try {
@@ -136,7 +139,11 @@ export async function readFileAgain() {
         keep({ selected: { ...selected, file: answer }, error: null });
       } else {
         keep({
-          selected: null,
+          selected: {
+            kind: "Unreadable",
+            path: selected.file.path,
+            listed: { entry: selected.entry, root: selected.root },
+          },
           error: { source: "selection", message: refusalText(answer) },
         });
       }
@@ -198,7 +205,18 @@ async function openListed(entry: CollectionEntry, root: string) {
       }
     } else {
       const { answer } = await ask({ type: "OpenPgnFile", path: entry.path });
-      if (answer.type === "Refusal") throw new Error(refusalText(answer));
+      if (answer.type === "Refusal") {
+        failedSelection(
+          request,
+          {
+            kind: "Unreadable",
+            path: entry.path,
+            listed: { entry, root },
+          },
+          refusalText(answer),
+        );
+        return;
+      }
       if (request === selectionRequest) {
         keep({ selected: { kind: "File", entry, root, file: answer } });
       }
@@ -208,17 +226,25 @@ async function openListed(entry: CollectionEntry, root: string) {
   }
 }
 
-async function pick(choice: PickerChoice) {
+async function pick(choice: PickerChoice, chosenPath?: string) {
   const previous = kept.selected;
   const folder = previous?.kind === "Folder" ? previous.entry.path : null;
   let request = selectionRequest;
   try {
-    const { path } = await ask({ type: "PickPgnPath", choice, folder });
+    const path =
+      chosenPath ?? (await ask({ type: "PickPgnPath", choice, folder })).path;
     if (path === null) return;
     if (request === selectionRequest) request = beginSelection(path);
 
     const { answer } = await ask({ type: "AddPgnPath", choice, path, folder });
-    if (answer.type === "Refusal") throw new Error(refusalText(answer));
+    if (answer.type === "Refusal") {
+      const keepOnRefusal: Selection | null =
+        choice === "File"
+          ? { kind: "Unreadable", path, listed: null }
+          : previous;
+      failedSelection(request, keepOnRefusal, refusalText(answer));
+      return;
+    }
     if (request === selectionRequest) {
       const { entry, entries: roots } = answer;
       const expanded = new Map(kept.expanded);
@@ -250,6 +276,19 @@ async function pick(choice: PickerChoice) {
   }
 }
 
+async function rereadAfterRestore(path: string) {
+  const { selected } = kept;
+  if (selected?.kind === "File" && selected.file.path === path) {
+    await readFileAgain();
+  } else if (selected?.kind === "Unreadable" && selected.path === path) {
+    if (selected.listed) {
+      await openListed(selected.listed.entry, selected.listed.root);
+    } else {
+      await pick("File", path);
+    }
+  }
+}
+
 type Props = {
   onOpenGame: (path: string, number: number) => Promise<boolean>;
 };
@@ -260,6 +299,7 @@ export function FilesPage({ onOpenGame }: Props) {
     () => kept,
   );
   const [choosing, setChoosing] = useState(false);
+  const [historyPath, setHistoryPath] = useState<string | null>(null);
   const openButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     void loadCollection();
@@ -316,6 +356,9 @@ export function FilesPage({ onOpenGame }: Props) {
     </ul>
   );
   const file = selected?.kind === "File" ? selected.file : undefined;
+  const historyFile =
+    file ?? (selected?.kind === "Unreadable" ? selected : null);
+  const historyOpen = historyFile !== null && historyPath === historyFile.path;
   return (
     <>
       <div className={toolbar}>
@@ -375,6 +418,19 @@ export function FilesPage({ onOpenGame }: Props) {
         >
           New PGN…
         </button>
+        {historyFile && (
+          <button
+            type="button"
+            className={button}
+            aria-expanded={historyOpen}
+            onClick={() =>
+              setHistoryPath(historyOpen ? null : historyFile.path)
+            }
+          >
+            <History aria-hidden="true" />
+            Earlier states
+          </button>
+        )}
       </div>
       <div className={workspace}>
         <section className={collection} aria-label="Collection">
@@ -409,6 +465,16 @@ export function FilesPage({ onOpenGame }: Props) {
             <p className={pathText} role="status">
               Opening {selected.path}…
             </p>
+          )}
+          {selected?.kind === "Unreadable" && (
+            <p className={pathText}>{selected.path}</p>
+          )}
+          {historyOpen && (
+            <EarlierStates
+              key={historyFile.path}
+              file={historyFile}
+              onRestored={rereadAfterRestore}
+            />
           )}
           {!selected && !error && (
             <p className={line}>Select a file to see its games.</p>
