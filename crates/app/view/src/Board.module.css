@@ -12,6 +12,22 @@
   isolation: isolate;
 }
 
+[data-board-palette="green"] .ground cg-board {
+  background-color: var(--board-green-light);
+  background-image: conic-gradient(
+    var(--board-green-dark) 25%,
+    var(--board-green-light) 0 50%,
+    var(--board-green-dark) 0 75%,
+    var(--board-green-light) 0
+  );
+  background-size: 25% 25%;
+}
+
+[data-show-coordinates="false"] .ground :global(.ranks),
+[data-show-coordinates="false"] .ground :global(.files) {
+  display: none;
+}
+
 /* The stylesheet of the board component places the coordinates for a layout that zobrist does
    not have, and they leave their squares on a small board. The class of the component in each
    selector lets these rules win over its own rules. */

@@ -1,0 +1,47 @@
+.settings {
+  max-width: var(--settings-width);
+  margin-top: var(--settings-gap);
+}
+
+.group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.group legend {
+  width: 100%;
+  padding: 0 0 var(--list-gap-above);
+  font-size: var(--collection-heading-size);
+  font-weight: var(--top-bar-name-weight);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--button-row-gap);
+  min-height: var(--settings-row-height);
+  border-top: 1px solid var(--list-line-color);
+}
+
+.row select {
+  width: var(--settings-choice-width);
+  height: var(--field-height);
+  padding: var(--field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
+  background-color: var(--background-color);
+  color: inherit;
+  font: inherit;
+}
+
+.row input {
+  margin: 0;
+  accent-color: var(--button-color);
+}
+
+.refusal {
+  color: var(--refusal-color);
+}

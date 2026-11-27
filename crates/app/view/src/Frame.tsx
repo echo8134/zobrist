@@ -14,7 +14,6 @@ import {
   closeOrAsk,
   closeTab,
   goTo,
-  openGame,
   openTab,
   playMove,
   type SaveTool,
@@ -77,10 +76,7 @@ export function Frame() {
         onChoose={(chosen) => change({ type: "showPage", page: chosen })}
       />
       {tab === undefined ? (
-        <PageArea
-          page={page}
-          onOpenGame={(path, number) => openGame(path, number, change)}
-        />
+        <PageArea page={page} change={change} />
       ) : (
         <TabArea
           key={tab.game}

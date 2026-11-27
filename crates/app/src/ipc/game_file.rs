@@ -144,7 +144,7 @@ pub enum OpenGameAnswer {
 }
 
 pub(super) fn open(typed: String, number: u64) -> FirstStep {
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let read = read(&typed, number);
         move |games: &mut Games| Response::OpenGame {
             answer: match read {
@@ -235,7 +235,7 @@ pub(super) fn save(games: &Games, game: usize) -> FirstStep {
     };
     let (path, number, held) = (file.path.clone(), file.number, file.held.clone());
     let to_write = open.editor.game().clone();
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let written = write_in_place(&path, number, &held, &to_write).map(|()| InFile {
             path,
             number,
@@ -276,7 +276,7 @@ pub(super) fn save_as(games: &Games, game: usize, typed: String) -> FirstStep {
         return FirstStep::Answer(Box::new(Response::SaveGameAs { answer: None }));
     };
     let to_write = open.editor.game().clone();
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let written = write_as_last(&typed, &to_write).map(|(path, number)| InFile {
             path,
             number,

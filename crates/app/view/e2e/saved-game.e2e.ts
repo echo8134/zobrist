@@ -515,4 +515,29 @@ describe("the games of a file in tabs", () => {
     await expect(dot(3)).not.toExist();
     await expect(commentField()).toHaveValue("King's pawn");
   });
+
+  it("adds just one copy when Save as new game is double-clicked", async () => {
+    const path = `${work}/double-click.pgn`;
+    writeFileSync(path, newGame);
+    await showFilesPage();
+    await pick("File", path);
+    await expect(rows()).toBeElementsArrayOfSize(1);
+    await rows()[0]?.click();
+    const saveAsNew = tool("Save as new game");
+    await expect(saveAsNew).toBeEnabled();
+
+    // The window driver reports a click count of one even on the second click.
+    await browser.execute(
+      `const button = arguments[0];
+       for (const [type, detail] of [["click", 1], ["click", 2], ["dblclick", 2]]) {
+         button.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }));
+       }`,
+      await saveAsNew,
+    );
+
+    await showFilesPage();
+    await expect(rows()).toBeElementsArrayOfSize(2);
+    expect(readFileSync(path, "utf8")).toBe(`${newGame}\n${newGame}`);
+    await browser.saveScreenshot(`${screenshots}/save-as-new-double-click.png`);
+  });
 });

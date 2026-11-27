@@ -1,7 +1,8 @@
 import "@fontsource-variable/inter";
 import "./design.css";
-import { StrictMode } from "react";
+import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
+import { BoardSettingsProvider } from "./BoardSettings";
 import { Frame } from "./Frame";
 
 const root = document.getElementById("root");
@@ -10,6 +11,10 @@ if (root === null) {
 }
 createRoot(root).render(
   <StrictMode>
-    <Frame />
+    <Suspense>
+      <BoardSettingsProvider>
+        <Frame />
+      </BoardSettingsProvider>
+    </Suspense>
   </StrictMode>,
 );

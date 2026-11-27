@@ -6,7 +6,7 @@ This document is the map a reader opens first. It names the parts of zobrist and
 
 zobrist is a personal chess database desktop app written in Rust. It is meant to store the maintainer's own games, search them, and run a UCI engine for analysis. It is developed on Linux and is meant to run on macOS and Windows as well.
 
-The program is a set of Rust crates with one direction of dependency. A pure domain model sits at the bottom. Persistence and engine management sit on top of it. Two user interfaces, a CLI and a Tauri desktop shell with a React view, sit at the top and own no chess logic.
+The program is a set of Rust crates with one direction of dependency. A pure domain model sits at the bottom. Persistence, engine management, and connections to chess sites sit on top of it. Two user interfaces, a CLI and a Tauri desktop shell with a React view, sit at the top and own no chess logic.
 
 ## Code map
 
@@ -22,13 +22,17 @@ Creates a game database in zobrist's own file format, verifies its checksums, an
 
 Runs a local UCI program and collects the lines it reports for each search. It uses the standard library.
 
+### `crates/online` (zobrist-online)
+
+Owns outgoing connections to chess sites. It resolves a public Lichess game link, fetches its PGN export, and returns one finished standard game or the reason it could not be opened.
+
 ### `crates/cli` (zobrist-cli)
 
 The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell uses `core` to edit games, `store` to read and save them, and `engine` to analyse the position on the board. It holds the lock on its open games only for the steps that touch them, and works on a file between those steps.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock.
 
 ### `scripts/`
 
@@ -37,10 +41,10 @@ The quality gate. `scripts/check.sh` is the entry point. Each script says in its
 ## Dependency direction
 
 ```
-core  <-  store, engine  <-  cli, app
+core  <-  store, engine, online  <-  cli, app
 ```
 
-Read each arrow as "is depended on by". `store` and `engine` may depend on `core`. `cli` and `app` may depend on `core`, `store`, and `engine`. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. No workspace crate may depend directly on `rusqlite`. Only `app` may depend directly on the `tauri` crates.
+Read each arrow as "is depended on by". `store`, `engine`, and `online` may depend on `core`. `cli` and `app` may use each of these crates and `core` directly. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. No workspace crate may depend directly on `rusqlite`. Only `app` may depend directly on the `tauri` crates. Only `online` may depend directly on `reqwest`.
 
 `scripts/check-deps.sh` holds this rule as data and enforces it. The rule covers normal and build dependencies, not dev-dependencies.
 
@@ -88,6 +92,12 @@ Revisit if the notation panel or the large game list cannot be made acceptable, 
 The desktop starts the registered program as a child and speaks UCI over its standard streams. This lets players choose an installed executable independently of how zobrist was built. Linking engine libraries would require a new build for each choice.
 
 While the engine runs, the view polls through the typed request. Each answer identifies the game, its position revision and the search, so a line arriving after a move or restart cannot appear on the wrong board. Sending unsolicited updates would change the one-request, one-answer contract. Revisit polling if delivering analysis to an active board measurably delays play or navigation.
+
+### One client for outgoing connections to chess sites
+
+The CLI and desktop both open public Lichess links through `zobrist-online`. The crate owns the provider's HTTPS address, request limits, and cooldown. It uses `reqwest` (MIT OR Apache-2.0) with native TLS and returns game types from `zobrist-core`. Keeping this code in each interface would duplicate the request rules. Putting it in `core` would give the chess model an I/O dependency.
+
+Future connections to chess sites, including account features, belong in this crate. Revisit the client choice if a provider requires a transport it cannot support.
 
 ### An own file format for the game store
 

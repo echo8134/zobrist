@@ -13,3 +13,14 @@
   margin: var(--version-line-gap) 0 0;
   color: var(--version-line-color);
 }
+
+.gameLink {
+  width: var(--game-link-width);
+  height: var(--field-height);
+  padding: var(--field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
+  background-color: var(--background-color);
+  color: inherit;
+  font: inherit;
+}
