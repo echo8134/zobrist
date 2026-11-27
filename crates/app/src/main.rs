@@ -9,6 +9,12 @@ async fn answer(
     games: State<'_, SharedGames>,
     window: Window,
 ) -> Result<Response, String> {
+    let data_directory = |window: &Window| {
+        window
+            .path()
+            .app_local_data_dir()
+            .map_err(std::io::Error::other)
+    };
     let task = match request {
         DesktopRequest::Editor(request) => {
             return games
@@ -17,12 +23,11 @@ async fn answer(
                 .map_err(|error| error.to_string());
         }
         DesktopRequest::Collection(request) => spawn_blocking(move || request.answer(&window)),
+        DesktopRequest::Account(request) => {
+            spawn_blocking(move || request.answer(&data_directory(&window)?))
+        }
         DesktopRequest::Appearance(request) => {
-            let directory = window
-                .path()
-                .app_local_data_dir()
-                .map_err(|error| error.to_string())?;
-            spawn_blocking(move || request.answer(&directory))
+            spawn_blocking(move || request.answer(&data_directory(&window)?))
         }
     };
     task.await
