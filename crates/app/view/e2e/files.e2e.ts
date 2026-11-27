@@ -13,7 +13,7 @@ import {
 import { fileURLToPath } from "node:url";
 import { browser, expect } from "@wdio/globals";
 import { pick } from "./file-picker";
-import { exportPaths, replyWithPlayerGames } from "./game-export";
+import { exportOrigin, exportPaths, replyWithPlayerGames } from "./game-export";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
@@ -129,6 +129,7 @@ describe("the page Files", () => {
     const binary = fileURLToPath(
       new URL("../../../../target/debug/zobrist", import.meta.url),
     );
+    const fixture = exportOrigin();
     const download = () => {
       const { status, stdout, stderr } = spawnSync(
         binary,
@@ -142,7 +143,14 @@ describe("the page Files", () => {
           "2026-01-31",
           "study.pgn",
         ],
-        { cwd: work, encoding: "utf8" },
+        {
+          cwd: work,
+          encoding: "utf8",
+          env: {
+            ZOBRIST_TEST_EXPORT_PORT: fixture.port,
+            HTTPS_PROXY: fixture.origin,
+          },
+        },
       );
       expect({ status, stdout, stderr }).toEqual({
         status: 0,

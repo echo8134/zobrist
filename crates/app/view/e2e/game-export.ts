@@ -83,6 +83,8 @@ export async function startGameExports() {
       response.writeHead(400).end();
     }
   });
+  // A CLI built without fixtures reaches this listener as its HTTPS proxy.
+  server.on("connect", (_request, socket) => socket.destroy());
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -93,14 +95,15 @@ export async function startGameExports() {
   return server.unref();
 }
 
-const endpoint = () => `http://127.0.0.1:${process.env[portVariable]}`;
+export const exportOrigin = () =>
+  new URL(`http://127.0.0.1:${process.env[portVariable]}`);
 
 async function setReply(
   path: string,
   body: string,
   headers: Record<string, string> = {},
 ) {
-  const reply = await fetch(`${endpoint()}${path}`, {
+  const reply = await fetch(new URL(path, exportOrigin()), {
     method: "PUT",
     headers,
     body,
@@ -119,7 +122,7 @@ export function replyWithPlayerGames(reply: PlayerReply) {
 }
 
 export async function exportPaths(): Promise<string[]> {
-  const response = await fetch(`${endpoint()}/requests`);
+  const response = await fetch(new URL("/requests", exportOrigin()));
   const paths = await response.text();
   return paths === "" ? [] : paths.split("\n");
 }
