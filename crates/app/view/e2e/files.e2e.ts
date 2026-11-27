@@ -269,8 +269,10 @@ describe("the page Files", () => {
   });
 
   it("says why a file cannot be opened and shows no list", async () => {
-    await browser.refresh();
     await browser.$("nav").$("aria/Files").click();
+    await open(clean);
+    await expect(rows()).toBeElementsArrayOfSize(2);
+    expect(await cellTexts()).toEqual(cleanRows);
     await open(`${work}/missing.pgn`);
 
     await expect(line()).toHaveText(

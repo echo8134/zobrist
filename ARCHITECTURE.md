@@ -95,7 +95,7 @@ Revisit if a scan cannot answer a kind of query fast enough. The first answer is
 
 ### Personal PGN files on the desktop
 
-The Files page keeps references to PGN files and folders. A player can keep a repertoire in one folder and tournament games in another, close the app, and find both again on the next start. Opening a PGN keeps it in place. Saving an edit writes to that same file. The app stores the collection of paths in its own data directory.
+The Files page keeps references to PGN files and folders. A player can keep a repertoire in one folder and tournament games in another, close the app, and find both again on the next start. Opening a PGN keeps it in place. Saving an edit writes to that same file. The app stores the paths in files.json in its local data directory, which Tauri resolves with `app_local_data_dir()` for `io.github.echo8134.zobrist`.
 
 When creating a PGN, the native save dialog starts in the selected folder. Without a selected folder, it suggests a folder named `zobrist` inside the personal Documents directory reported by the operating system. When the system has no Documents directory, the player chooses the destination in the dialog. The player can change the suggested location before saving.
 

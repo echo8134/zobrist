@@ -326,16 +326,24 @@ fn children(path: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
-    match fs::read(directory.join("files.json")) {
-        Ok(bytes) => {
-            let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(&bytes)?;
-            paths
-                .into_iter()
-                .map(|(kind, path)| CollectionEntry::new(kind, path))
-                .collect()
-        }
+    let list = directory.join("files.json");
+    let entries = fs::read(&list).and_then(|bytes| {
+        let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(&bytes)?;
+        paths
+            .into_iter()
+            .map(|(kind, path)| CollectionEntry::new(kind, path))
+            .collect()
+    });
+    match entries {
+        Ok(entries) => Ok(entries),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(error),
+        Err(error) => Err(io::Error::new(
+            error.kind(),
+            format!(
+                "Could not read the file collection at {}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.",
+                list.display()
+            ),
+        )),
     }
 }
 
@@ -488,6 +496,31 @@ mod tests {
             ErrorKind::InvalidInput
         );
         assert_eq!(fs::read(directory.join("files.json"))?, bad_collection);
+        fs::remove_dir_all(directory)
+    }
+
+    #[test]
+    fn identifies_an_unreadable_collection_when_loading_it_or_opening_a_pgn() -> io::Result<()> {
+        let directory = env::temp_dir().join(format!("zobrist-damaged-list-{}", process::id()));
+        fs::create_dir(&directory)?;
+        let list = directory.join("files.json");
+        let game = directory.join("game.pgn");
+        fs::write(&list, b"[[")?;
+        fs::write(&game, b"1. e4 *\n")?;
+
+        let message = format!(
+            "Could not read the file collection at {}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.",
+            list.display()
+        );
+        assert_eq!(collection(&directory).unwrap_err().to_string(), message);
+        assert_eq!(
+            add(&directory, PickerChoice::File, &game, None)
+                .unwrap_err()
+                .to_string(),
+            message
+        );
+        assert_eq!(fs::read(list)?, b"[[");
+        assert_eq!(fs::read(game)?, b"1. e4 *\n");
         fs::remove_dir_all(directory)
     }
 

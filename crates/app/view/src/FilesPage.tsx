@@ -198,7 +198,7 @@ async function openListed(entry: CollectionEntry, root: string) {
       }
     }
   } catch (error) {
-    failedSelection(request, previous, error);
+    failedSelection(request, entry.kind === "File" ? null : previous, error);
   }
 }
 
@@ -240,7 +240,7 @@ async function pick(choice: PickerChoice) {
     // Another confirmed dialog may finish after this one, even if its file is no longer selected.
     await loadCollection();
   } catch (error) {
-    failedSelection(request, previous, error);
+    failedSelection(request, choice === "File" ? null : previous, error);
   }
 }
 
