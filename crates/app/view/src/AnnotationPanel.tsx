@@ -3,7 +3,7 @@ import styles from "./AnnotationPanel.module.css";
 import type { GamePicture } from "./generated/GamePicture";
 import type { MoveSymbol } from "./generated/MoveSymbol";
 import type { PositionSymbol } from "./generated/PositionSymbol";
-import { type Annotation, commentOfCurrentPlace } from "./tabs";
+import { type Annotation, commentOfCurrentPlace, isSaveKey } from "./tabs";
 
 const { annotationPanel, commentField, symbolRow, symbolButton } = styles;
 
@@ -99,6 +99,9 @@ export function AnnotationPanel({ picture, onAnnotate }: Props) {
         onKeyDown={(event) => {
           if (event.key === "Enter" && event.ctrlKey) {
             event.preventDefault();
+            sendComment(event.currentTarget.value);
+          } else if (isSaveKey(event)) {
+            // A save takes the text of the field with it.
             sendComment(event.currentTarget.value);
           }
         }}

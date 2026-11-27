@@ -32,6 +32,8 @@ async function playMoves(moves: string) {
   }
 }
 
+// A game without changes has nothing to save.
+const saveTools = ["Save", "Save as new game"];
 const allTools = [
   "Undo",
   "Redo",
@@ -75,13 +77,16 @@ describe("the tools above the notation", () => {
     await expect(board()).toExist();
   });
 
-  it("shows five dim buttons above the notation of a new game", async () => {
+  it("shows seven dim buttons above the notation of a new game", async () => {
     expect(
       await browser
         .$$("main aside > div:first-child button")
         .map((button) => button.getComputedLabel()),
-    ).toEqual(allTools);
-    expect(await seen()).toEqual({ notation: "", dimTools: allTools });
+    ).toEqual([...saveTools, ...allTools]);
+    expect(await seen()).toEqual({
+      notation: "",
+      dimTools: [...saveTools, ...allTools],
+    });
     expect(await tool("Undo").isEnabled()).toBe(false);
   });
 
@@ -125,6 +130,7 @@ describe("the tools above the notation", () => {
     await expectSoon(seen, {
       notation: "",
       dimTools: [
+        ...saveTools,
         "Undo",
         "Promote variation",
         "Delete variation",
@@ -251,11 +257,12 @@ describe("the tools above the notation", () => {
       deleteVariation: await left("Delete variation"),
       deleteTheRest: await left("Delete the rest"),
     }).toEqual({
-      undo: 960 + 1 + 8,
-      redo: 960 + 1 + 8 + 32 + 2,
-      promote: 960 + 1 + 8 + 2 * 32 + 2 + 12,
-      deleteVariation: 960 + 1 + 8 + 3 * 32 + 2 * 2 + 12,
-      deleteTheRest: 960 + 1 + 8 + 4 * 32 + 3 * 2 + 12,
+      // The two save buttons and the gap behind them stand before Undo.
+      undo: 960 + 1 + 8 + 2 * 32 + 2 + 12,
+      redo: 960 + 1 + 8 + 3 * 32 + 2 * 2 + 12,
+      promote: 960 + 1 + 8 + 4 * 32 + 2 * 2 + 2 * 12,
+      deleteVariation: 960 + 1 + 8 + 5 * 32 + 3 * 2 + 2 * 12,
+      deleteTheRest: 960 + 1 + 8 + 6 * 32 + 4 * 2 + 2 * 12,
     });
   });
 });

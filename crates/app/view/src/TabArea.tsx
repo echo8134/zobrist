@@ -11,9 +11,12 @@ import { NotationTools } from "./NotationTools";
 import styles from "./TabArea.module.css";
 import {
   type Annotation,
+  isSaveKey,
   type Move,
   type NotationTool,
   placeToAskFor,
+  refusedSaveLine,
+  type SaveTool,
   type Shapes,
   type Tab,
   toolForKey,
@@ -25,6 +28,7 @@ const {
   boardColumn,
   buttonRow,
   notationArea,
+  refusedSave,
   notationScroller,
 } = styles;
 
@@ -34,6 +38,7 @@ type Props = {
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
   onTool: (tool: NotationTool) => void;
+  onSave: (tool: SaveTool) => void;
   onAnnotate: (annotation: Annotation) => void;
   onShapes: (shapes: Shapes) => void;
   onSetTag: (tag: EditableTag, text: string) => Promise<boolean>;
@@ -46,6 +51,7 @@ export function TabArea({
   onMove,
   onGoTo,
   onTool,
+  onSave,
   onAnnotate,
   onShapes,
   onSetTag,
@@ -56,6 +62,12 @@ export function TabArea({
   // A plain effect runs later, and until then the key would start from the picture before.
   useLayoutEffect(() => {
     const act = (event: KeyboardEvent) => {
+      // The key of Save works in a field too. The field sends its text first.
+      if (isSaveKey(event)) {
+        event.preventDefault();
+        onSave("Save");
+        return;
+      }
       const { target } = event;
       if (
         target instanceof HTMLInputElement ||
@@ -76,7 +88,7 @@ export function TabArea({
     };
     document.addEventListener("keydown", act);
     return () => document.removeEventListener("keydown", act);
-  }, [picture, onGoTo, onTool]);
+  }, [picture, onGoTo, onTool, onSave]);
 
   // The board keeps the window from moving the focus when the player clicks on it. So a
   // press of the mouse outside the field or the choice that has the focus takes the focus
@@ -117,7 +129,12 @@ export function TabArea({
         </div>
       </div>
       <aside className={notationArea}>
-        <NotationTools picture={picture} onUse={onTool} />
+        <NotationTools picture={picture} onUse={onTool} onSave={onSave} />
+        {tab.refusedSave !== undefined && (
+          <p className={refusedSave} role="alert">
+            {refusedSaveLine(tab.refusedSave)}
+          </p>
+        )}
         <GameDataForm
           picture={picture}
           onSetTag={onSetTag}

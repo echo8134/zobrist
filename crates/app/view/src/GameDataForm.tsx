@@ -4,7 +4,7 @@ import styles from "./GameDataForm.module.css";
 import type { EditableTag } from "./generated/EditableTag";
 import type { GamePicture } from "./generated/GamePicture";
 import type { GameResult } from "./generated/GameResult";
-import { tagValue } from "./tabs";
+import { isSaveKey, tagValue } from "./tabs";
 
 const { form, field, fieldName, control, refused, hint, choice } = styles;
 
@@ -38,8 +38,12 @@ export function GameDataForm({ picture, onSetTag, onSetResult }: Props) {
       aria-label="Game data"
       onSubmit={(event) => event.preventDefault()}
       // A key that is pressed in the form belongs to the form. It does not reach the keys
-      // that walk through the game or change it.
-      onKeyDown={(event) => event.stopPropagation()}
+      // that walk through the game or change it. Only the key of Save goes on to the tab.
+      onKeyDown={(event) => {
+        if (!isSaveKey(event)) {
+          event.stopPropagation();
+        }
+      }}
     >
       {fields.map((name) => (
         <Field
@@ -138,7 +142,8 @@ function Field({ name, value, onSend }: FieldProps) {
         onChange={(event) => setTyped(event.target.value)}
         onBlur={() => void send()}
         onKeyDown={(event) => {
-          if (event.key === "Enter") {
+          // A save takes the text of the field with it.
+          if (event.key === "Enter" || isSaveKey(event)) {
             void send();
           }
         }}

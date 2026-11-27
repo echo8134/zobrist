@@ -63,6 +63,51 @@
   color: var(--current-tab-color);
 }
 
+.dot {
+  display: inline-block;
+  width: var(--tab-dot-size);
+  height: var(--tab-dot-size);
+  margin-right: var(--tab-dot-gap);
+  border-radius: 50%;
+  background-color: var(--tab-dot-color);
+  vertical-align: middle;
+}
+
+/* The two answers stand where the close button stood, and the question ends before them. */
+.asking .tabButton {
+  width: var(--asking-tab-width);
+  padding-right: calc(
+    var(--tab-padding-right) +
+    2 *
+    var(--tab-answer-width) +
+    2 *
+    var(--tab-answer-gap)
+  );
+  font-size: var(--tab-question-size);
+}
+
+.answers {
+  position: absolute;
+  top: 0;
+  right: var(--tab-padding-right);
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--tab-answer-gap);
+}
+
+.answers button {
+  width: var(--tab-answer-width);
+  height: var(--tab-answer-height);
+  padding: 0;
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--close-button-corner-radius);
+  background-color: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+  font-size: var(--tab-question-size);
+}
+
 .closeButton {
   position: absolute;
   top: 0;

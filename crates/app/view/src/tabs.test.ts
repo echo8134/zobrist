@@ -1,19 +1,24 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import type { GamePicture } from "./generated/GamePicture";
 import type { NotationMove } from "./generated/NotationMove";
-import { ask } from "./ipc";
+import { answersOnTheirWay, ask } from "./ipc";
 import {
   annotate,
   apply,
   askForTool,
   type Change,
+  closeOrAsk,
   closeTab,
   commentOfCurrentPlace,
   goTo,
+  isSaveKey,
+  openGame,
   openTab,
   placeToAskFor,
   playMove,
+  refusedSaveLine,
   type Shown,
+  save,
   setResult,
   setShapes,
   setTag,
@@ -21,10 +26,11 @@ import {
   toolForKey,
 } from "./tabs";
 
-vi.mock("./ipc", () => ({ ask: vi.fn() }));
+vi.mock("./ipc", () => ({ ask: vi.fn(), answersOnTheirWay: vi.fn() }));
 
 beforeEach(() => {
   vi.mocked(ask).mockReset();
+  vi.mocked(answersOnTheirWay).mockReset();
 });
 
 // The tab state hands a picture on and reads none of its fields. With one field here, a new
@@ -440,4 +446,363 @@ test("the comment of a game without moves is its start comment", () => {
       startComments: ["Not", "played"],
     }),
   ).toBe("Not played");
+});
+
+test("a game of a file opens in a tab, and a game that is open already gets no second tab", async () => {
+  const { change, shown } = tabState({
+    tabs: [{ game: 3, picture, bottomSide: "black" }],
+    page: "Files",
+    shownTab: undefined,
+  });
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "OpenGame",
+    answer: { type: "Game", game: 7, picture: pictureAfterE4 },
+  });
+
+  expect(await openGame("/games/club.pgn", 2, change)).toBe(true);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "OpenGame", path: "/games/club.pgn", number: 2 }],
+  ]);
+  expect(shown()).toEqual({
+    tabs: [
+      { game: 3, picture, bottomSide: "black" },
+      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+    ],
+    page: "Files",
+    shownTab: 7,
+  });
+
+  // Rust answers with the open game that exists.
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "OpenGame",
+    answer: { type: "Game", game: 3, picture },
+  });
+  expect(await openGame("/games/club.pgn", 1, change)).toBe(true);
+  expect(shown()).toEqual({
+    tabs: [
+      { game: 3, picture, bottomSide: "black" },
+      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+    ],
+    page: "Files",
+    shownTab: 3,
+  });
+});
+
+test("a game that Rust does not open changes nothing", async () => {
+  const atStart: Shown = { tabs: [], page: "Files", shownTab: undefined };
+  const { change, shown } = tabState(atStart);
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "OpenGame",
+    answer: { type: "Refusal", reason: "noSuchGame", system: null },
+  });
+
+  expect(await openGame("/games/club.pgn", 9, change)).toBe(false);
+  expect(shown()).toEqual(atStart);
+});
+
+const inClub = { path: "/games/club.pgn", number: 2 };
+const changedFromFile = {
+  ...picture,
+  file: inClub,
+  unsaved: true,
+} as GamePicture;
+const savedInFile = { ...picture, file: inClub, unsaved: false } as GamePicture;
+const changedWithoutFile = {
+  ...picture,
+  file: null,
+  unsaved: true,
+} as GamePicture;
+const emptyWithoutFile = {
+  ...picture,
+  file: null,
+  unsaved: false,
+} as GamePicture;
+
+function oneTab(ofTheTab: GamePicture) {
+  const state = tabState({
+    tabs: [{ game: 7, picture: ofTheTab, bottomSide: "white" }],
+    page: "Home",
+    shownTab: 7,
+  });
+  const tabNow = (game: number) =>
+    state.shown().tabs.find((tab) => tab.game === game);
+  return { ...state, tabNow };
+}
+
+test("Save writes a game from a file back into its place", async () => {
+  const { change, shown, tabNow } = oneTab(changedFromFile);
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGame",
+    answer: { type: "Saved", picture: savedInFile },
+  });
+
+  expect(await save(7, "Save", "/games/other.pgn", tabNow, change)).toBe(true);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([[{ type: "SaveGame", game: 7 }]]);
+  expect(shown().tabs).toEqual([
+    { game: 7, picture: savedInFile, bottomSide: "white" },
+  ]);
+});
+
+test("Save adds a game without a file to the file of the page Files", async () => {
+  const { change, shown, tabNow } = oneTab(changedWithoutFile);
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGameAs",
+    answer: { type: "Saved", picture: savedInFile },
+  });
+
+  expect(await save(7, "Save", "/games/club.pgn", tabNow, change)).toBe(true);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "SaveGameAs", game: 7, path: "/games/club.pgn" }],
+  ]);
+  expect(shown().tabs[0]?.picture).toBe(savedInFile);
+});
+
+test("Save as new game adds a game to the file that it came from", async () => {
+  const { change, shown, tabNow } = oneTab(savedInFile);
+  const asLastGame = {
+    ...picture,
+    file: { path: "/games/club.pgn", number: 3 },
+    unsaved: false,
+  } as GamePicture;
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGameAs",
+    answer: { type: "Saved", picture: asLastGame },
+  });
+
+  expect(
+    await save(7, "SaveAsNewGame", "/games/other.pgn", tabNow, change),
+  ).toBe(true);
+
+  expect(vi.mocked(ask).mock.calls).toEqual([
+    [{ type: "SaveGameAs", game: 7, path: "/games/club.pgn" }],
+  ]);
+  expect(shown().tabs[0]?.picture).toBe(asLastGame);
+});
+
+test.each(["Save", "SaveAsNewGame"] as const)(
+  "%s of a game without a file asks for a file on the page Files and saves nothing",
+  async (tool) => {
+    const { change, shown, tabNow } = oneTab(changedWithoutFile);
+
+    expect(await save(7, tool, undefined, tabNow, change)).toBe(false);
+
+    expect(vi.mocked(ask)).not.toHaveBeenCalled();
+    expect(shown().tabs).toEqual([
+      {
+        game: 7,
+        picture: changedWithoutFile,
+        bottomSide: "white",
+        refusedSave: { type: "Refusal", reason: "noFile", system: null },
+      },
+    ]);
+  },
+);
+
+test("a game without changes is not saved, and an empty game is not saved as a new game", async () => {
+  const fromFile = oneTab(savedInFile);
+  await save(7, "Save", "/games/club.pgn", fromFile.tabNow, fromFile.change);
+
+  const empty = oneTab(emptyWithoutFile);
+  await save(7, "Save", "/games/club.pgn", empty.tabNow, empty.change);
+  await save(7, "SaveAsNewGame", "/games/club.pgn", empty.tabNow, empty.change);
+
+  const closed = oneTab(changedFromFile);
+  await save(8, "Save", "/games/club.pgn", closed.tabNow, closed.change);
+
+  expect(vi.mocked(ask)).not.toHaveBeenCalled();
+  expect(empty.shown().tabs).toEqual([
+    { game: 7, picture: emptyWithoutFile, bottomSide: "white" },
+  ]);
+});
+
+test("a save takes the game as it is after the answers to the requests before it", async () => {
+  const { change, shown, tabNow } = oneTab(savedInFile);
+  // The change that the player made right before the save is drawn while the save waits.
+  vi.mocked(answersOnTheirWay).mockReturnValueOnce(
+    Promise.resolve().then(() =>
+      change({ type: "drawPicture", game: 7, picture: changedFromFile }),
+    ),
+  );
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGame",
+    answer: { type: "Saved", picture: savedInFile },
+  });
+
+  await save(7, "Save", undefined, tabNow, change);
+
+  expect(vi.mocked(answersOnTheirWay).mock.calls).toEqual([[7]]);
+  expect(vi.mocked(ask).mock.calls).toEqual([[{ type: "SaveGame", game: 7 }]]);
+  expect(shown().tabs[0]?.picture).toBe(savedInFile);
+});
+
+test("a refused save stays as a line until the game changes or a save works", async () => {
+  const { change, shown, tabNow } = oneTab(changedFromFile);
+  const refusal = {
+    type: "Refusal",
+    reason: "fileChanged",
+    system: null,
+  } as const;
+  const refused = { type: "SaveGame", answer: refusal } as const;
+  vi.mocked(ask).mockResolvedValueOnce(refused);
+
+  expect(await save(7, "Save", undefined, tabNow, change)).toBe(false);
+
+  expect(shown().tabs).toEqual([
+    {
+      game: 7,
+      picture: changedFromFile,
+      bottomSide: "white",
+      refusedSave: refusal,
+    },
+  ]);
+
+  // A walk through the game is no change of the game.
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "GoTo",
+    picture: changedFromFile,
+  });
+  await goTo(7, [0], change);
+  expect(shown().tabs[0]?.refusedSave).toEqual(refusal);
+
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "PlayMove",
+    picture: changedFromFile,
+  });
+  await playMove(7, { from: "e2", to: "e4", promotion: null }, change);
+  expect(shown().tabs[0]).not.toHaveProperty("refusedSave");
+
+  vi.mocked(ask).mockResolvedValueOnce(refused);
+  await save(7, "Save", undefined, tabNow, change);
+  expect(shown().tabs[0]?.refusedSave).toEqual(refusal);
+
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGame",
+    answer: { type: "Saved", picture: savedInFile },
+  });
+  await save(7, "Save", undefined, tabNow, change);
+  expect(shown().tabs).toEqual([
+    { game: 7, picture: savedInFile, bottomSide: "white" },
+  ]);
+  expect(shown().tabs[0]).not.toHaveProperty("refusedSave");
+});
+
+test("a save whose game is no longer open changes nothing", async () => {
+  const { change, shown, tabNow } = oneTab(changedFromFile);
+  vi.mocked(ask).mockResolvedValueOnce({ type: "SaveGame", answer: null });
+
+  expect(await save(7, "Save", undefined, tabNow, change)).toBe(false);
+
+  expect(shown().tabs).toEqual([
+    { game: 7, picture: changedFromFile, bottomSide: "white" },
+  ]);
+});
+
+test("the line of a refused save says what went wrong and what the system said", () => {
+  expect(
+    refusedSaveLine({ type: "Refusal", reason: "noFile", system: null }),
+  ).toBe("Open a file on the page Files first.");
+  expect(
+    refusedSaveLine({ type: "Refusal", reason: "fileChanged", system: null }),
+  ).toBe("The file changed since this game was opened. Save it as a new game.");
+  expect(
+    refusedSaveLine({
+      type: "Refusal",
+      reason: "cannotWrite",
+      system: "Permission denied (os error 13)",
+    }),
+  ).toBe("The file cannot be written. Permission denied (os error 13)");
+});
+
+test("Ctrl+S is the key of Save", () => {
+  expect(isSaveKey({ key: "s", ctrlKey: true, shiftKey: false })).toBe(true);
+  expect(isSaveKey({ key: "S", ctrlKey: true, shiftKey: false })).toBe(true);
+  expect(isSaveKey({ key: "s", ctrlKey: false, shiftKey: false })).toBe(false);
+  expect(isSaveKey({ key: "S", ctrlKey: true, shiftKey: true })).toBe(false);
+  expect(isSaveKey({ key: "z", ctrlKey: true, shiftKey: false })).toBe(false);
+});
+
+test("a tab without changes closes at once, and a tab with changes asks first", () => {
+  const saved = oneTab(savedInFile);
+
+  closeOrAsk(7, saved.tabNow, saved.change);
+
+  expect(vi.mocked(answersOnTheirWay).mock.calls).toEqual([[7]]);
+  expect(vi.mocked(ask).mock.calls).toEqual([[{ type: "CloseGame", game: 7 }]]);
+  expect(saved.shown()).toEqual({
+    tabs: [],
+    page: "Home",
+    shownTab: undefined,
+  });
+
+  const changed = oneTab(changedFromFile);
+
+  closeOrAsk(7, changed.tabNow, changed.change);
+  // A tab that is gone already has nothing to close and nothing to ask.
+  closeOrAsk(8, changed.tabNow, changed.change);
+
+  expect(vi.mocked(ask)).toHaveBeenCalledTimes(1);
+  expect(changed.shown()).toEqual({
+    tabs: [{ game: 7, picture: changedFromFile, bottomSide: "white" }],
+    page: "Home",
+    shownTab: 7,
+    asksToClose: 7,
+  });
+});
+
+test("a tab asks when a change of its game arrives while the close waits for it", async () => {
+  const { change, shown, tabNow } = oneTab(savedInFile);
+  // The change that the player made right before the click is drawn while the close waits.
+  vi.mocked(answersOnTheirWay).mockReturnValueOnce(
+    Promise.resolve().then(() =>
+      change({ type: "drawPicture", game: 7, picture: changedFromFile }),
+    ),
+  );
+
+  const closed = closeOrAsk(7, tabNow, change);
+
+  expect(shown().tabs[0]?.picture).toBe(savedInFile);
+  await closed;
+  expect(vi.mocked(ask)).not.toHaveBeenCalled();
+  expect(shown()).toEqual({
+    tabs: [{ game: 7, picture: changedFromFile, bottomSide: "white" }],
+    page: "Home",
+    shownTab: 7,
+    asksToClose: 7,
+  });
+});
+
+test("the question ends with Keep, with the close of its tab, and when its game has no changes any more", () => {
+  const asking: Shown = {
+    tabs: [
+      { game: 7, picture: changedFromFile, bottomSide: "white" },
+      { game: 8, picture: changedWithoutFile, bottomSide: "white" },
+    ],
+    page: "Home",
+    shownTab: 7,
+    asksToClose: 7,
+  };
+
+  expect(apply(asking, { type: "keepTab" })).not.toHaveProperty("asksToClose");
+  expect(apply(asking, { type: "closeTab", game: 7 })).toEqual({
+    tabs: [{ game: 8, picture: changedWithoutFile, bottomSide: "white" }],
+    page: "Home",
+    shownTab: 8,
+  });
+  expect(
+    apply(asking, { type: "drawPicture", game: 7, picture: savedInFile }),
+  ).not.toHaveProperty("asksToClose");
+
+  // Another tab and a game that still has changes leave the question.
+  expect(apply(asking, { type: "closeTab", game: 8 }).asksToClose).toBe(7);
+  expect(
+    apply(asking, { type: "drawPicture", game: 8, picture: emptyWithoutFile })
+      .asksToClose,
+  ).toBe(7);
+  expect(
+    apply(asking, { type: "drawPicture", game: 7, picture: changedFromFile })
+      .asksToClose,
+  ).toBe(7);
 });

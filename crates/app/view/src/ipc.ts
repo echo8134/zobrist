@@ -2,9 +2,44 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Request } from "./generated/Request";
 import type { Response } from "./generated/Response";
 
+// For each game, the answers that are still on their way. An entry leaves when its answers
+// came and their senders have handled them.
+const onTheirWay = new Map<number, Promise<void>>();
+
 /** Asks Rust. The answer has the type of the response case that is named like the request. */
 export function ask<Asked extends Request>(
   request: Asked,
 ): Promise<Extract<Response, { type: Asked["type"] }>> {
-  return invoke("answer", { request });
+  const answer = invoke<Extract<Response, { type: Asked["type"] }>>("answer", {
+    request,
+  });
+  if ("game" in request) {
+    const { game } = request;
+    const handled: Promise<void> = Promise.allSettled([
+      onTheirWay.get(game),
+      answer,
+    ])
+      // A sender handles its answer in the same turn of the event loop in which it came.
+      .then(() => new Promise<void>((nextTurn) => setTimeout(nextTurn)))
+      .then(() => {
+        if (onTheirWay.get(game) === handled) {
+          onTheirWay.delete(game);
+        }
+      });
+    onTheirWay.set(game, handled);
+  }
+  return answer;
+}
+
+/**
+ * The answers about a game that are still on their way, or nothing when none is. The promise
+ * resolves when Rust has answered every request about the game that was sent so far, and the
+ * senders have handled those answers.
+ *
+ * Rust answers each request in a task of its own, so two requests that follow each other
+ * closely can reach a game in the other order. A save waits here, or it could write the game
+ * without the change that the player made right before it.
+ */
+export function answersOnTheirWay(game: number) {
+  return onTheirWay.get(game);
 }
