@@ -81,6 +81,26 @@
   --board-squares-per-side: 8;
   --button-row-gap: 12px;
   --button-row-height: 28px;
+  --position-button-gap: 6px;
+  --position-button-padding: 0 10px;
+  --position-panel-padding: 16px;
+  --position-group-gap: 12px;
+  --pgn-field-height: 200px;
+  --setup-piece-size: 36px;
+  --setup-piece-gap: 4px;
+  --setup-square-width: 64px;
+  --setup-area-width: min(
+    55%,
+    calc(
+      13 *
+      var(--setup-piece-size) +
+      12 *
+      var(--setup-piece-gap) +
+      2 *
+      var(--position-panel-padding) +
+      1px
+    )
+  );
 
   --coordinate-size: 11px;
   --coordinate-weight: 600;

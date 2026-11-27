@@ -8,9 +8,11 @@ import type { GameResult } from "./generated/GameResult";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
+import { PositionPanel, PositionTools } from "./PositionTools";
 import styles from "./TabArea.module.css";
 import {
   type Annotation,
+  type Change,
   isSaveKey,
   type Move,
   type NotationTool,
@@ -34,6 +36,7 @@ const {
 
 type Props = {
   tab: Tab;
+  change: (change: Change) => void;
   onTurnBoard: () => void;
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
@@ -47,6 +50,7 @@ type Props = {
 
 export function TabArea({
   tab,
+  change,
   onTurnBoard,
   onMove,
   onGoTo,
@@ -57,10 +61,11 @@ export function TabArea({
   onSetTag,
   onSetResult,
 }: Props) {
-  const { picture } = tab;
+  const { game, panel, picture } = tab;
   // A layout effect, so that a key right after a new picture is drawn starts from that picture.
   // A plain effect runs later, and until then the key would start from the picture before.
   useLayoutEffect(() => {
+    if (panel !== undefined) return;
     const act = (event: KeyboardEvent) => {
       // The key of Save works in a field too. The field sends its text first.
       if (isSaveKey(event)) {
@@ -88,7 +93,7 @@ export function TabArea({
     };
     document.addEventListener("keydown", act);
     return () => document.removeEventListener("keydown", act);
-  }, [picture, onGoTo, onTool, onSave]);
+  }, [panel, picture, onGoTo, onTool, onSave]);
 
   // The board keeps the window from moving the focus when the player clicks on it. So a
   // press of the mouse outside the field or the choice that has the focus takes the focus
@@ -114,6 +119,21 @@ export function TabArea({
       <div className={boardPart}>
         <div className={boardColumn}>
           <Board
+            key={panel?.type === "setup" ? "setup" : "game"}
+            setup={
+              panel?.type === "setup"
+                ? {
+                    draft: panel.draft,
+                    pending: panel.status === "pending",
+                    onChange: (draft) =>
+                      change({
+                        type: "setPanel",
+                        game,
+                        panel: { type: "setup", draft },
+                      }),
+                  }
+                : undefined
+            }
             picture={picture}
             bottomSide={tab.bottomSide}
             onMove={onMove}
@@ -125,10 +145,11 @@ export function TabArea({
               icon={ArrowUpDown}
               onClick={onTurnBoard}
             />
+            <PositionTools tab={tab} change={change} />
           </div>
         </div>
       </div>
-      <aside className={notationArea}>
+      <PositionPanel tab={tab} change={change} className={notationArea}>
         <NotationTools picture={picture} onUse={onTool} onSave={onSave} />
         {tab.refusedSave !== undefined && (
           <p className={refusedSave} role="alert">
@@ -149,7 +170,7 @@ export function TabArea({
           />
         </div>
         <AnnotationPanel picture={picture} onAnnotate={onAnnotate} />
-      </aside>
+      </PositionPanel>
     </main>
   );
 }

@@ -84,6 +84,7 @@ export function Frame() {
         <TabArea
           key={tab.game}
           tab={tab}
+          change={change}
           onTurnBoard={() => change({ type: "turnBoard", game: tab.game })}
           onMove={(move) => playMove(tab.game, move, change)}
           onGoTo={(place) => goTo(tab.game, place, change)}

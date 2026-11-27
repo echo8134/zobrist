@@ -27,6 +27,8 @@
 
 .buttonRow {
   display: flex;
+  align-items: center;
+  gap: var(--position-button-gap);
   height: var(--button-row-height);
 }
 
