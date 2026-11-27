@@ -18,6 +18,8 @@ use super::{EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Request, Respon
 pub enum DesktopRequest {
     /// Requests answered by the games and PGN editor.
     Editor(Request),
+    /// Start, stop or poll a board's engine analysis.
+    Analysis(super::analysis::AnalysisRequest),
     /// Requests about the player's collection or the system picker.
     Collection(CollectionRequest),
 }

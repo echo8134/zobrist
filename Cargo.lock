@@ -5206,6 +5206,7 @@ dependencies = [
  "tauri-plugin-wdio-webdriver",
  "ts-rs",
  "zobrist-core",
+ "zobrist-engine",
  "zobrist-store",
 ]
 
@@ -5225,6 +5226,10 @@ dependencies = [
  "pgn-reader",
  "shakmaty",
 ]
+
+[[package]]
+name = "zobrist-engine"
+version = "0.1.0"
 
 [[package]]
 name = "zobrist-store"

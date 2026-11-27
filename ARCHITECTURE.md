@@ -18,9 +18,9 @@ The chess domain model. Pure. No IO and no framework dependencies.
 
 Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. It also reads one game of a PGN file by its number, adds games to a PGN file, and replaces one game of a PGN file. Adding and replacing keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Search over games and positions is planned.
 
-### `crates/engine` (zobrist-engine, planned)
+### `crates/engine` (zobrist-engine)
 
-UCI engine process management.
+Runs a local UCI program and collects the lines it reports for each search. It uses the standard library.
 
 ### `crates/cli` (zobrist-cli)
 
@@ -28,7 +28,7 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for the games and on `store` for the games that it reads from a PGN file and saves into one. It holds the lock on its open games only for the steps that touch them, and works on a file between those steps.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell uses `core` to edit games, `store` to read and save them, and `engine` to analyse the position on the board. It holds the lock on its open games only for the steps that touch them, and works on a file between those steps.
 
 ### `scripts/`
 
@@ -40,7 +40,7 @@ The quality gate. `scripts/check.sh` is the entry point. Each script says in its
 core  <-  store, engine  <-  cli, app
 ```
 
-Read each arrow as "is depended on by". `store` and `engine` depend on `core`. `cli` and `app` depend on `core`, `store`, and `engine`. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. No workspace crate may depend directly on `rusqlite`. Only `app` may depend directly on the `tauri` crates.
+Read each arrow as "is depended on by". `store` and `engine` may depend on `core`. `cli` and `app` may depend on `core`, `store`, and `engine`. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. No workspace crate may depend directly on `rusqlite`. Only `app` may depend directly on the `tauri` crates.
 
 `scripts/check-deps.sh` holds this rule as data and enforces it. The rule covers normal and build dependencies, not dev-dependencies.
 
@@ -82,6 +82,12 @@ Rust owns every open game. Opening, playing, and navigating return the whole pic
 The view is styled with plain CSS and builds its own controls. It uses no component library and no utility-class framework. The design is hairlines, text, and a few controls, and a library brings a look of its own that zobrist would have to undo. `crates/app/view/src/design.css` holds the design values, and each component has a stylesheet of its own. The cost is that zobrist builds and tests every control itself, also the hard ones that come later, such as the long game list and the tiles. A later switch touches every component. Revisit this choice when a control costs more to build than a library costs to restyle.
 
 Revisit if the notation panel or the large game list cannot be made acceptable, or if the webview fails on Linux, the development platform. The fallback is egui in `app`, which leaves `core`, `store`, and `engine` unchanged.
+
+### Local engine analysis on the board
+
+The desktop starts the registered program as a child and speaks UCI over its standard streams. This lets players choose an installed executable independently of how zobrist was built. Linking engine libraries would require a new build for each choice.
+
+While the engine runs, the view polls through the typed request. Each answer identifies the game, its position revision and the search, so a line arriving after a move or restart cannot appear on the wrong board. Sending unsolicited updates would change the one-request, one-answer contract. Revisit polling if delivering analysis to an active board measurably delays play or navigation.
 
 ### An own file format for the game store
 
