@@ -285,12 +285,54 @@ describe("the window", () => {
       await expect(heading()).toHaveText(name);
       expect(await currentEntries()).toEqual([name]);
 
-      if (name === "Events" || name === "User") {
+      if (name === "Events") {
         await expect(browser.$("main")).toHaveText(name);
         expect(await browser.$$("main > *").length).toBe(1);
       }
     });
   }
+
+  it("shows the two unconnected chess accounts and their details on User", async () => {
+    await entry("User").click();
+    expect(await browser.$$("main h2").map((title) => title.getText())).toEqual(
+      ["Local profile", "Chess accounts"],
+    );
+    expect(
+      await browser.$$("main h2 + p").map((line) => line.getText()),
+    ).toEqual(["On this device", "Account linking is not available yet."]);
+    await expect(browser.$$("main summary")).toBeElementsArrayOfSize(2);
+    expect(await screenshot("user")).toEqual({ width: 1280, height: 800 });
+    const accounts = [
+      [
+        "Lichess",
+        "Once linking is available, you can sign in to Lichess from your browser to open your bookmarked games.",
+      ],
+      [
+        "Chess.com",
+        "You can already download your games as PGN from Chess.com and open them in Files.",
+      ],
+    ] as const;
+    for (const [index, [name, description]] of accounts.entries()) {
+      const account = browser.$(`main details:nth-of-type(${index + 1})`);
+      const summary = account.$("summary");
+      const text = account.$("p");
+      await expect(summary).toHaveText(expect.stringContaining(name));
+      await expect(summary).toHaveText(
+        expect.stringContaining("Not connected"),
+      );
+      await expect(account).not.toHaveAttribute("open");
+      await summary.click();
+      await expect(account).toHaveAttribute("open");
+      await expect(text).toBeDisplayed();
+      await expect(text).toHaveText(description);
+      await summary.click();
+      await expect(account).not.toHaveAttribute("open");
+      await expect(summary).toHaveText(
+        expect.stringContaining("Not connected"),
+      );
+    }
+    await expect(heading()).toHaveText("User");
+  });
 
   it("shows on Settings the version that Rust answered", async () => {
     await entry("Settings").click();

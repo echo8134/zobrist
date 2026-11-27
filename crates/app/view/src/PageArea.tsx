@@ -2,6 +2,7 @@ import { type ReactNode, Suspense, use } from "react";
 import { FilesPage } from "./FilesPage";
 import { ask } from "./ipc";
 import styles from "./PageArea.module.css";
+import { UserPage } from "./UserPage";
 
 const { area, heading, versionLine } = styles;
 
@@ -29,7 +30,7 @@ const contents: Record<Exclude<Page, "Files">, ReactNode> = {
   Databases: null,
   Events: null,
   Engines: null,
-  User: null,
+  User: <UserPage />,
   Settings: (
     <Suspense>
       <VersionLine />
