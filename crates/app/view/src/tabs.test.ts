@@ -3,10 +3,12 @@ import type { GamePicture } from "./generated/GamePicture";
 import type { NotationMove } from "./generated/NotationMove";
 import { ask } from "./ipc";
 import {
+  annotate,
   apply,
   askForTool,
   type Change,
   closeTab,
+  commentOfCurrentPlace,
   goTo,
   openTab,
   placeToAskFor,
@@ -343,4 +345,99 @@ test("a key without Ctrl and another key with Ctrl are the key of no tool", () =
   expect(
     toolForKey({ key: "Y", ctrlKey: true, shiftKey: true }),
   ).toBeUndefined();
+});
+
+test.each([
+  { type: "SetComment", text: "Open game" },
+  { type: "SetMoveSymbol", symbol: "!?" },
+  { type: "SetMoveSymbol", symbol: null },
+  { type: "SetPositionSymbol", symbol: "⩲" },
+  { type: "SetPositionSymbol", symbol: null },
+] as const)(
+  "the annotation $type goes to Rust with its value, and its tab takes the picture of the answer",
+  async (annotation) => {
+    const { change, shown } = tabState({
+      tabs: [{ game: 7, picture, bottomSide: "white" }],
+      page: "Home",
+      shownTab: 7,
+    });
+    vi.mocked(ask).mockResolvedValueOnce({
+      type: annotation.type,
+      picture: pictureAfterE4,
+    });
+
+    await annotate(7, annotation, change);
+
+    expect(vi.mocked(ask).mock.calls).toEqual([[{ ...annotation, game: 7 }]]);
+    expect(shown().tabs).toEqual([
+      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+    ]);
+  },
+);
+
+const commented = (
+  text: string,
+  place: number[],
+  comments: { before?: string[]; after?: string[] },
+  variations: NotationMove[][] = [],
+) =>
+  ({
+    text,
+    place,
+    commentsBefore: comments.before ?? [],
+    commentsAfter: comments.after ?? [],
+    variations,
+  }) as NotationMove;
+const commentedNotation = [
+  commented("e4", [0], {
+    before: ["A short game"],
+    after: ["Best", "by test"],
+  }),
+  commented("e5", [0, 0], {}, [
+    [commented("c5", [0, 1], { after: ["Sicilian"] })],
+  ]),
+];
+
+test("the comment of a move is the text behind it, with a space between its parts", () => {
+  expect(
+    commentOfCurrentPlace({
+      place: [0],
+      notation: commentedNotation,
+      startComments: [],
+    }),
+  ).toBe("Best by test");
+  expect(
+    commentOfCurrentPlace({
+      place: [0, 1],
+      notation: commentedNotation,
+      startComments: [],
+    }),
+  ).toBe("Sicilian");
+  expect(
+    commentOfCurrentPlace({
+      place: [0, 0],
+      notation: commentedNotation,
+      startComments: [],
+    }),
+  ).toBe("");
+});
+
+test("the comment of the start is the text before the first move", () => {
+  expect(
+    commentOfCurrentPlace({
+      place: [],
+      notation: commentedNotation,
+      startComments: [],
+    }),
+  ).toBe("A short game");
+});
+
+test("the comment of a game without moves is its start comment", () => {
+  expect(
+    commentOfCurrentPlace({
+      place: [],
+      notation: [],
+      startComments: ["Not", "played"],
+    }),
+  ).toBe("Not played");
 });

@@ -47,3 +47,8 @@
   display: block;
   margin-left: var(--variation-indent);
 }
+
+.comment {
+  margin-right: var(--comment-gap);
+  color: var(--comment-color);
+}
