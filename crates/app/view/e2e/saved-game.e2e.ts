@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { browser, expect } from "@wdio/globals";
+import { pick } from "./file-picker";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
@@ -205,8 +206,7 @@ describe("the games of a file in tabs", () => {
 
   it("opens a game of the list in a tab", async () => {
     await showFilesPage();
-    await browser.$("main").$("aria/Path of a PGN file").setValue(file);
-    await browser.$("main").$("button=Open").click();
+    await pick("File", file);
     await expect(rows()).toBeElementsArrayOfSize(2);
 
     await rows()[1]?.click();

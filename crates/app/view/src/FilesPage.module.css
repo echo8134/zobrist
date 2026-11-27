@@ -1,18 +1,34 @@
-.pathRow {
+.toolbar {
   display: flex;
-  gap: var(--path-row-gap);
-  margin-top: var(--path-row-gap-above);
+  gap: var(--files-toolbar-gap);
+  margin-top: var(--files-toolbar-gap-above);
 }
 
-.field {
-  width: var(--field-width);
-  height: var(--field-height);
-  padding: var(--field-padding);
-  border: 1px solid var(--field-line-color);
-  border-radius: var(--field-corner-radius);
-  background-color: var(--background-color);
+.disclosure {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.button,
+.options button,
+.entryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--files-toolbar-gap);
   color: inherit;
   font: inherit;
+  cursor: pointer;
+}
+
+.button svg,
+.options svg,
+.entryButton svg {
+  flex: none;
+  width: var(--icon-button-icon-size);
+  height: var(--icon-button-icon-size);
+  stroke-width: var(--icon-button-icon-stroke);
 }
 
 .button {
@@ -23,6 +39,108 @@
   background-color: var(--button-background-color);
   color: var(--button-color);
   font: inherit;
+}
+
+.options {
+  position: absolute;
+  z-index: 1;
+  width: var(--collection-menu-width);
+  margin-top: var(--tab-strip-gap);
+  padding: var(--tab-strip-gap);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background: var(--background-color);
+}
+
+.options button,
+.entryButton {
+  width: 100%;
+  min-height: var(--list-row-height);
+  padding: var(--entry-padding);
+  border: none;
+  border-radius: var(--entry-corner-radius);
+  background: transparent;
+  text-align: left;
+}
+
+.button:hover,
+.options button:hover,
+.entryButton:hover,
+.list tbody tr:hover {
+  background-color: var(--top-bar-background-color);
+}
+
+.entryButton[aria-current="true"] {
+  background: var(--current-entry-background-color);
+  font-weight: var(--heading-weight);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: min(32%, var(--collection-width)) minmax(0, 1fr);
+  gap: var(--collection-gap);
+  min-height: var(--collection-min-height);
+  margin-top: var(--list-gap-above);
+  border-top: 1px solid var(--list-line-color);
+}
+
+.collection,
+.details {
+  min-width: 0;
+  padding-top: var(--list-gap-above);
+}
+
+.collection {
+  padding-right: var(--collection-inset);
+  border-right: 1px solid var(--list-line-color);
+}
+
+.caption {
+  margin: 0 0 var(--files-toolbar-gap);
+  color: var(--list-head-color);
+  font-size: var(--text-size);
+  font-weight: var(--heading-weight);
+}
+
+.tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tree .tree {
+  padding-left: var(--collection-indent);
+}
+
+.entryButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--files-toolbar-gap);
+}
+
+.title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--collection-heading-size);
+  font-weight: var(--top-bar-name-weight);
+}
+
+.count {
+  flex: none;
+  color: var(--file-line-color);
+}
+
+.pathText {
+  margin: var(--tab-strip-gap) 0 0;
+  overflow-wrap: anywhere;
+  color: var(--file-line-color);
 }
 
 .line {
@@ -68,4 +186,17 @@
 
 .dateColumn {
   width: var(--list-date-width);
+}
+
+.list tbody tr,
+.list td button {
+  cursor: pointer;
+}
+
+.list td button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
 }
