@@ -1,9 +1,13 @@
-import { browser, expect } from "@wdio/globals";
+import { browser as defaultBrowser, expect } from "@wdio/globals";
 
 type Choice = "File" | "Folder" | "New";
 
 /** WebDriver cannot drive the system dialog. Only its next answer is supplied by the test. */
-export async function pick(choice: Choice, path: string | null) {
+export async function pick(
+  choice: Choice,
+  path: string | null,
+  browser = defaultBrowser,
+) {
   await browser.execute(
     `
       const [path] = arguments;

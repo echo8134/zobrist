@@ -1,7 +1,7 @@
 import { browser } from "@wdio/globals";
 
-export const drawnBoard = () =>
-  browser.execute(`
+export const drawnBoard = (session = browser) =>
+  session.execute(`
     const board = document.querySelector("main cg-board").getBoundingClientRect();
     const letters = { pawn: "p", knight: "n", bishop: "b", rook: "r", queen: "q", king: "k" };
     const rows = Array.from({ length: 8 }, () => Array(8).fill("."));
