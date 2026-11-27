@@ -1,4 +1,5 @@
 import { type ReactNode, Suspense, use, useActionState, useState } from "react";
+import { EnginesPage } from "./EnginesPage";
 import { FilesPage } from "./FilesPage";
 import formStyles from "./FilesPage.module.css";
 import { ask } from "./ipc";
@@ -75,7 +76,7 @@ function GameLinkForm({ change }: Pick<Props, "change">) {
 const contents: Record<Exclude<Page, "Files" | "Home">, ReactNode> = {
   Databases: null,
   Events: null,
-  Engines: null,
+  Engines: <EnginesPage />,
   User: <UserPage />,
   Settings: (
     <Suspense>
