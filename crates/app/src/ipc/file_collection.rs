@@ -345,24 +345,43 @@ fn children(path: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
-    let list = directory.join("files.json");
-    let entries = fs::read(&list).and_then(|bytes| {
-        let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(&bytes)?;
+    CollectionList::Files.read(&directory.join("files.json"), |bytes| {
+        let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(bytes)?;
         paths
             .into_iter()
             .map(|(kind, path)| CollectionEntry::new(kind, path))
             .collect()
-    });
-    match entries {
-        Ok(entries) => Ok(entries),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(io::Error::new(
-            error.kind(),
-            format!(
-                "Could not read the file collection at {}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.",
-                list.display()
-            ),
-        )),
+    })
+}
+
+pub(super) enum CollectionList {
+    Files,
+    Databases,
+}
+
+impl CollectionList {
+    pub(super) fn read<T: Default>(
+        self,
+        list: &Path,
+        parse: impl FnOnce(&[u8]) -> io::Result<T>,
+    ) -> io::Result<T> {
+        match fs::read(list).and_then(|bytes| parse(&bytes)) {
+            Ok(entries) => Ok(entries),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(T::default()),
+            Err(error) => {
+                let (collection, files, page) = match self {
+                    Self::Files => ("file", "PGN files", "Files"),
+                    Self::Databases => ("database", "database files", "Databases"),
+                };
+                Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "Could not read the {collection} collection at {}. Your existing {files} are untouched. Restore the list from a backup or move it aside, then reopen {page}.",
+                        list.display()
+                    ),
+                ))
+            }
+        }
     }
 }
 

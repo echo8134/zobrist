@@ -1,7 +1,6 @@
 //! Native databases that the player has registered on this device.
 
 use std::collections::BTreeSet;
-use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
@@ -11,7 +10,7 @@ use ts_rs::TS;
 use zobrist_store::{Database, OpenError};
 
 use super::Response;
-use super::file_collection::{lock_collection, save_collection};
+use super::file_collection::{CollectionList, lock_collection, save_collection};
 
 /// One local collection in the Databases list.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -102,11 +101,13 @@ fn game_count(path: &Path) -> io::Result<u64> {
 }
 
 fn paths(catalog: &Path) -> io::Result<BTreeSet<PathBuf>> {
-    match fs::read(catalog) {
-        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(BTreeSet::new()),
-        Err(error) => Err(error),
-    }
+    CollectionList::Databases.read(catalog, |bytes| {
+        let paths: BTreeSet<PathBuf> = serde_json::from_slice(bytes)?;
+        for path in &paths {
+            file_name(path)?;
+        }
+        Ok(paths)
+    })
 }
 
 fn entries(paths: &BTreeSet<PathBuf>) -> io::Result<Vec<DatabaseEntry>> {
@@ -138,12 +139,46 @@ fn update(
 
 #[cfg(test)]
 mod tests {
-    use std::{env, process, thread};
+    use std::{env, fs, process, thread};
 
     use serde_json::json;
     use zobrist_store::DatabaseWriter;
 
     use super::*;
+
+    #[test]
+    fn an_unreadable_database_list_identifies_the_file_and_leaves_both_files_untouched()
+    -> io::Result<()> {
+        let directory =
+            env::temp_dir().join(format!("zobrist-damaged-database-list-{}", process::id()));
+        fs::create_dir(&directory)?;
+        let list = directory.join("databases.json");
+        let database = directory.join("Masters.zobrist");
+        DatabaseWriter::create(&database)?.finish()?;
+        let original = fs::read(&database)?;
+        let message = format!(
+            "Could not read the database collection at {}. Your existing database files are untouched. Restore the list from a backup or move it aside, then reopen Databases.",
+            list.display()
+        );
+
+        for damaged in [b"[".as_slice(), br#"["relative.zobrist"]"#] {
+            fs::write(&list, damaged)?;
+            for request in [
+                DatabaseRequest::ListDatabases,
+                DatabaseRequest::AddDatabase {
+                    path: database.clone(),
+                },
+                DatabaseRequest::RemoveDatabase {
+                    path: database.clone(),
+                },
+            ] {
+                assert_eq!(request.apply(&directory).unwrap_err().to_string(), message);
+                assert_eq!(fs::read(&list)?, damaged);
+                assert_eq!(fs::read(&database)?, original);
+            }
+        }
+        fs::remove_dir_all(directory)
+    }
 
     #[test]
     fn concurrent_registrations_keep_both_locations_and_removal_leaves_the_database()
