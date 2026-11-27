@@ -3,11 +3,13 @@
 //! The view sends a [`DesktopRequest`] and gets back the [`Response`] case with the same name. The
 //! TypeScript types of the view are generated from these two types.
 
+mod accounts;
 mod engines;
 mod file_collection;
 mod game_file;
 mod pgn_file;
 
+pub use accounts::AccountRequest;
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
@@ -452,6 +454,18 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// The public Lichess name saved on this device.
+    GetLichessName {
+        /// Absent when the player has not saved a name.
+        name: Option<String>,
+    },
+    /// The name after trimming and saving.
+    SaveLichessName {
+        /// The exact name now on disk.
+        name: String,
+    },
+    /// The name has been removed from this device.
+    RemoveLichessName,
     /// The version of zobrist.
     Version {
         /// The version of this crate.

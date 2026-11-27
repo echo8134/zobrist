@@ -15,7 +15,15 @@ import type { SaveGameAnswer } from "./SaveGameAnswer";
 /**
  * What Rust answers. Each case has the name of its request.
  */
-export type Response = { "type": "Version", 
+export type Response = { "type": "GetLichessName", 
+/**
+ * Absent when the player has not saved a name.
+ */
+name: string | null, } | { "type": "SaveLichessName", 
+/**
+ * The exact name now on disk.
+ */
+name: string, } | { "type": "RemoveLichessName" } | { "type": "Version", 
 /**
  * The version of this crate.
  */

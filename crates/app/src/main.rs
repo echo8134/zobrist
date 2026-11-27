@@ -1,6 +1,6 @@
 //! The zobrist desktop app.
 
-use tauri::{State, Window, async_runtime::spawn_blocking};
+use tauri::{Manager as _, State, Window, async_runtime::spawn_blocking};
 use zobrist_app::ipc::{DesktopRequest, Response, SharedGames};
 
 #[tauri::command]
@@ -10,15 +10,28 @@ async fn answer(
     window: Window,
 ) -> Result<Response, String> {
     match request {
-        DesktopRequest::Editor(request) => games
-            .answer(request)
+        DesktopRequest::Editor(request) => {
+            return games
+                .answer(request)
+                .await
+                .map_err(|error| error.to_string());
+        }
+        DesktopRequest::Collection(request) => {
+            spawn_blocking(move || request.answer(&window)).await
+        }
+        DesktopRequest::Account(request) => {
+            spawn_blocking(move || {
+                let directory = window
+                    .path()
+                    .app_local_data_dir()
+                    .map_err(std::io::Error::other)?;
+                request.answer(&directory)
+            })
             .await
-            .map_err(|error| error.to_string()),
-        DesktopRequest::Collection(request) => spawn_blocking(move || request.answer(&window))
-            .await
-            .map_err(|error| error.to_string())?
-            .map_err(|error| error.to_string()),
+        }
     }
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 fn main() -> tauri::Result<()> {
