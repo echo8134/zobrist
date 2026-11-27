@@ -1,5 +1,11 @@
 //! The zobrist desktop app.
 
+use std::{
+    fs::{self, File, TryLockError},
+    io::{self, Write as _},
+    process::ExitCode,
+};
+
 use tauri::{Manager as _, RunEvent, State, Window, WindowEvent, async_runtime::spawn_blocking};
 use tauri_plugin_dialog::DialogExt as _;
 use zobrist_app::ipc::{DesktopRequest, Response, SharedGames};
@@ -55,7 +61,7 @@ async fn answer(
         .map_err(|error| error.to_string())
 }
 
-fn main() -> tauri::Result<()> {
+fn main() -> tauri::Result<ExitCode> {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SharedGames::default())
@@ -117,14 +123,28 @@ fn main() -> tauri::Result<()> {
                     .show(|_| {});
             }
         });
+    let app = builder.build(tauri::generate_context!())?;
+    let directory = app.path().app_local_data_dir()?;
+    fs::create_dir_all(&directory)?;
+    let lock = File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join("app.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            writeln!(io::stderr().lock(), "zobrist is already running.")?;
+            return Ok(ExitCode::FAILURE);
+        }
+        Err(TryLockError::Error(error)) => return Err(error.into()),
+    }
     #[cfg(feature = "webdriver")]
-    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
-    builder
-        .build(tauri::generate_context!())?
-        .run(|app, event| {
-            if matches!(event, RunEvent::Exit) {
-                app.state::<SharedGames>().stop_engines();
-            }
-        });
-    Ok(())
+    app.handle().plugin(tauri_plugin_wdio_webdriver::init())?;
+    app.run(|app, event| {
+        if matches!(event, RunEvent::Exit) {
+            app.state::<SharedGames>().stop_engines();
+        }
+    });
+    Ok(ExitCode::SUCCESS)
 }

@@ -1,8 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmdirSync,
   rmSync,
@@ -20,11 +22,7 @@ const fixture = fileURLToPath(
   new URL("../../../cli/tests/fixtures/clean.pgn", import.meta.url),
 );
 
-async function runApp(
-  profile: string,
-  check: (app: WebdriverIO.Browser) => Promise<void>,
-) {
-  // Each gate run has its own display and a primary driver. The restarted app needs a second port.
+async function driverPort() {
   const listener = createServer().listen(0, "127.0.0.1");
   await once(listener, "listening");
   const address = listener.address();
@@ -32,12 +30,27 @@ async function runApp(
     throw new Error("Missing TCP port");
   const port = address.port;
   await listener[Symbol.asyncDispose]();
+  return port;
+}
+
+const application = `${target}/debug/zobrist-app`;
+const profileEnv = (profile: string) => ({
+  XDG_DATA_HOME: profile,
+  XDG_CACHE_HOME: `${profile}/cache`,
+});
+
+async function runApp(
+  profile: string,
+  check: (app: WebdriverIO.Browser) => Promise<void>,
+  exit: "close window" | "terminate process" = "close window",
+) {
+  const port = await driverPort();
   const app = await startWdioSession({
-    "tauri:options": { application: `${target}/debug/zobrist-app` },
+    "tauri:options": { application },
     "wdio:tauriServiceOptions": {
       driverProvider: "embedded",
       embeddedPort: port,
-      env: { XDG_DATA_HOME: profile, XDG_CACHE_HOME: `${profile}/cache` },
+      env: profileEnv(profile),
     },
   });
   try {
@@ -45,6 +58,7 @@ async function runApp(
     app.options.connectionRetryCount = 0;
     await app.switchToWindow("main");
     await check(app);
+    if (exit === "terminate process") return;
     // Closing the last native window also takes its WebDriver server down, sometimes before the reply.
     const endpoint = `http://127.0.0.1:${port}`;
     const closed = await fetch(`${endpoint}/session/${app.sessionId}/window`, {
@@ -137,6 +151,62 @@ describe("boards after quitting and starting zobrist", function () {
     copyFileSync(fixture, file);
   });
   afterEach(() => rmSync(work, { recursive: true, force: true }));
+
+  it("keeps one running copy per data directory and restores its board after quitting", async () => {
+    const directory = `${work}/io.github.echo8134.zobrist`;
+    await runApp(work, async (app) => {
+      await expectHome(app);
+      await newBoard(app);
+      await play(app, "e2", "e4", "e4");
+
+      // Recovery would move this file if another window tried to restore the session.
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(`${directory}/boards.json`, '{"boards":[');
+      writeFileSync(`${directory}/files.json`, "[]");
+      const entries = readdirSync(directory).sort();
+      const second = spawnSync(application, {
+        env: {
+          ...process.env,
+          ...profileEnv(work),
+          TAURI_WEBDRIVER_PORT: String(await driverPort()),
+        },
+        encoding: "utf8",
+        timeout: 10_000,
+        killSignal: "SIGKILL",
+      });
+      expect({ status: second.status, signal: second.signal }).toEqual({
+        status: 1,
+        signal: null,
+      });
+      expect(second.stderr).toBe("zobrist is already running.\n");
+      expect(readdirSync(directory).sort()).toEqual(entries);
+      expect(readFileSync(`${directory}/boards.json`, "utf8")).toBe(
+        '{"boards":[',
+      );
+      expect(readFileSync(`${directory}/files.json`, "utf8")).toBe("[]");
+      expect(readFileSync(`${directory}/app.lock`)).toHaveLength(0);
+      await runApp(`${work}/other`, expectHome);
+      await expectMove(app, "e4");
+      const picture = await app.saveScreenshot(
+        `${target}/e2e/one-running-copy.png`,
+      );
+      expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
+        1280, 800,
+      ]);
+    });
+    await runApp(
+      work,
+      async (app) => {
+        await expect(tabs(app)).toBeElementsArrayOfSize(1);
+        await expect(selected(app)).toHaveText("New game");
+        await expectMove(app, "e4");
+      },
+      "terminate process",
+    );
+    await runApp(work, async (app) => {
+      await expect(app.$("header").$("aria/New board")).toBeDisplayed();
+    });
+  });
 
   it("opens Home or the readable board and tells the player where the original session is kept", async () => {
     const directory = `${work}/io.github.echo8134.zobrist`;
