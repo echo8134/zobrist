@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -13,6 +13,7 @@ import {
 import { fileURLToPath } from "node:url";
 import { browser, expect } from "@wdio/globals";
 import { pick } from "./file-picker";
+import { exportPaths, replyWithPlayerGames } from "./game-export";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
@@ -110,6 +111,81 @@ describe("the page Files", () => {
     await open.click();
     expect(await pick("New", null)).toBeNull();
     await expect(list()).not.toExist();
+  });
+
+  it("lists a player's downloaded games in the order they were added", async () => {
+    await browser.setWindowSize(1280, 800);
+    await browser.$("nav").$("aria/Files").click();
+    const study = `${work}/study.pgn`;
+    const original = `[Event "Original"]
+[Date "2025.12.14"]
+[White "Elm"]
+[Black "Ash"]
+[Result "1/2-1/2"]
+
+1. d4 {Keep my note} (1. Nf3) d5 1/2-1/2`;
+    writeFileSync(study, original);
+    await replyWithPlayerGames("games");
+    const binary = fileURLToPath(
+      new URL("../../../../target/debug/zobrist", import.meta.url),
+    );
+    const download = () => {
+      const { status, stdout, stderr } = spawnSync(
+        binary,
+        [
+          "pgn",
+          "download-player",
+          "RookExample",
+          "--from",
+          "2026-01-01",
+          "--to",
+          "2026-01-31",
+          "study.pgn",
+        ],
+        { cwd: work, encoding: "utf8" },
+      );
+      expect({ status, stdout, stderr }).toEqual({
+        status: 0,
+        stdout: "games added: 2\n",
+        stderr: "",
+      });
+    };
+    download();
+    const paths = await exportPaths();
+    expect(paths).toHaveLength(1);
+    const url = new URL(paths[0] ?? "", "http://127.0.0.1");
+    expect(url.pathname).toBe("/api/games/user/RookExample");
+    url.searchParams.sort();
+    expect(url.search).toBe(
+      "?pgnInJson=true&since=1767225600000&until=1769904000000",
+    );
+    expect(
+      readFileSync(study).subarray(0, Buffer.byteLength(original)),
+    ).toEqual(Buffer.from(original));
+
+    await open(study);
+    await expect(rows()).toBeElementsArrayOfSize(3);
+    const contents = [
+      ["1", "Elm", "Ash", "1/2-1/2", "2025.12.14", "Original"],
+      ["2", "Birch", "RookExample", "0-1", "2026.01.31", "January 31"],
+      ["3", "RookExample", "Aster", "1-0", "2026.01.01", "January 1"],
+    ];
+    expect(await cellTexts()).toEqual(contents);
+    const picture = await browser.saveScreenshot(
+      `${screenshots}/download-player-games.png`,
+    );
+    expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
+      1280, 800,
+    ]);
+
+    download();
+    await button("study.pgn").click();
+    await expect(rows()).toBeElementsArrayOfSize(5);
+    expect(await cellTexts()).toEqual([
+      ...contents,
+      ["4", "Birch", "RookExample", "0-1", "2026.01.31", "January 31"],
+      ["5", "RookExample", "Aster", "1-0", "2026.01.01", "January 1"],
+    ]);
   });
 
   it("remembers a tournament folder and a separate repertoire at their original locations", async () => {
