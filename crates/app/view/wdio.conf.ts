@@ -1,5 +1,9 @@
+import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import type { TauriCapabilities } from "@wdio/tauri-service";
+import { startGameExports } from "./e2e/game-export";
+
+let exportsServer: Server | undefined;
 
 const target = fileURLToPath(new URL("../../../target", import.meta.url));
 
@@ -10,6 +14,12 @@ const app: TauriCapabilities = {
 
 export const config: WebdriverIO.Config = {
   runner: "local",
+  onPrepare: async () => {
+    exportsServer = await startGameExports();
+  },
+  onComplete: () => {
+    exportsServer?.close();
+  },
   // The caller provides the display. Without this line the runner would start one of its own.
   autoXvfb: false,
   specs: ["./e2e/*.e2e.ts"],
