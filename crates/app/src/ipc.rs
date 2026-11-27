@@ -4,15 +4,17 @@
 //! TypeScript types of the view are generated from these two types.
 
 mod accounts;
+mod board_appearance;
 mod engines;
 mod file_collection;
 mod game_file;
 mod pgn_file;
 
 pub use accounts::AccountRequest;
+pub use board_appearance::{AppearanceRequest, BoardAppearance};
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
-    AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
+    AddedPgnPath, CollectionEntry, CollectionRequest, EntryKind, PickerChoice,
 };
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SavedState};
@@ -35,6 +37,21 @@ use zobrist_core::shapes;
 mod drawing;
 use drawing::BoardShapes;
 pub use drawing::ShapeEdit;
+
+/// The request sent to the desktop command.
+#[derive(Deserialize, TS)]
+#[serde(untagged)]
+#[ts(export)]
+pub enum DesktopRequest {
+    /// Requests answered by the games and PGN editor.
+    Editor(Request),
+    /// Requests about the player's collection or the system picker.
+    Collection(CollectionRequest),
+    /// Requests about the name saved on this device.
+    Account(AccountRequest),
+    /// Read or save the board preferences for this device.
+    Appearance(AppearanceRequest),
+}
 
 /// What the view can ask for.
 #[derive(Clone, Deserialize, TS)]
@@ -567,6 +584,16 @@ pub enum Response {
     },
     /// The game is closed.
     CloseGame,
+    /// The board preferences for this device.
+    GetBoardAppearance {
+        /// The saved preferences, or the defaults on first use.
+        appearance: BoardAppearance,
+    },
+    /// The board preferences after a successful save.
+    SetBoardAppearance {
+        /// The preferences to apply to every board.
+        appearance: BoardAppearance,
+    },
     /// The executable path selected on this computer.
     PickEnginePath {
         /// Absent after cancellation.
