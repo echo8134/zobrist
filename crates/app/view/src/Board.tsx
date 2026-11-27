@@ -2,6 +2,7 @@ import { Chessground } from "@lichess-org/chessground";
 import type { Api } from "@lichess-org/chessground/api";
 import type { Config } from "@lichess-org/chessground/config";
 import type { DrawShape } from "@lichess-org/chessground/draw";
+import { initial, write } from "@lichess-org/chessground/fen";
 import type { Key } from "@lichess-org/chessground/types";
 import "@lichess-org/chessground/assets/chessground.base.css";
 import "@lichess-org/chessground/assets/chessground.brown.css";
@@ -10,23 +11,37 @@ import { useLayoutEffect, useRef, useState } from "react";
 import styles from "./Board.module.css";
 import type { GamePicture } from "./generated/GamePicture";
 import type { MoveSquares } from "./generated/MoveSquares";
+import type { PositionFields } from "./generated/PositionFields";
 import type { ShapeColor } from "./generated/ShapeColor";
 import type { Side } from "./generated/Side";
 import { PromotionChooser } from "./PromotionChooser";
-import { changePosition, type PositionSetup } from "./positionSetup";
+import type { PositionSetup } from "./positionSetup";
 import type { Move, Shapes } from "./tabs";
 
 const { board, ground } = styles;
 
+export function presetFields(preset: "start" | "empty"): PositionFields {
+  const start = preset === "start";
+  return {
+    pieces: start ? initial : write(new Map()),
+    turn: "white",
+    whiteShort: start,
+    whiteLong: start,
+    blackShort: start,
+    blackLong: start,
+    enPassant: null,
+  };
+}
+
 type Props = {
   picture: GamePicture;
   bottomSide: Side;
+  inert: boolean;
   onMove: (move: Move) => void;
   setup?:
     | {
         draft: PositionSetup;
-        pending: boolean;
-        onChange: (setup: PositionSetup) => void;
+        onPieces: (pieces: string) => void;
       }
     | undefined;
   /** Gets all shapes of the board after the player drew one or took some away. */
@@ -59,7 +74,14 @@ function shapesOfBoard(drawn: readonly DrawShape[]): Shapes {
   return shapes;
 }
 
-export function Board({ picture, bottomSide, onMove, onShapes, setup }: Props) {
+export function Board({
+  picture,
+  bottomSide,
+  inert,
+  onMove,
+  onShapes,
+  setup,
+}: Props) {
   const groundElement = useRef<HTMLDivElement>(null);
   const groundApi = useRef<Api>(null);
   const [promotionInPicture, setPromotionInPicture] = useState<{
@@ -140,8 +162,10 @@ export function Board({ picture, bottomSide, onMove, onShapes, setup }: Props) {
       const { position } = setup.draft;
       drawn = {
         orientation: bottomSide,
-        fen: position.pieces,
-        turnColor: position.turn,
+        ...(groundApi.current && setup.draft.pending
+          ? {}
+          : { fen: position.fields.pieces }),
+        turnColor: position.fields.turn,
         autoCastle: false,
         lastMove: [],
         check: false,
@@ -155,7 +179,7 @@ export function Board({ picture, bottomSide, onMove, onShapes, setup }: Props) {
             after: () => {
               const pieces = groundApi.current?.getFen();
               if (pieces !== undefined) {
-                setup.onChange(changePosition(setup.draft, { pieces }));
+                setup.onPieces(pieces);
               }
             },
           },
@@ -204,7 +228,7 @@ export function Board({ picture, bottomSide, onMove, onShapes, setup }: Props) {
         api.setPieces(
           new Map([[square, tool === "eraser" ? undefined : tool]]),
         );
-        setup.onChange(changePosition(setup.draft, { pieces: api.getFen() }));
+        setup.onPieces(api.getFen());
       }
       pressed = undefined;
     };
@@ -229,7 +253,7 @@ export function Board({ picture, bottomSide, onMove, onShapes, setup }: Props) {
   );
 
   return (
-    <div className={board} inert={setup?.pending}>
+    <div className={board} inert={inert}>
       <div ref={groundElement} className={ground} />
       {waitingPromotion !== null && (
         <PromotionChooser

@@ -832,3 +832,106 @@ fn opening_pgn_text_keeps_castling_from_a_nonstandard_start() -> serde_json::Res
     );
     Ok(())
 }
+
+#[test]
+fn describing_position_text_preserves_all_six_fields() -> serde_json::Result<()> {
+    assert_eq!(
+        ask(
+            &mut Games::default(),
+            json!({"type": "DescribePosition", "input": {
+                "type": "Fen", "fen": "r3k2r/8/8/4pP2/8/8/8/R3K2R w Kq e6 9 12"
+            }})
+        )?,
+        json!({"type": "DescribePosition", "draft": {
+            "fen": "r3k2r/8/8/4pP2/8/8/8/R3K2R w Kq e6 9 12",
+            "fields": {"pieces": "r3k2r/8/8/4pP2/8/8/8/R3K2R", "turn": "white",
+                "whiteShort": true, "whiteLong": false,
+                "blackShort": false, "blackLong": true, "enPassant": "e6"}
+        }})
+    );
+    Ok(())
+}
+
+#[test]
+fn describing_position_fields_supplies_the_move_counters() -> serde_json::Result<()> {
+    assert_eq!(
+        ask(
+            &mut Games::default(),
+            json!({"type": "DescribePosition", "input": {
+                "type": "Fields", "fields": {"pieces": "r3k2r/8/8/8/8/8/8/R3K2R", "turn": "black",
+                    "whiteShort": false, "whiteLong": true,
+                    "blackShort": true, "blackLong": false, "enPassant": null}
+            }})
+        )?,
+        json!({"type": "DescribePosition", "draft": {
+            "fen": "r3k2r/8/8/8/8/8/8/R3K2R b Qk - 0 1",
+            "fields": {"pieces": "r3k2r/8/8/8/8/8/8/R3K2R", "turn": "black",
+                "whiteShort": false, "whiteLong": true,
+                "blackShort": true, "blackLong": false, "enPassant": null}
+        }})
+    );
+    Ok(())
+}
+
+#[test]
+fn describing_position_keeps_an_unfinished_position_from_text_or_fields() -> serde_json::Result<()>
+{
+    for input in [
+        json!({"type": "Fen", "fen": "8/8/8/8/8/8/8/8 w KQkq a4 0 1"}),
+        json!({"type": "Fields", "fields": {"pieces": "8/8/8/8/8/8/8/8", "turn": "white",
+            "whiteShort": true, "whiteLong": true,
+            "blackShort": true, "blackLong": true, "enPassant": "a4"}}),
+    ] {
+        assert_eq!(
+            ask(
+                &mut Games::default(),
+                json!({"type": "DescribePosition", "input": input})
+            )?,
+            json!({"type": "DescribePosition", "draft": {
+                "fen": "8/8/8/8/8/8/8/8 w KQkq a4 0 1",
+                "fields": {"pieces": "8/8/8/8/8/8/8/8", "turn": "white",
+                    "whiteShort": true, "whiteLong": true,
+                    "blackShort": true, "blackLong": true, "enPassant": "a4"}
+            }})
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn describing_position_returns_no_draft_for_malformed_input() -> serde_json::Result<()> {
+    for fen in [
+        "",
+        "8/8/8/8/8/8/8 w - - 0 1",
+        "8/8/8/8/8/8/8/7Kp w - - 0 1",
+        "8/8/8/8/8/8/8/7X w - - 0 1",
+        "8/8/8/8/8/8/8/8 w KK - 0 1",
+        "8/8/8/8/8/8/8/8 black - - 0 1",
+        "8/8/8/8/8/8/8/8 w - i4 0 1",
+        "8/8/8/8/8/8/8/8 w - - 0",
+        "8/8/8/8/8/8/8/8 w - - -1 1",
+        "8/8/8/8/8/8/8/8 w - - 0 0",
+    ] {
+        assert_eq!(
+            ask(
+                &mut Games::default(),
+                json!({"type": "DescribePosition", "input": {"type": "Fen", "fen": fen}})
+            )?,
+            json!({"type": "DescribePosition", "draft": null}),
+            "{fen}"
+        );
+    }
+    for (pieces, en_passant) in [("8/8", None), ("8/8/8/8/8/8/8/8", Some("i4"))] {
+        assert_eq!(
+            ask(
+                &mut Games::default(),
+                json!({"type": "DescribePosition", "input": {"type": "Fields", "fields": {
+                    "pieces": pieces, "turn": "white", "whiteShort": false, "whiteLong": false,
+                    "blackShort": false, "blackLong": false, "enPassant": en_passant
+                }}})
+            )?,
+            json!({"type": "DescribePosition", "draft": null})
+        );
+    }
+    Ok(())
+}

@@ -28,6 +28,7 @@ export function tabName(picture: GamePicture) {
 export type SaveRefusal = Extract<SaveGameAnswer, { type: "Refusal" }>;
 
 export type PositionPanelState = (
+  | { type: "openingSetup" }
   | { type: "setup"; draft: PositionSetup }
   | { type: "paste"; text: string }
 ) & { status?: "pending" | "refused" };

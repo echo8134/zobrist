@@ -5,6 +5,7 @@ import type { OpenedGame } from "./OpenedGame";
 import type { PgnExport } from "./PgnExport";
 import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
+import type { PositionDraft } from "./PositionDraft";
 import type { SaveGameAnswer } from "./SaveGameAnswer";
 
 /**
@@ -22,7 +23,11 @@ game: number,
 /**
  * The picture at the starting position.
  */
-picture: GamePicture, } | { "type": "SetStartPosition", 
+picture: GamePicture, } | { "type": "DescribePosition", 
+/**
+ * Absent when the input does not have the form of a position.
+ */
+draft: PositionDraft | null, } | { "type": "SetStartPosition", 
 /**
  * Absent when the game is no longer open.
  */

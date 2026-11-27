@@ -1,16 +1,9 @@
 import { Eraser } from "lucide-react";
 import { createElement } from "react";
+import { presetFields } from "./Board";
 import styles from "./PositionSetupPanel.module.css";
 import toolStyles from "./PositionTools.module.css";
-import {
-  changePosition,
-  editFen,
-  emptyFen,
-  fenOf,
-  type PositionSetup,
-  roles,
-  startingFen,
-} from "./positionSetup";
+import { type PositionSetup, roles, type SetupEdit } from "./positionSetup";
 
 const {
   panel,
@@ -30,35 +23,34 @@ const { textButton } = toolStyles;
 const sides = ["white", "black"] as const;
 const sideNames = { white: "White", black: "Black" };
 const rights = [
-  ["K", "White short"],
-  ["Q", "White long"],
-  ["k", "Black short"],
-  ["q", "Black long"],
+  ["whiteShort", "White short"],
+  ["whiteLong", "White long"],
+  ["blackShort", "Black short"],
+  ["blackLong", "Black long"],
 ] as const;
 
 type Props = {
   setup: PositionSetup;
-  onChange: (setup: PositionSetup) => void;
-  onUse: (fen: string) => void;
+  onChoose: (tool: PositionSetup["tool"]) => void;
+  onEdit: (edit: SetupEdit) => void;
+  onUse: () => void;
   onCancel: () => void;
   refused: boolean;
 };
 
 export function PositionSetupPanel({
   setup,
-  onChange,
+  onChoose,
+  onEdit,
   onUse,
   onCancel,
   refused,
 }: Props) {
-  const { position, invalid, tool } = setup;
-  const fen = invalid?.field === "fen" ? invalid.text : fenOf(position);
+  const { position, raw, pending, tool } = setup;
+  const fields = position.fields;
+  const fen = raw?.field === "fen" ? raw.text : position.fen;
   const enPassant =
-    invalid?.field === "enPassant"
-      ? invalid.text
-      : position.enPassant === "-"
-        ? ""
-        : position.enPassant;
+    raw?.field === "enPassant" ? raw.text : (fields.enPassant ?? "");
   return (
     <div className={panel}>
       <fieldset className={`cg-wrap ${palette}`} aria-label="Pieces">
@@ -72,7 +64,7 @@ export function PositionSetupPanel({
               aria-pressed={
                 tool !== "eraser" && tool?.color === color && tool.role === role
               }
-              onClick={() => onChange({ ...setup, tool: { color, role } })}
+              onClick={() => onChoose({ color, role })}
             >
               {createElement("piece", {
                 className: `${pieceImage} ${color} ${role}`,
@@ -85,7 +77,7 @@ export function PositionSetupPanel({
           className={pieceButton}
           aria-label="Eraser"
           aria-pressed={tool === "eraser"}
-          onClick={() => onChange({ ...setup, tool: "eraser" })}
+          onClick={() => onChoose("eraser")}
         >
           <Eraser aria-hidden="true" />
         </button>
@@ -98,8 +90,8 @@ export function PositionSetupPanel({
               <input
                 type="radio"
                 name="side-to-move"
-                checked={position.turn === turn}
-                onChange={() => onChange(changePosition(setup, { turn }))}
+                checked={fields.turn === turn}
+                onChange={() => onEdit({ type: "Fields", fields: { turn } })}
               />
               {sideNames[turn]}
             </label>
@@ -113,20 +105,13 @@ export function PositionSetupPanel({
             <label key={right} className={option}>
               <input
                 type="checkbox"
-                checked={position.castling.includes(right)}
-                onChange={({ currentTarget }) => {
-                  const castling = rights
-                    .filter(([letter]) =>
-                      letter === right
-                        ? currentTarget.checked
-                        : position.castling.includes(letter),
-                    )
-                    .map(([letter]) => letter)
-                    .join("");
-                  onChange(
-                    changePosition(setup, { castling: castling || "-" }),
-                  );
-                }}
+                checked={fields[right]}
+                onChange={({ currentTarget }) =>
+                  onEdit({
+                    type: "Fields",
+                    fields: { [right]: currentTarget.checked },
+                  })
+                }
               />
               {name}
             </label>
@@ -138,15 +123,10 @@ export function PositionSetupPanel({
         <input
           className={control}
           size={2}
-          maxLength={2}
           value={enPassant}
-          aria-invalid={invalid?.field === "enPassant"}
+          aria-invalid={pending === undefined && raw?.field === "enPassant"}
           onChange={({ currentTarget: { value } }) =>
-            onChange(
-              value === "" || /^[a-h][1-8]$/.test(value)
-                ? changePosition(setup, { enPassant: value || "-" })
-                : { ...setup, invalid: { field: "enPassant", text: value } },
-            )
+            onEdit({ type: "Fields", fields: { enPassant: value || null } })
           }
         />
       </label>
@@ -155,10 +135,10 @@ export function PositionSetupPanel({
         <input
           className={control}
           value={fen}
-          aria-invalid={invalid?.field === "fen"}
+          aria-invalid={pending === undefined && raw?.field === "fen"}
           spellCheck={false}
           onChange={({ currentTarget: { value } }) =>
-            onChange(editFen(setup, value))
+            onEdit({ type: "Fen", fen: value })
           }
         />
       </label>
@@ -172,25 +152,24 @@ export function PositionSetupPanel({
           <button
             className={textButton}
             type="button"
-            onClick={() => onChange(editFen(setup, startingFen))}
+            onClick={() =>
+              onEdit({ type: "Fields", fields: presetFields("start") })
+            }
           >
             Start position
           </button>
           <button
             className={textButton}
             type="button"
-            onClick={() => onChange(editFen(setup, emptyFen))}
+            onClick={() =>
+              onEdit({ type: "Fields", fields: presetFields("empty") })
+            }
           >
             Empty board
           </button>
         </div>
         <div className={buttonGroup}>
-          <button
-            className={textButton}
-            type="button"
-            disabled={invalid !== null}
-            onClick={() => onUse(fen)}
-          >
+          <button className={textButton} type="button" onClick={onUse}>
             Use position
           </button>
           <button className={textButton} type="button" onClick={onCancel}>

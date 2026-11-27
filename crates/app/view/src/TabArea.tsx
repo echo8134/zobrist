@@ -9,6 +9,7 @@ import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
 import { PositionPanel, PositionTools } from "./PositionTools";
+import type { SetupEdit } from "./positionSetup";
 import styles from "./TabArea.module.css";
 import {
   type Annotation,
@@ -37,6 +38,7 @@ const {
 type Props = {
   tab: Tab;
   change: (change: Change) => void;
+  onEditSetup: (edit: SetupEdit) => void;
   onTurnBoard: () => void;
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
@@ -52,6 +54,7 @@ type Props = {
 export function TabArea({
   tab,
   change,
+  onEditSetup,
   onTurnBoard,
   onMove,
   onGoTo,
@@ -63,7 +66,7 @@ export function TabArea({
   onSetTag,
   onSetResult,
 }: Props) {
-  const { game, panel, picture } = tab;
+  const { panel, picture } = tab;
   // A layout effect, so that a key right after a new picture is drawn starts from that picture.
   // A plain effect runs later, and until then the key would start from the picture before.
   useLayoutEffect(() => {
@@ -125,17 +128,13 @@ export function TabArea({
         <div className={boardColumn}>
           <Board
             key={panel?.type === "setup" ? "setup" : "game"}
+            inert={panel?.type !== "paste" && panel?.status === "pending"}
             setup={
               panel?.type === "setup"
                 ? {
                     draft: panel.draft,
-                    pending: panel.status === "pending",
-                    onChange: (draft) =>
-                      change({
-                        type: "setPanel",
-                        game,
-                        panel: { type: "setup", draft },
-                      }),
+                    onPieces: (pieces) =>
+                      onEditSetup({ type: "Fields", fields: { pieces } }),
                   }
                 : undefined
             }
@@ -154,7 +153,12 @@ export function TabArea({
           </div>
         </div>
       </div>
-      <PositionPanel tab={tab} change={change} className={notationArea}>
+      <PositionPanel
+        onEditSetup={onEditSetup}
+        tab={tab}
+        change={change}
+        className={notationArea}
+      >
         <NotationTools
           picture={picture}
           onUse={onTool}

@@ -1,8 +1,8 @@
+import type { PositionDraft } from "./generated/PositionDraft";
+import type { PositionFields } from "./generated/PositionFields";
 import type { Side } from "./generated/Side";
-
-export const startingFen =
-  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-export const emptyFen = "8/8/8/8/8/8/8/8 w - - 0 1";
+import { ask } from "./ipc";
+import type { Change, Tab } from "./tabs";
 
 export const roles = [
   "king",
@@ -13,103 +13,60 @@ export const roles = [
   "pawn",
 ] as const;
 type Piece = { color: Side; role: (typeof roles)[number] };
-
-type FenFields = {
-  pieces: string;
-  turn: Side;
-  castling: string;
-  enPassant: string;
-  halfmoves: string;
-  fullmoves: string;
-};
-
-export type PositionSetup = {
-  position: FenFields;
+type TypedField = { field: "fen" | "enPassant"; text: string };
+type Description = { position: PositionDraft; raw: TypedField | null };
+export type PositionSetup = Description & {
   tool: Piece | "eraser" | null;
-  invalid: { field: "fen" | "enPassant"; text: string } | null;
+  pending?: Promise<Description>;
 };
+export type SetupEdit =
+  | { type: "Fen"; fen: string }
+  | { type: "Fields"; fields: Partial<PositionFields> };
 
-export function startSetup(fen: string): PositionSetup {
-  const [
-    pieces = "",
-    side,
-    castling = "-",
-    enPassant = "-",
-    halfmoves = "0",
-    fullmoves = "1",
-  ] = fen.trim().split(/\s+/);
-  return {
-    position: {
-      pieces,
-      turn: side === "b" ? "black" : "white",
-      castling,
-      enPassant,
-      halfmoves,
-      fullmoves,
+export async function editSetup(
+  game: number,
+  edit: SetupEdit,
+  tabNow: (game: number) => Pick<Tab, "panel"> | undefined,
+  change: (change: Change) => void,
+) {
+  const panel = tabNow(game)?.panel;
+  if (panel?.type !== "setup" || panel.status === "pending") return;
+  const setup = panel.draft;
+  const raw: TypedField | null =
+    edit.type === "Fen"
+      ? { field: "fen", text: edit.fen }
+      : edit.fields.enPassant !== undefined
+        ? { field: "enPassant", text: edit.fields.enPassant ?? "" }
+        : null;
+
+  // Each change starts from the draft Rust accepted for the preceding edit.
+  const pending = Promise.resolve(setup.pending ?? setup).then(
+    async ({ position }) => {
+      const input =
+        edit.type === "Fen"
+          ? edit
+          : { type: edit.type, fields: { ...position.fields, ...edit.fields } };
+      const { draft } = await ask({ type: "DescribePosition", input });
+      return draft === null
+        ? { position, raw }
+        : { position: draft, raw: null };
     },
-    tool: null,
-    invalid: null,
-  };
-}
-
-export function fenOf({
-  pieces,
-  turn,
-  castling,
-  enPassant,
-  halfmoves,
-  fullmoves,
-}: FenFields) {
-  return [
-    pieces,
-    turn === "white" ? "w" : "b",
-    castling,
-    enPassant,
-    halfmoves,
-    fullmoves,
-  ].join(" ");
-}
-
-export function changePosition(
-  setup: PositionSetup,
-  fields: Partial<FenFields>,
-): PositionSetup {
-  return {
-    ...setup,
-    position: { ...setup.position, ...fields },
-    invalid: null,
-  };
-}
-
-export function editFen(setup: PositionSetup, text: string): PositionSetup {
-  const parts = text.trim().split(/\s+/);
-  const [
-    pieces = "",
-    side,
-    castling = "",
-    enPassant = "",
-    halfmoves = "",
-    fullmoves = "",
-  ] = parts;
-  const ranks = pieces.split("/");
-  const hasEightSquares = (rank: string) =>
-    /^[pnbrqk1-8]+$/i.test(rank) &&
-    !/\d\d/.test(rank) &&
-    [...rank].reduce(
-      (squares, letter) => squares + (Number(letter) || 1),
-      0,
-    ) === 8;
-  if (
-    parts.length !== 6 ||
-    ranks.length !== 8 ||
-    !ranks.every(hasEightSquares) ||
-    (side !== "w" && side !== "b") ||
-    !(castling === "-" || /^(?=[KQkq])K?Q?k?q?$/.test(castling)) ||
-    !(enPassant === "-" || /^[a-h][1-8]$/.test(enPassant)) ||
-    !/^\d+$/.test(halfmoves) ||
-    !/^[1-9]\d*$/.test(fullmoves)
-  ) {
-    return { ...setup, invalid: { field: "fen", text } };
+  );
+  change({
+    type: "setPanel",
+    game,
+    panel: { type: "setup", draft: { ...setup, raw, pending } },
+  });
+  const description = await pending;
+  const current = tabNow(game)?.panel;
+  if (current?.type === "setup" && current.draft.pending === pending) {
+    change({
+      type: "setPanel",
+      game,
+      panel: {
+        ...current,
+        draft: { ...description, tool: current.draft.tool },
+      },
+    });
   }
-  return { ...startSetup(text), tool: setup.tool };
 }

@@ -2,6 +2,7 @@
 import type { EditableTag } from "./EditableTag";
 import type { GameResult } from "./GameResult";
 import type { MoveSymbol } from "./MoveSymbol";
+import type { PositionInput } from "./PositionInput";
 import type { PositionSymbol } from "./PositionSymbol";
 import type { Promotion } from "./Promotion";
 import type { ShapeEdit } from "./ShapeEdit";
@@ -9,7 +10,11 @@ import type { ShapeEdit } from "./ShapeEdit";
 /**
  * What the view can ask for.
  */
-export type Request = { "type": "Version" } | { "type": "NewGame" } | { "type": "SetStartPosition", 
+export type Request = { "type": "Version" } | { "type": "NewGame" } | { "type": "DescribePosition", 
+/**
+ * Text from the FEN field or the edited board fields.
+ */
+input: PositionInput, } | { "type": "SetStartPosition", 
 /**
  * The open game's number.
  */

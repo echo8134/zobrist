@@ -1,31 +1,97 @@
-import { describe, expect, it } from "vitest";
-import { changePosition, editFen, fenOf, startSetup } from "./positionSetup";
+import { expect, test, vi } from "vitest";
+import type { PositionDraft } from "./generated/PositionDraft";
+import { ask } from "./ipc";
+import { editSetup } from "./positionSetup";
+import type { Change, Tab } from "./tabs";
 
-describe("the FEN field of a position being set up", () => {
-  const setup = startSetup("4k3/4p3/8/8/8/8/8/4K3 b - - 9 12");
+vi.mock("./ipc", () => ({ ask: vi.fn() }));
 
-  it("preserves move counters when editing the position", () => {
-    const changed = changePosition(setup, { turn: "white", enPassant: "d6" });
-    expect(fenOf(changed.position)).toBe("4k3/4p3/8/8/8/8/8/4K3 w - d6 9 12");
+const position: PositionDraft = {
+  fen: "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+  fields: {
+    pieces: "4k3/8/8/8/8/8/8/4K3",
+    turn: "white",
+    whiteShort: false,
+    whiteLong: false,
+    blackShort: false,
+    blackLong: false,
+    enPassant: null,
+  },
+};
+
+function openSetup() {
+  let panel: Tab["panel"] = {
+    type: "setup",
+    draft: { position, raw: null, tool: "eraser" },
+  };
+  const tabNow = () => ({ panel });
+  const change = (next: Change) => {
+    if (next.type === "setPanel") panel = next.panel;
+  };
+  return { tabNow, change };
+}
+
+test("two quick edits keep the first accepted position when Rust refuses the second", async () => {
+  const { tabNow, change } = openSetup();
+  const blackToPlay: PositionDraft = {
+    fen: "4k3/8/8/8/8/8/8/4K3 b - - 0 1",
+    fields: { ...position.fields, turn: "black" },
+  };
+  vi.mocked(ask)
+    .mockResolvedValueOnce({ type: "DescribePosition", draft: blackToPlay })
+    .mockResolvedValueOnce({ type: "DescribePosition", draft: null });
+  const first = editSetup(
+    1,
+    { type: "Fen", fen: blackToPlay.fen },
+    tabNow,
+    change,
+  );
+  const second = editSetup(
+    1,
+    { type: "Fields", fields: { enPassant: "e" } },
+    tabNow,
+    change,
+  );
+  await Promise.all([first, second]);
+
+  expect(ask).toHaveBeenLastCalledWith({
+    type: "DescribePosition",
+    input: {
+      type: "Fields",
+      fields: {
+        pieces: "4k3/8/8/8/8/8/8/4K3",
+        turn: "black",
+        whiteShort: false,
+        whiteLong: false,
+        blackShort: false,
+        blackLong: false,
+        enPassant: "e",
+      },
+    },
   });
-
-  it.each([
-    "8/8/8/8/8/8/8 w - - 0 1",
-    "8/8/8/8/8/8/8/7Kp w - - 0 1",
-    "8/8/8/8/8/8/8/7X w - - 0 1",
-    "8/8/8/8/8/8/8/8 w KK - 0 1",
-    "8/8/8/8/8/8/8/8 black - - 0 1",
-    "8/8/8/8/8/8/8/8 w - i4 0 1",
-    "8/8/8/8/8/8/8/8 w - - 0",
-  ])("keeps the position while the field contains %s", (text) => {
-    const changed = editFen(setup, text);
-    expect(changed.invalid).toEqual({ field: "fen", text });
-    expect(fenOf(changed.position)).toBe("4k3/4p3/8/8/8/8/8/4K3 b - - 9 12");
+  expect(tabNow().panel).toEqual({
+    type: "setup",
+    draft: {
+      position: blackToPlay,
+      raw: { field: "enPassant", text: "e" },
+      tool: "eraser",
+    },
   });
+});
 
-  it("accepts a complete FEN with an empty board for Rust to judge", () => {
-    const changed = editFen(setup, "8/8/8/8/8/8/8/8 w Kq e3 0 1");
-    expect(changed.invalid).toBeNull();
-    expect(fenOf(changed.position)).toBe("8/8/8/8/8/8/8/8 w Kq e3 0 1");
+test("an answer that arrives after Cancel leaves setup closed", async () => {
+  const { tabNow, change } = openSetup();
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "DescribePosition",
+    draft: position,
   });
+  const editing = editSetup(
+    1,
+    { type: "Fen", fen: position.fen },
+    tabNow,
+    change,
+  );
+  change({ type: "setPanel", game: 1, panel: undefined });
+  await editing;
+  expect(tabNow().panel).toBeUndefined();
 });

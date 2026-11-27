@@ -269,7 +269,12 @@ describe("setting up a position and exchanging game text", () => {
     await fen().setValue("broken");
     await expect(fen()).toHaveAttribute("aria-invalid", "true");
     await expectBoard(pasted);
-    expect(await named("Use position").isEnabled()).toBe(false);
+    await expect(named("Use position")).toBeEnabled();
+    await named("Use position").click();
+    await expect(named("Set up position")).toBeEnabled();
+    await expectBoard(pasted);
+    await named("Set up position").click();
+    await expect(fen()).toHaveValue("4k3/4p3/8/8/8/8/8/4K3 b - - 0 12");
     await named("Start position").click();
     await expectBoard(startPositionWithWhiteAtBottom);
     await expect(fen()).toHaveValue(

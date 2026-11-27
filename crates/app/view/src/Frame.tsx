@@ -3,6 +3,7 @@ import { fileOfThePage, readFileAgain } from "./FilesPage";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
 import { PageArea } from "./PageArea";
+import { editSetup } from "./positionSetup";
 import { TabArea } from "./TabArea";
 import { TopBar } from "./TopBar";
 import {
@@ -85,6 +86,7 @@ export function Frame() {
           key={tab.game}
           tab={tab}
           change={change}
+          onEditSetup={(edit) => editSetup(tab.game, edit, tabNow, change)}
           onTurnBoard={() => change({ type: "turnBoard", game: tab.game })}
           onMove={(move) => playMove(tab.game, move, change)}
           onGoTo={(place) => goTo(tab.game, place, change)}

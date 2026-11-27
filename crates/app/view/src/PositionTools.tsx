@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { answersOnTheirWay, ask } from "./ipc";
 import { PositionSetupPanel } from "./PositionSetupPanel";
 import styles from "./PositionTools.module.css";
-import { startSetup } from "./positionSetup";
+import type { SetupEdit } from "./positionSetup";
 import type { Change, PositionPanelState, Tab } from "./tabs";
 
 const {
@@ -72,13 +72,28 @@ export function PositionTools({
         type="button"
         className={textButton}
         disabled={disabled}
-        onClick={() =>
+        onClick={async () => {
           change({
             type: "setPanel",
             game,
-            panel: { type: "setup", draft: startSetup(picture.fen) },
-          })
-        }
+            panel: { type: "openingSetup", status: "pending" },
+          });
+          const { draft } = await ask({
+            type: "DescribePosition",
+            input: { type: "Fen", fen: picture.fen },
+          });
+          change({
+            type: "setPanel",
+            game,
+            panel:
+              draft === null
+                ? undefined
+                : {
+                    type: "setup",
+                    draft: { position: draft, raw: null, tool: null },
+                  },
+          });
+        }}
       >
         Set up position
       </button>
@@ -122,7 +137,12 @@ export function PositionPanel({
   change,
   className,
   children,
-}: Props & { className: string | undefined; children: ReactNode }) {
+  onEditSetup,
+}: Props & {
+  className: string | undefined;
+  children: ReactNode;
+  onEditSetup: (edit: SetupEdit) => void;
+}) {
   const { game, panel } = tab;
   const setPanel = (next: PositionPanelState | undefined) =>
     change({ type: "setPanel", game, panel: next });
@@ -132,17 +152,25 @@ export function PositionPanel({
       <PositionSetupPanel
         setup={panel.draft}
         refused={panel.status === "refused"}
-        onChange={(draft) => setPanel({ type: "setup", draft })}
+        onChoose={(tool) =>
+          setPanel({ ...panel, draft: { ...panel.draft, tool } })
+        }
+        onEdit={onEditSetup}
         onCancel={() => setPanel(undefined)}
-        onUse={async (fen) => {
+        onUse={async () => {
           setPanel({ ...panel, status: "pending" });
+          const description = await (panel.draft.pending ?? panel.draft);
           const { change: answer } = await ask({
             type: "SetStartPosition",
             game,
-            fen,
+            fen: description.position.fen,
           });
           if (answer?.refused) {
-            setPanel({ ...panel, status: "refused" });
+            setPanel({
+              type: "setup",
+              draft: { ...description, tool: panel.draft.tool },
+              status: "refused",
+            });
           } else if (answer !== null) {
             change({ type: "drawPicture", game, picture: answer.picture });
             setPanel(undefined);
