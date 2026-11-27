@@ -2,6 +2,7 @@
 import type { AddedPgnPath } from "./AddedPgnPath";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
+import type { EngineEntry } from "./EngineEntry";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
 import type { OpenedGame } from "./OpenedGame";
@@ -90,7 +91,15 @@ picture: GamePicture | null, } | { "type": "DeleteRest",
 /**
  * Absent when the game is no longer open.
  */
-picture: GamePicture | null, } | { "type": "CloseGame" } | { "type": "PickPgnPath", 
+picture: GamePicture | null, } | { "type": "CloseGame" } | { "type": "PickEnginePath", 
+/**
+ * Absent after cancellation.
+ */
+path: string | null, } | { "type": "EngineInventory", 
+/**
+ * The default comes first.
+ */
+entries: Array<EngineEntry>, } | { "type": "PickPgnPath", 
 /**
  * The absolute path returned by the system.
  */

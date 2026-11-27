@@ -4,11 +4,13 @@
 //! TypeScript types of the view are generated from these two types.
 
 mod database_collection;
+mod engines;
 mod file_collection;
 mod game_file;
 mod pgn_file;
 
 pub use database_collection::{DatabaseEntry, DatabaseRequest};
+pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
 };
@@ -543,6 +545,16 @@ pub enum Response {
     },
     /// The game is closed.
     CloseGame,
+    /// The executable path selected on this computer.
+    PickEnginePath {
+        /// Absent after cancellation.
+        path: Option<std::path::PathBuf>,
+    },
+    /// The engines registered on this computer.
+    EngineInventory {
+        /// The default comes first.
+        entries: Vec<EngineEntry>,
+    },
     /// The path the player chose, or nothing after cancellation.
     PickPgnPath {
         /// The absolute path returned by the system.

@@ -1,13 +1,14 @@
 import { browser, expect } from "@wdio/globals";
 
-type Choice = "File" | "Folder" | "New";
+type Choice = "File" | "Folder" | "New" | "Engine";
 
 /** WebDriver cannot drive the system dialog. Only its next answer is supplied by the test. */
 export async function answerNextPicker(
-  type: "PickPgnPath" | "PickDatabasePath",
+  type: "PickPgnPath" | "PickDatabasePath" | "PickEnginePath",
   path: string | null,
+  session: WebdriverIO.Browser = browser,
 ) {
-  await browser.execute(
+  await session.execute(
     `
       const [type, path] = arguments;
       const original = window.fetch;
@@ -32,22 +33,30 @@ export async function answerNextPicker(
   );
 }
 
-export async function pick(choice: Choice, path: string | null) {
-  await answerNextPicker("PickPgnPath", path);
-  if (choice === "New") {
-    await browser.$("main").$("aria/New PGN…").click();
+export async function pick(
+  choice: Choice,
+  path: string | null,
+  session: WebdriverIO.Browser = browser,
+) {
+  const requestType = choice === "Engine" ? "PickEnginePath" : "PickPgnPath";
+  await answerNextPicker(requestType, path, session);
+  if (choice === "Engine") {
+    await session.$("main").$("aria/Add engine…").click();
+  } else if (choice === "New") {
+    await session.$("main").$("aria/New PGN…").click();
   } else {
-    await browser.$("main").$("aria/Open").click();
-    await browser
+    await session.$("main").$("aria/Open").click();
+    await session
       .$("main")
       .$(choice === "File" ? "aria/PGN file…" : "aria/Folder…")
       .click();
   }
-  await browser.waitUntil(async () =>
-    Boolean(await browser.execute("return window.pickerRequest")),
+  await session.waitUntil(async () =>
+    Boolean(await session.execute("return window.pickerRequest")),
   );
-  expect(await browser.execute("return window.pickerRequest.choice")).toBe(
+  if (choice === "Engine") return;
+  expect(await session.execute("return window.pickerRequest.choice")).toBe(
     choice,
   );
-  return browser.execute("return window.pickerRequest.folder");
+  return session.execute("return window.pickerRequest.folder");
 }

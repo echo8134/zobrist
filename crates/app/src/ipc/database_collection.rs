@@ -10,7 +10,7 @@ use ts_rs::TS;
 use zobrist_store::{Database, OpenError};
 
 use super::Response;
-use super::file_collection::{CollectionList, lock_collection, save_collection};
+use super::file_collection::{CollectionList, lock_collection, publish_collection};
 
 /// One local collection in the Databases list.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -132,7 +132,7 @@ fn update(
     let changed = change(&mut paths);
     let entries = entries(&paths)?;
     if changed {
-        save_collection(catalog, &paths)?;
+        publish_collection(catalog, &paths)?;
     }
     Ok(entries)
 }
