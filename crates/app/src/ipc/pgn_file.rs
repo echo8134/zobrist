@@ -13,14 +13,14 @@ use zobrist_store::PgnGameRow;
 use super::{FirstStep, Games, Response};
 
 pub(super) fn open(typed: String) -> FirstStep {
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let answer = opened(&resolve(&typed));
         move |_: &mut Games| Response::OpenPgnFile { answer }
     })
 }
 
 pub(super) fn create(typed: String) -> FirstStep {
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let answer = created(&resolve(&typed));
         move |_: &mut Games| Response::CreatePgnFile { answer }
     })

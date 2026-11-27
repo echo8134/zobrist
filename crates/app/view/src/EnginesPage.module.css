@@ -1,0 +1,59 @@
+.panel {
+  margin-top: var(--files-toolbar-gap-above);
+}
+
+.panel button {
+  height: var(--button-height);
+  padding: var(--button-padding);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel button:hover {
+  background: var(--top-bar-background-color);
+}
+
+.panel button:disabled {
+  color: var(--dim-symbol-button-color);
+  cursor: default;
+}
+
+.panel p {
+  margin: var(--file-line-gap-above) 0 0;
+  color: var(--file-line-color);
+}
+
+.panel [role="alert"] {
+  color: var(--refusal-color);
+}
+
+.engines {
+  margin: var(--list-gap-above) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--list-line-color);
+  list-style: none;
+}
+
+.engines li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--files-toolbar-gap);
+  padding-block: var(--file-line-gap-above);
+  border-bottom: 1px solid var(--list-line-color);
+}
+
+.engine {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.engine span {
+  display: block;
+  color: var(--file-line-color);
+}

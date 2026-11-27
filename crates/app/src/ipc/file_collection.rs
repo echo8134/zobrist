@@ -9,7 +9,10 @@ use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
 
-use super::{AccountRequest, PgnFile, PgnFileAnswer, RefusalReason, Request, Response, pgn_file};
+use super::{
+    AccountRequest, EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Request, Response,
+    pgn_file,
+};
 
 /// The command routes game, file and account requests to their owners.
 #[derive(Deserialize, TS)]
@@ -24,10 +27,17 @@ pub enum DesktopRequest {
     Account(AccountRequest),
 }
 
-/// An operation on the Files page that needs the desktop environment.
+/// A request about a desktop collection or its file picker.
 #[derive(Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum CollectionRequest {
+    /// Choose a local engine program.
+    PickEnginePath,
+    /// Read or change the registered local engines.
+    EngineInventory {
+        /// The requested inventory operation.
+        action: EngineAction,
+    },
     /// Choose an existing file, a folder, or a destination for a new PGN.
     PickPgnPath {
         /// Which dialog to show.
@@ -114,6 +124,25 @@ impl CollectionRequest {
     /// Answers on a blocking thread. A dialog or a folder read never takes the game lock.
     pub fn answer(self, window: &Window) -> io::Result<Response> {
         match self {
+            Self::PickEnginePath => {
+                let path = window
+                    .dialog()
+                    .file()
+                    .set_parent(window)
+                    .blocking_pick_file()
+                    .map(|file| file.into_path().map_err(io::Error::other))
+                    .transpose()?;
+                Ok(Response::PickEnginePath { path })
+            }
+            Self::EngineInventory { action } => {
+                let directory = window
+                    .path()
+                    .app_local_data_dir()
+                    .map_err(io::Error::other)?;
+                Ok(Response::EngineInventory {
+                    entries: action.apply(&directory)?,
+                })
+            }
             Self::PickPgnPath { choice, folder } => {
                 let dialog = window.dialog().file().set_parent(window);
                 let selected = match choice {
@@ -350,15 +379,7 @@ fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {
-    fs::create_dir_all(directory)?;
-    // Separate app windows and processes may add to the same collection.
-    let lock = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(directory.join("files.lock"))?;
-    lock.lock()?;
+    let _lock = lock_collection(directory, "files.lock")?;
     let mut entries = collection(directory)?;
     if let Some(previous) = entries
         .iter_mut()
@@ -371,17 +392,34 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
     } else {
         entries.push(entry.clone());
     }
-    let staged = directory.join("files.tmp");
-    let mut file = File::create(&staged)?;
     let paths: Vec<_> = entries
         .iter()
         .map(|entry| (entry.kind, &entry.path))
         .collect();
-    serde_json::to_writer(&mut file, &paths)?;
+    publish_collection(&directory.join("files.json"), &paths)?;
+    Ok(entries)
+}
+
+pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<File> {
+    fs::create_dir_all(directory)?;
+    // Separate app windows and processes may add to the same collection.
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join(filename))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+pub(super) fn publish_collection(path: &Path, contents: &impl Serialize) -> io::Result<()> {
+    let staged = path.with_extension("tmp");
+    let mut file = File::create(&staged)?;
+    serde_json::to_writer(&mut file, contents)?;
     file.sync_all()?;
     drop(file);
-    fs::rename(staged, directory.join("files.json"))?;
-    Ok(entries)
+    fs::rename(staged, path)
 }
 
 #[cfg(test)]

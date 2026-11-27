@@ -8,6 +8,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 workspace_crates="
 zobrist-core
 zobrist-store
+zobrist-online
 zobrist-engine
 zobrist-cli
 zobrist-app
@@ -15,12 +16,15 @@ zobrist-app
 # Allowed edges, one per line: a crate, then a workspace crate that it may depend on.
 internal_edges="
 zobrist-store zobrist-core
+zobrist-online zobrist-core
 zobrist-engine zobrist-core
 zobrist-cli zobrist-core
 zobrist-cli zobrist-store
+zobrist-cli zobrist-online
 zobrist-cli zobrist-engine
 zobrist-app zobrist-core
 zobrist-app zobrist-store
+zobrist-app zobrist-online
 zobrist-app zobrist-engine
 "
 # External crates that zobrist-core may depend on, one per line. Empty means none.
@@ -56,6 +60,8 @@ while read -r crate dep; do
       grep -qx "$crate $dep" <<<"$internal_edges" || fail "$crate may not depend on $dep" ;;
     rusqlite)
       fail "$crate may not depend on $dep. Use the game store for persistence" ;;
+    reqwest)
+      [ "$crate" = "zobrist-online" ] || fail "only zobrist-online may depend on $dep. Put requests to outside sites in crates/online" ;;
     tauri | tauri-*)
       [ "$crate" = "$owner_of_tauri" ] || fail "only $owner_of_tauri may depend on $dep, not $crate" ;;
   esac
