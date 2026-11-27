@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { browser, expect } from "@wdio/globals";
 import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
+import { nativeKey } from "./native-key";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
@@ -301,36 +302,47 @@ describe("the window", () => {
       await browser.$$("main h2 + p").map((line) => line.getText()),
     ).toEqual(["On this device", "Account linking is not available yet."]);
     await expect(browser.$$("main summary")).toBeElementsArrayOfSize(2);
-    expect(await screenshot("user")).toEqual({ width: 1280, height: 800 });
-    const accounts = [
-      [
-        "Lichess",
-        "Once linking is available, you can sign in to Lichess from your browser to open your bookmarked games.",
-      ],
-      [
-        "Chess.com",
-        "You can already download your games as PGN from Chess.com and open them in Files.",
-      ],
-    ] as const;
-    for (const [index, [name, description]] of accounts.entries()) {
-      const account = browser.$(`main details:nth-of-type(${index + 1})`);
+    const lichess = browser.$("main details:first-of-type");
+    const chessCom = browser.$("main details:nth-of-type(2)");
+    for (const [account, name, icon] of [
+      [lichess, "Lichess", "lucide-chess-knight"],
+      [chessCom, "Chess.com", "lucide-chess-pawn"],
+    ] as const) {
       const summary = account.$("summary");
-      const text = account.$("p");
-      await expect(summary).toHaveText(expect.stringContaining(name));
-      await expect(summary).toHaveText(
-        expect.stringContaining("Not connected"),
-      );
+      await expect(summary.$(`span=${name}`)).toHaveText(name);
+      await expect(summary.$(`svg.${icon}`)).toBeDisplayed();
+      await expect(summary.$("span:last-of-type")).toHaveText("Not connected");
       await expect(account).not.toHaveAttribute("open");
-      await summary.click();
-      await expect(account).toHaveAttribute("open");
-      await expect(text).toBeDisplayed();
-      await expect(text).toHaveText(description);
-      await summary.click();
-      await expect(account).not.toHaveAttribute("open");
-      await expect(summary).toHaveText(
-        expect.stringContaining("Not connected"),
-      );
     }
+    expect(await screenshot("user")).toEqual({ width: 1280, height: 800 });
+
+    await lichess.$("summary").click();
+    await expect(lichess).toHaveAttribute("open");
+    await expect(lichess.$("p")).toBeDisplayed();
+    await expect(lichess.$("p")).toHaveText(
+      "Once linking is available, you can sign in to Lichess from your browser to open your bookmarked games.",
+    );
+    await lichess.$("summary").click();
+    await expect(lichess).not.toHaveAttribute("open");
+    await expect(lichess.$("p")).not.toBeDisplayed();
+    await expect(lichess.$("summary span:last-of-type")).toHaveText(
+      "Not connected",
+    );
+
+    nativeKey("tab");
+    await expect(chessCom.$("summary")).toBeFocused();
+    nativeKey("enter");
+    await expect(chessCom).toHaveAttribute("open");
+    await expect(chessCom.$("p")).toBeDisplayed();
+    await expect(chessCom.$("p")).toHaveText(
+      "You can already download your games as PGN from Chess.com and open them in Files.",
+    );
+    nativeKey("enter");
+    await expect(chessCom).not.toHaveAttribute("open");
+    await expect(chessCom.$("p")).not.toBeDisplayed();
+    await expect(chessCom.$("summary span:last-of-type")).toHaveText(
+      "Not connected",
+    );
     await expect(heading()).toHaveText("User");
   });
 
