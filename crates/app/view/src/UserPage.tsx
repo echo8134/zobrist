@@ -1,4 +1,6 @@
 import { ChessKnight, ChessPawn, ChevronDown, Monitor } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ask } from "./ipc";
 import styles from "./UserPage.module.css";
 
 const {
@@ -16,6 +18,9 @@ const {
   status,
   chevron,
   description: providerDescription,
+  nameForm,
+  actions,
+  refusal,
 } = styles;
 
 const providers = [
@@ -33,7 +38,53 @@ const providers = [
   },
 ];
 
+// Returning to User while a save finishes must read the name after that write.
+let lastWrite: Promise<void> = Promise.resolve();
+
 export function UserPage() {
+  const [savedName, setSavedName] = useState<string | null>();
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const [writing, setWriting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    lastWrite
+      .then(() => ask({ type: "GetLichessName" }))
+      .then(
+        ({ name }) => {
+          if (active) {
+            setSavedName(name);
+            setDraft(name ?? "");
+          }
+        },
+        (reason: unknown) => {
+          if (active) setError(String(reason));
+        },
+      );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function changeName(name: string | null) {
+    setWriting(true);
+    setError("");
+    const result =
+      name === null
+        ? ask({ type: "RemoveLichessName" }).then(() => null)
+        : ask({ type: "SaveLichessName", name }).then((answer) => answer.name);
+    lastWrite = result
+      .then(
+        (saved) => {
+          setSavedName(saved);
+          setDraft(saved ?? "");
+        },
+        (reason: unknown) => setError(String(reason)),
+      )
+      .finally(() => setWriting(false));
+  }
+
   return (
     <div className={content}>
       <div className={profile}>
@@ -58,10 +109,58 @@ export function UserPage() {
                   <Icon aria-hidden="true" />
                 </span>
                 <span className={providerName}>{name}</span>
-                <span className={status}>Not connected</span>
+                <span className={status}>
+                  {name === "Lichess" && savedName != null
+                    ? savedName
+                    : "Not connected"}
+                </span>
                 <ChevronDown aria-hidden="true" className={chevron} />
               </summary>
               <p className={providerDescription}>{description}</p>
+              {name === "Lichess" && (
+                <form
+                  className={nameForm}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    changeName(draft);
+                  }}
+                >
+                  <label htmlFor="lichess-username">Lichess username</label>
+                  <input
+                    id="lichess-username"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={draft}
+                    disabled={savedName === undefined || writing}
+                    onChange={(event) => {
+                      setDraft(event.target.value);
+                      setError("");
+                    }}
+                  />
+                  <div className={actions}>
+                    <button
+                      type="submit"
+                      disabled={savedName === undefined || writing}
+                    >
+                      Save
+                    </button>
+                    {savedName != null && (
+                      <button
+                        type="button"
+                        disabled={writing}
+                        onClick={() => changeName(null)}
+                      >
+                        Remove name
+                      </button>
+                    )}
+                  </div>
+                  {error && (
+                    <span role="alert" className={refusal}>
+                      {error}
+                    </span>
+                  )}
+                </form>
+              )}
             </details>
           ))}
         </div>
