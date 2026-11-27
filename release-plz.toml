@@ -28,6 +28,12 @@ git_release_enable = true
 git_release_name = "v{{ version }}"
 git_release_draft = true
 
+# v0.1.0 predates zobrist-online. With no matching tag, release-plz treats the crate as new.
+# Remove this entry once a workspace release tag contains the crate.
+[[package]]
+name = "zobrist-online"
+git_tag_name = "{{ package }}-v{{ version }}"
+
 [changelog]
 commit_parsers = [
   { message = "^feat", group = "added" },
