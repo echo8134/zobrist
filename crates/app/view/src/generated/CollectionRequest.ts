@@ -17,7 +17,11 @@ choice: PickerChoice,
 /**
  * The selected folder, when choosing a new file.
  */
-folder: string | null, } | { "type": "GetFileCollection" } | { "type": "AddPgnPath", 
+folder: string | null, } | { "type": "GetFileCollection" } | { "type": "GetRecentFiles" } | { "type": "OpenListedPgnFile", 
+/**
+ * The absolute path of the selected file.
+ */
+path: string, } | { "type": "AddPgnPath", 
 /**
  * Which picker supplied the path.
  */

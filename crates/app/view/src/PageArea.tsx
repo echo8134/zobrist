@@ -1,10 +1,11 @@
 import { type ReactNode, Suspense, use, useActionState, useState } from "react";
 import { BoardSettingsForm } from "./BoardSettings";
 import { EnginesPage } from "./EnginesPage";
-import { FilesPage } from "./FilesPage";
+import { FilesPage, openListed } from "./FilesPage";
 import formStyles from "./FilesPage.module.css";
 import { ask } from "./ipc";
 import styles from "./PageArea.module.css";
+import { RecentFiles } from "./RecentFiles";
 import { type Change, openGame } from "./tabs";
 import { UserPage } from "./UserPage";
 
@@ -92,7 +93,15 @@ export function PageArea({ page, change }: Props) {
     <main className={area}>
       <h1 className={heading}>{page}</h1>
       {page === "Home" ? (
-        <GameLinkForm change={change} />
+        <>
+          <GameLinkForm change={change} />
+          <RecentFiles
+            onOpen={(entry) => {
+              change({ type: "showPage", page: "Files" });
+              void openListed(entry);
+            }}
+          />
+        </>
       ) : page === "Files" ? (
         <FilesPage
           onOpenGame={(path, number) => openGame(path, number, change)}

@@ -614,6 +614,16 @@ pub enum Response {
         /// The root entries of the collection.
         entries: Vec<CollectionEntry>,
     },
+    /// The files the player recently opened.
+    GetRecentFiles {
+        /// Up to ten PGN files, newest first.
+        entries: Vec<CollectionEntry>,
+    },
+    /// The PGN selected on Home or Files, or the refusal.
+    OpenListedPgnFile {
+        /// The file with its games or why it could not be opened.
+        answer: PgnFileAnswer,
+    },
     /// The collection and the selected file or folder after applying the picker result.
     AddPgnPath {
         /// The new selection or the reason the file operation was refused.

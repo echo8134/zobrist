@@ -1,5 +1,7 @@
 //! The player's collection of PGN files and folders at their original locations.
 
+mod recent_files;
+
 use std::fs::{self, File};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -31,6 +33,13 @@ pub enum CollectionRequest {
     },
     /// Load the references the player has kept.
     GetFileCollection,
+    /// Load the most recently opened PGN files, newest first.
+    GetRecentFiles,
+    /// Open a PGN selected in a list on Files or Home.
+    OpenListedPgnFile {
+        /// The absolute path of the selected file.
+        path: PathBuf,
+    },
     /// Open or create the chosen item and keep it in the collection.
     AddPgnPath {
         /// Which picker supplied the path.
@@ -107,6 +116,7 @@ impl CollectionEntry {
 impl CollectionRequest {
     /// Answers on a blocking thread. A dialog or a folder read never takes the game lock.
     pub fn answer(self, window: &Window) -> io::Result<Response> {
+        let data_directory = || window.path().app_local_data_dir().map_err(io::Error::other);
         match self {
             Self::PickEnginePath => {
                 let path = window
@@ -118,15 +128,9 @@ impl CollectionRequest {
                     .transpose()?;
                 Ok(Response::PickEnginePath { path })
             }
-            Self::EngineInventory { action } => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                Ok(Response::EngineInventory {
-                    entries: action.apply(&directory)?,
-                })
-            }
+            Self::EngineInventory { action } => Ok(Response::EngineInventory {
+                entries: action.apply(&data_directory()?)?,
+            }),
             Self::PickPgnPath { choice, folder } => {
                 let dialog = window.dialog().file().set_parent(window);
                 let selected = match choice {
@@ -159,28 +163,22 @@ impl CollectionRequest {
                 }
                 Ok(Response::PickPgnPath { path })
             }
-            Self::GetFileCollection => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                Ok(Response::GetFileCollection {
-                    entries: collection(&directory)?,
-                })
-            }
+            Self::GetFileCollection => Ok(Response::GetFileCollection {
+                entries: collection(&data_directory()?)?,
+            }),
+            Self::GetRecentFiles => Ok(Response::GetRecentFiles {
+                entries: recent_files::list(&data_directory()?)?,
+            }),
+            Self::OpenListedPgnFile { path } => Ok(Response::OpenListedPgnFile {
+                answer: open_listed(&data_directory()?, path)?,
+            }),
             Self::AddPgnPath {
                 choice,
                 path,
                 folder,
-            } => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                Ok(Response::AddPgnPath {
-                    answer: add(&directory, choice, &path, folder.as_deref())?,
-                })
-            }
+            } => Ok(Response::AddPgnPath {
+                answer: add(&data_directory()?, choice, &path, folder.as_deref())?,
+            }),
             Self::ReadPgnFolder { path } => Ok(Response::ReadPgnFolder {
                 entries: children(&path)?,
             }),
@@ -297,12 +295,24 @@ fn add(
             error
         }
     })?;
+    if choice == PickerChoice::File {
+        recent_files::record(directory, &entry.path);
+    }
     Ok(AddedPgnPath::File {
         entry,
         entries,
         parent,
         file,
     })
+}
+
+fn open_listed(directory: &Path, path: PathBuf) -> io::Result<PgnFileAnswer> {
+    let entry = CollectionEntry::new(EntryKind::File, path)?;
+    let answer = pgn_file::opened(&entry.path);
+    if matches!(answer, PgnFileAnswer::File(_)) {
+        recent_files::record(directory, &entry.path);
+    }
+    Ok(answer)
 }
 
 fn suggested_folder(documents: Option<&Path>) -> Option<PathBuf> {

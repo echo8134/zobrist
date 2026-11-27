@@ -128,7 +128,15 @@ path: string | null, } | { "type": "GetFileCollection",
 /**
  * The root entries of the collection.
  */
-entries: Array<CollectionEntry>, } | { "type": "AddPgnPath", 
+entries: Array<CollectionEntry>, } | { "type": "GetRecentFiles", 
+/**
+ * Up to ten PGN files, newest first.
+ */
+entries: Array<CollectionEntry>, } | { "type": "OpenListedPgnFile", 
+/**
+ * The file with its games or why it could not be opened.
+ */
+answer: PgnFileAnswer, } | { "type": "AddPgnPath", 
 /**
  * The new selection or the reason the file operation was refused.
  */
