@@ -122,6 +122,34 @@ fn reopens_dirty_and_clean_boards_in_tab_order_and_saves_to_the_original_game() 
 }
 
 #[test]
+fn reopens_both_boards_when_a_new_game_reuses_the_first_boards_file_and_number() -> io::Result<()> {
+    let directory = directory("shared-origin")?;
+    let source = directory.join("games.pgn");
+    fs::write(&source, "1. d4 *\n")?;
+    let games = SharedGames::default();
+    let send = |request| ask(&games, &directory, request);
+    send(json!({"type":"OpenGame","path":source,"number":1}))?;
+    fs::remove_file(&source)?;
+    send(json!({"type":"NewGame"}))?;
+    send(json!({"type":"PlayMove","game":2,"from":"e2","to":"e4","promotion":null}))?;
+    send(json!({"type":"SaveGameAs","game":2,"path":source}))?;
+    assert_eq!(
+        quit(&games, &directory, &[1, 2], Some(2))?,
+        json!({"type":"QuitWithBoards"})
+    );
+
+    let answer = restore(&SharedGames::default(), &directory)?;
+    let boards = answer["boards"].as_array().unwrap();
+    assert_eq!(boards.len(), 2);
+    assert_eq!(answer["selected"], 2);
+    for (board, first_move) in boards.iter().zip(["d4", "e4"]) {
+        assert_eq!(board["picture"]["file"], json!({"path":source,"number":1}));
+        assert_eq!(board["picture"]["notation"][0]["text"], first_move);
+    }
+    fs::remove_dir_all(directory)
+}
+
+#[test]
 fn retains_the_game_last_read_for_conflict_detection_even_if_its_file_is_missing() -> io::Result<()>
 {
     let directory = directory("missing-file")?;

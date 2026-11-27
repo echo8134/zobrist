@@ -191,13 +191,12 @@ impl BoardSession {
                 "The saved board selection is out of range.",
             ));
         }
-        let mut origins = HashSet::new();
         for origin in session
             .boards
             .iter()
             .filter_map(|board| board.origin.as_ref())
         {
-            if !origin.path.is_absolute() || !origins.insert((&origin.path, origin.number)) {
+            if !origin.path.is_absolute() {
                 return Err(io::Error::new(
                     ErrorKind::InvalidData,
                     "Invalid file origin in the board session.",
