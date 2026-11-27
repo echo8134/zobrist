@@ -109,6 +109,26 @@
   --current-move-color: #222222;
   --variation-color: #6b6b6b;
   --variation-indent: 16px;
+  --comment-color: #3f7a56;
+  --comment-gap: 6px;
+
+  --annotation-panel-padding: 12px 16px;
+  --annotation-panel-gap: 8px;
+  --annotation-panel-line-color: #e6e6e6;
+
+  --comment-field-height: 64px;
+  --comment-field-padding: 8px;
+  --comment-field-line-color: #e2e2e2;
+  --comment-field-corner-radius: 5px;
+
+  --symbol-button-size: 28px;
+  --symbol-button-gap: 2px;
+  --symbol-button-corner-radius: 4px;
+  --symbol-button-color: #444444;
+  --symbol-button-weight: 500;
+  --set-symbol-button-background-color: #efefef;
+  --set-symbol-button-color: #222222;
+  --dim-symbol-button-color: #bbbbbb;
 
   --promotion-chooser-line-color: #e2e2e2;
   --promotion-chooser-background-color: #ffffff;

@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import styles from "./GameDataForm.module.css";
 import type { EditableTag } from "./generated/EditableTag";
 import type { GamePicture } from "./generated/GamePicture";
@@ -30,32 +30,10 @@ type Props = {
 };
 
 export function GameDataForm({ picture, onSetTag, onSetResult }: Props) {
-  const formElement = useRef<HTMLFormElement>(null);
   const resultId = useId();
-
-  // The board keeps the window from moving the focus when the player clicks on it. So a
-  // press of the mouse outside the form takes the focus from the form here, and the field
-  // that had it sends its text.
-  useEffect(() => {
-    const leaveForm = ({ target }: MouseEvent) => {
-      const focused = document.activeElement;
-      const inForm = (node: unknown) =>
-        node instanceof Node && formElement.current?.contains(node) === true;
-      if (
-        focused instanceof HTMLElement &&
-        inForm(focused) &&
-        !inForm(target)
-      ) {
-        focused.blur();
-      }
-    };
-    document.addEventListener("mousedown", leaveForm, true);
-    return () => document.removeEventListener("mousedown", leaveForm, true);
-  }, []);
 
   return (
     <form
-      ref={formElement}
       className={form}
       aria-label="Game data"
       onSubmit={(event) => event.preventDefault()}

@@ -53,7 +53,7 @@ const seen = () =>
     }
     return {
       notation: parts.join(" ").replaceAll("( ", "(").replaceAll(" )", ")"),
-      dimTools: [...document.querySelectorAll("main aside button:disabled")].map(
+      dimTools: [...document.querySelectorAll("main aside > div:first-child button:disabled")].map(
         (button) => button.getAttribute("aria-label"),
       ),
     };
@@ -80,7 +80,7 @@ describe("the tools above the notation", () => {
   it("shows seven dim buttons above the notation of a new game", async () => {
     expect(
       await browser
-        .$$("main aside button")
+        .$$("main aside > div:first-child button")
         .map((button) => button.getComputedLabel()),
     ).toEqual([...saveTools, ...allTools]);
     expect(await seen()).toEqual({

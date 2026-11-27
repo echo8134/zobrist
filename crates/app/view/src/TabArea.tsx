@@ -1,5 +1,6 @@
 import { ArrowUpDown } from "lucide-react";
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
+import { AnnotationPanel } from "./AnnotationPanel";
 import { Board } from "./Board";
 import { GameDataForm } from "./GameDataForm";
 import type { EditableTag } from "./generated/EditableTag";
@@ -9,6 +10,7 @@ import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
 import styles from "./TabArea.module.css";
 import {
+  type Annotation,
   isSaveKey,
   type Move,
   type NotationTool,
@@ -37,6 +39,7 @@ type Props = {
   onGoTo: (place: number[]) => void;
   onTool: (tool: NotationTool) => void;
   onSave: (tool: SaveTool) => void;
+  onAnnotate: (annotation: Annotation) => void;
   onShapes: (shapes: Shapes) => void;
   onSetTag: (tag: EditableTag, text: string) => Promise<boolean>;
   onSetResult: (result: GameResult) => void;
@@ -49,6 +52,7 @@ export function TabArea({
   onGoTo,
   onTool,
   onSave,
+  onAnnotate,
   onShapes,
   onSetTag,
   onSetResult,
@@ -86,6 +90,25 @@ export function TabArea({
     return () => document.removeEventListener("keydown", act);
   }, [picture, onGoTo, onTool, onSave]);
 
+  // The board keeps the window from moving the focus when the player clicks on it. So a
+  // press of the mouse outside the field or the choice that has the focus takes the focus
+  // from it here, and a field sends its text.
+  useEffect(() => {
+    const leaveField = ({ target }: MouseEvent) => {
+      const focused = document.activeElement;
+      if (
+        (focused instanceof HTMLInputElement ||
+          focused instanceof HTMLTextAreaElement ||
+          focused instanceof HTMLSelectElement) &&
+        focused !== target
+      ) {
+        focused.blur();
+      }
+    };
+    document.addEventListener("mousedown", leaveField, true);
+    return () => document.removeEventListener("mousedown", leaveField, true);
+  }, []);
+
   return (
     <main className={area}>
       <div className={boardPart}>
@@ -120,10 +143,12 @@ export function TabArea({
         <div className={notationScroller}>
           <Notation
             mainLine={picture.notation}
+            startComments={picture.startComments}
             currentPlace={picture.place}
             onGoTo={onGoTo}
           />
         </div>
+        <AnnotationPanel picture={picture} onAnnotate={onAnnotate} />
       </aside>
     </main>
   );
