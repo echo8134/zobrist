@@ -8,9 +8,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { browser, expect } from "@wdio/globals";
+import { openEngines } from "./engine-session";
 import { pick } from "./file-picker";
 
 const screenshots = fileURLToPath(
@@ -160,4 +162,56 @@ describe("the default engine on the board", () => {
       rmSync(work, { recursive: true, force: true });
     }
   });
+
+  const departures: [
+    string,
+    (session: WebdriverIO.Browser) => Promise<unknown>,
+  ][] = [
+    [
+      "opens another page",
+      (session) => session.$("nav").$("aria/Home").click(),
+    ],
+    [
+      "switches board tabs",
+      (session) => session.$("header [role=tab][aria-selected=false]").click(),
+    ],
+    [
+      "quits the app",
+      (session) => {
+        // Session cleanup cannot reconnect after the app's embedded driver exits.
+        session.options.connectionRetryCount = 0;
+        return expect(session.closeWindow()).rejects.toThrow(
+          "All window handles were removed",
+        );
+      },
+    ],
+  ];
+  for (const [description, leave] of departures) {
+    it(`reaps the running engine when the player ${description}`, async () => {
+      const work = mkdtempSync(join(tmpdir(), "zobrist-engine-exit-"));
+      const program = join(work, "single-line");
+      try {
+        copyFileSync(new URL("./analysis-engine.sh", import.meta.url), program);
+        chmodSync(program, 0o700);
+        await openEngines(work, async (session) => {
+          await pick("Engine", program, session);
+          await expect(session.$("main li").$("span=Default")).toBeDisplayed();
+          const newBoard = session.$("header").$("aria/New board");
+          await newBoard.click();
+          await newBoard.click();
+          const analysis = session.$('section[aria-label="Engine analysis"]');
+          await analysis.$("aria/Start engine").click();
+          await expect(analysis.$("li span")).toHaveText("1. e4 e5");
+
+          await leave(session);
+          await expectExit(program);
+          expect(readFileSync(`${program}.commands`, "utf8")).toMatch(
+            /\nquit\n$/,
+          );
+        });
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+    });
+  }
 });
