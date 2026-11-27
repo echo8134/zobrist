@@ -11,6 +11,7 @@ const board = () => browser.$("main cg-board");
 const inNotationArea = (name: string) =>
   browser.$("main aside").$(`aria/${name}`);
 const commentField = () => inNotationArea("Comment");
+const symbolButtons = "main aside textarea ~ div button[aria-pressed]";
 
 async function clickSquare(square: string) {
   const squareSide = (await board().getSize("width")) / 8;
@@ -43,7 +44,7 @@ const seen = () =>
       const isCurrent = texts.currentNode.parentElement.hasAttribute("aria-current");
       parts.push(isCurrent ? "[" + text + "]" : text);
     }
-    const symbolButtons = [...document.querySelectorAll("main aside [aria-pressed]")];
+    const symbolButtons = [...document.querySelectorAll("${symbolButtons}")];
     return {
       notation: parts.join(" ").replaceAll("( ", "(").replaceAll(" )", ")"),
       field: document.querySelector("main aside textarea").value,
@@ -77,7 +78,7 @@ describe("the comments and the symbols of a game", () => {
     expect(await commentField().getTagName()).toBe("textarea");
     expect(
       await browser
-        .$$("main aside [aria-pressed]")
+        .$$(symbolButtons)
         .map(async (button) => [
           await button.getText(),
           await button.getComputedLabel(),

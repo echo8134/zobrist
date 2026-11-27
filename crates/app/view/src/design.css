@@ -185,6 +185,7 @@
 
   --game-data-padding: 12px 16px;
   --game-data-gap: 8px;
+  --game-data-actions-gap-above: 12px;
   --game-data-line-color: #e6e6e6;
   --game-data-name-size: 11px;
   --game-data-name-color: #6b6b6b;

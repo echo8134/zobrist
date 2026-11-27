@@ -12,3 +12,7 @@
   display: flex;
   gap: var(--notation-tools-gap);
 }
+
+.notationTools > button:last-child {
+  margin-left: auto;
+}

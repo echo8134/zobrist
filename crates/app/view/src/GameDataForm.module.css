@@ -7,6 +7,13 @@
   border-bottom: 1px solid var(--game-data-line-color);
 }
 
+.actions {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: var(--game-data-gap);
+  margin-top: calc(var(--game-data-actions-gap-above) - var(--game-data-gap));
+}
+
 /* Without the least width a long text in a field would widen its column. */
 .field {
   display: flex;

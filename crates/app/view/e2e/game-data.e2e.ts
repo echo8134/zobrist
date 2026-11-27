@@ -1,16 +1,22 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { browser, expect } from "@wdio/globals";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
 );
+const file = `${screenshots}/game-data/new.pgn`;
+const fileText = () => readFileSync(file, "utf8");
 
 const names = ["White", "Black", "Event", "Site", "Date", "Round"] as const;
 type Name = (typeof names)[number];
 
 const board = () => browser.$("main cg-board");
 const form = () => browser.$("main aside form");
+const showData = () => browser.$("aria/Show the game data");
+const hideData = () => browser.$("aria/Hide the game data");
+const saveButton = () => form().$("aria/Save");
+const cancelButton = () => form().$("aria/Cancel");
 const field = (name: Name) => form().$(`aria/${name}`);
 const choice = () => form().$("select");
 const tab = (positionFromLeft: number) =>
@@ -58,6 +64,15 @@ async function clickSquare(square: string) {
   });
 }
 
+async function playMove(from: string, to: string) {
+  const movesBefore = await browser.$$("main aside li").length;
+  await clickSquare(from);
+  await clickSquare(to);
+  await expect(browser.$$("main aside li")).toBeElementsArrayOfSize(
+    movesBefore + 1,
+  );
+}
+
 /**
  * The choice opens a menu of the system, which the driver of the test cannot reach. So the
  * test sets the value of the choice and tells it of the change, as the menu does.
@@ -81,12 +96,23 @@ describe("the data of a game", () => {
     // Before each command the service asks a second plugin which window has the focus, and
     // the app does not carry that plugin. A window that the test chose itself turns that off.
     await browser.switchToWindow("main");
-    mkdirSync(screenshots, { recursive: true });
     await browser.$("header").$("aria/New board").click();
     await expect(board()).toExist();
   });
 
-  it("shows an empty form above the notation, with the result that is not known", async () => {
+  it("opens the empty game data above the notation", async () => {
+    expect(await form().isDisplayed()).toBe(false);
+    await expect(showData()).toHaveAttribute("aria-pressed", "false");
+    await expect(browser.$("main aside div:has(> ol)")).toBeDisplayed();
+    await expect(browser.$$("main aside li")).toBeElementsArrayOfSize(0);
+    await expect(browser.$("aria/Comment")).toBeDisplayed();
+
+    await showData().click();
+
+    await expect(form()).toBeDisplayed();
+    await expect(hideData()).toHaveAttribute("aria-pressed", "true");
+    expect(await saveButton().isDisplayed()).toBe(false);
+    expect(await cancelButton().isDisplayed()).toBe(false);
     expect(await shownData()).toEqual({
       White: "",
       Black: "",
@@ -146,6 +172,13 @@ describe("the data of a game", () => {
     await clickOnTheBoard();
     await expect(tab(1)).toHaveText("Alpha - Beta");
     await expect(browser.$("header").$("aria/Close Alpha - Beta")).toExist();
+
+    await hideData().click();
+    expect(await form().isDisplayed()).toBe(false);
+    await expect(tab(1)).toHaveText("Alpha - Beta");
+    await showData().click();
+    await expect(field("White")).toHaveValue("Alpha");
+    await expect(field("Black")).toHaveValue("Beta");
   });
 
   it("keeps a date that Rust refuses, marks its field, and says how to write it", async () => {
@@ -194,21 +227,9 @@ describe("the data of a game", () => {
     await choose("1-0");
     await browser.waitUntil(async () => (await chosenResult()) === "1-0");
 
-    await clickSquare("e2");
-    await clickSquare("e4");
+    await playMove("e2", "e4");
     await expect(browser.$$("main aside li")).toBeElementsArrayOfSize(1);
     expect(await chosenResult()).toBe("1-0");
-
-    // The board lets the pawn glide to its square, and the picture waits for it.
-    await expect(board().$("piece.anim")).not.toExist();
-    const picture = await browser.saveScreenshot(
-      `${screenshots}/game-data.png`,
-    );
-    // A PNG file holds its width and its height at these two places.
-    expect({
-      width: picture.readUInt32BE(16),
-      height: picture.readUInt32BE(20),
-    }).toEqual({ width: 1280, height: 800 });
 
     await clickOnTheBoard();
     await browser.keys(["Control", "z"]);
@@ -269,6 +290,8 @@ describe("the data of a game", () => {
     await expect(tab(2)).toHaveAttribute("aria-selected", "true");
 
     expect(await tabNames()).toEqual(["Alpha - Beta", "New game"]);
+    expect(await form().isDisplayed()).toBe(false);
+    await showData().click();
     expect(await shownData()).toEqual({
       White: "",
       Black: "",
@@ -290,5 +313,129 @@ describe("the data of a game", () => {
       Round: "2",
       Result: "1-0",
     });
+  });
+
+  it("asks for the game data before the first save and writes the focused field", async () => {
+    mkdirSync(`${screenshots}/game-data`, { recursive: true });
+    rmSync(file, { force: true });
+    await browser.$("nav").$("aria/Files").click();
+    await browser.$("aria/Path of a PGN file").setValue(file);
+    await browser.$("aria/Create").click();
+    await expect(browser.$('main [role="status"]')).toHaveText(
+      "The file has no games.",
+    );
+    await browser.$("header").$("aria/New board").click();
+    await expect(tab(3)).toHaveAttribute("aria-selected", "true");
+    await playMove("e2", "e4");
+    await expect(browser.$("main aside [aria-current]")).toHaveText("e4");
+    await browser.$("aria/Save").click();
+
+    await expect(saveButton()).toBeDisplayed();
+    await expect(cancelButton()).toBeDisplayed();
+    await expect(hideData()).toHaveAttribute("aria-pressed", "true");
+    expect(fileText()).toBe("");
+    await field("White").setValue("Gamma");
+    expect(await saveButton().getSize("height")).toBe(28);
+    expect(await cancelButton().getSize("height")).toBe(28);
+    const save = await saveButton().getLocation();
+    expect(save.x).toBe(await choice().getLocation("x"));
+    expect(save.y - (await choice().getLocation("y")) - 28).toBeCloseTo(12);
+    expect(
+      (await cancelButton().getLocation("x")) -
+        save.x -
+        (await saveButton().getSize("width")),
+    ).toBeCloseTo(8);
+    await expect(board().$("piece.anim")).not.toExist();
+    const picture = await browser.saveScreenshot(
+      `${screenshots}/game-data.png`,
+    );
+    expect({
+      width: picture.readUInt32BE(16),
+      height: picture.readUInt32BE(20),
+    }).toEqual({ width: 1280, height: 800 });
+
+    await saveButton().click();
+
+    await expect(tab(3).$("span:empty")).not.toExist();
+    expect(await form().isDisplayed()).toBe(false);
+    expect(fileText()).toBe('[White "Gamma"]\n\n1. e4 *\n');
+  });
+
+  it("keeps a cancelled game unsaved and accepts Enter outside a field", async () => {
+    await browser.$("header").$("aria/New board").click();
+    await expect(tab(4)).toHaveAttribute("aria-selected", "true");
+    await playMove("d2", "d4");
+    await expect(browser.$("main aside [aria-current]")).toHaveText("d4");
+    const firstGame = '[White "Gamma"]\n\n1. e4 *\n';
+
+    await browser.$("aria/Save as new game").click();
+    await expect(saveButton()).toBeDisplayed();
+    await hideData().click();
+    expect(await form().isDisplayed()).toBe(false);
+    expect(fileText()).toBe(firstGame);
+
+    await browser.keys(["Control", "s"]);
+    await field("White").click();
+    await browser.keys("Escape");
+    expect(await form().isDisplayed()).toBe(false);
+    expect(fileText()).toBe(firstGame);
+
+    await browser.keys(["Control", "s"]);
+    await expect(saveButton()).toBeDisplayed();
+    await expect(cancelButton()).toBeDisplayed();
+    expect(fileText()).toBe(firstGame);
+    await cancelButton().click();
+
+    expect(await form().isDisplayed()).toBe(false);
+    await expect(tab(4).$("span:empty")).toExist();
+    expect(fileText()).toBe(firstGame);
+
+    await browser.keys(["Control", "s"]);
+    await expect(saveButton()).toBeDisplayed();
+    await browser.keys("Enter");
+
+    await expect(tab(4).$("span:empty")).not.toExist();
+    expect(await form().isDisplayed()).toBe(false);
+    expect(fileText()).toBe(`${firstGame}\n1. d4 *\n`);
+  });
+
+  it("saves the next move in place as soon as the player clicks Save", async () => {
+    await tab(3).click();
+    await expect(tab(3)).toHaveAttribute("aria-selected", "true");
+    await playMove("e7", "e5");
+    await expect(browser.$("main aside [aria-current]")).toHaveText("e5");
+    await browser.$("aria/Save").click();
+
+    await expect(tab(3).$("span:empty")).not.toExist();
+    expect(await form().isDisplayed()).toBe(false);
+    expect(fileText()).toBe('[White "Gamma"]\n\n1. e4 e5 *\n\n1. d4 *\n');
+  });
+
+  it("cancels the first save when Enter is pressed on Cancel", async () => {
+    const before = fileText();
+    await browser.$("header").$("aria/New board").click();
+    await expect(tab(5)).toHaveAttribute("aria-selected", "true");
+    await playMove("c2", "c4");
+    await browser.keys(["Control", "s"]);
+    await expect(cancelButton()).toBeDisplayed();
+    await browser.execute("arguments[0].focus();", await cancelButton());
+    await expect(cancelButton()).toBeFocused();
+
+    // A synthetic Enter does not activate a button. Apply its default click only if
+    // the key reaches the focused button and the app leaves it uncancelled.
+    await browser.execute(`
+      const button = document.activeElement;
+      button.addEventListener("keydown", (event) => {
+        queueMicrotask(() => {
+          if (event.key === "Enter" && !event.defaultPrevented) button.click();
+        });
+      }, { once: true });
+    `);
+    await browser.keys("Enter");
+
+    await expect(showData()).toBeDisplayed();
+    expect(await form().isDisplayed()).toBe(false);
+    expect(fileText()).toBe(before);
+    await expect(tab(5).$("span:empty")).toExist();
   });
 });
