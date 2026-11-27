@@ -13,17 +13,8 @@ const count = () => main().$("span=2 games");
 
 function databaseCommand(...args: string[]) {
   return execFileSync(
-    "cargo",
-    [
-      "run",
-      "--quiet",
-      "--locked",
-      "-p",
-      "zobrist-cli",
-      "--",
-      "database",
-      ...args,
-    ],
+    join(root, "target/debug/zobrist"),
+    ["database", ...args],
     { cwd: root, encoding: "utf8" },
   );
 }
