@@ -39,6 +39,7 @@ type Props = {
   onGoTo: (place: number[]) => void;
   onTool: (tool: NotationTool) => void;
   onSave: (tool: SaveTool) => void;
+  onSetGameData: (gameData: Tab["gameData"]) => void;
   onAnnotate: (annotation: Annotation) => void;
   onShapes: (shapes: Shapes) => void;
   onSetTag: (tag: EditableTag, text: string) => Promise<boolean>;
@@ -52,6 +53,7 @@ export function TabArea({
   onGoTo,
   onTool,
   onSave,
+  onSetGameData,
   onAnnotate,
   onShapes,
   onSetTag,
@@ -90,9 +92,8 @@ export function TabArea({
     return () => document.removeEventListener("keydown", act);
   }, [picture, onGoTo, onTool, onSave]);
 
-  // The board keeps the window from moving the focus when the player clicks on it. So a
-  // press of the mouse outside the field or the choice that has the focus takes the focus
-  // from it here, and a field sends its text.
+  // The board keeps focus on a mouse press. A button can also receive a click without a
+  // mouse press. In both cases the field must send its text before the action.
   useEffect(() => {
     const leaveField = ({ target }: MouseEvent) => {
       const focused = document.activeElement;
@@ -106,7 +107,11 @@ export function TabArea({
       }
     };
     document.addEventListener("mousedown", leaveField, true);
-    return () => document.removeEventListener("mousedown", leaveField, true);
+    document.addEventListener("click", leaveField, true);
+    return () => {
+      document.removeEventListener("mousedown", leaveField, true);
+      document.removeEventListener("click", leaveField, true);
+    };
   }, []);
 
   return (
@@ -129,16 +134,27 @@ export function TabArea({
         </div>
       </div>
       <aside className={notationArea}>
-        <NotationTools picture={picture} onUse={onTool} onSave={onSave} />
+        <NotationTools
+          picture={picture}
+          onUse={onTool}
+          onSave={onSave}
+          gameDataOpen={tab.gameData !== "closed"}
+          onToggleGameData={() =>
+            onSetGameData(tab.gameData === "closed" ? "open" : "closed")
+          }
+        />
         {tab.refusedSave !== undefined && (
           <p className={refusedSave} role="alert">
             {refusedSaveLine(tab.refusedSave)}
           </p>
         )}
         <GameDataForm
+          mode={tab.gameData}
           picture={picture}
           onSetTag={onSetTag}
           onSetResult={onSetResult}
+          onSave={() => onSave("ConfirmSave")}
+          onCancel={() => onSetGameData("closed")}
         />
         <div className={notationScroller}>
           <Notation

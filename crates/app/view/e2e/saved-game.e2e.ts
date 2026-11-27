@@ -33,6 +33,7 @@ const closeButton = (positionFromLeft: number) =>
 const tool = (name: string) => browser.$("main aside").$(`aria/${name}`);
 const refusedSave = () => browser.$('main aside [role="alert"]');
 const form = () => browser.$("main aside form");
+const confirmSave = () => form().$("aria/Save").click();
 const commentField = () => browser.$("main aside").$("aria/Comment");
 
 /** The notation as text, with the current move in brackets. */
@@ -155,6 +156,7 @@ describe("the games of a file in tabs", () => {
       "Promote variation",
       "Delete variation",
       "Delete the rest",
+      "Show the game data",
     ]);
     expect(await tool("Save").isEnabled()).toBe(false);
     expect(await tool("Save as new game").isEnabled()).toBe(false);
@@ -182,6 +184,7 @@ describe("the games of a file in tabs", () => {
     await expect(refusedSave()).toHaveText(
       "Open a file on the page Files first.",
     );
+    expect(await form().isDisplayed()).toBe(false);
     expect(await refusedSave().getLocation()).toEqual({ x: 961, y: 40 + 40 });
     expect((await refusedSave().getCSSProperty("font-size")).value).toBe(
       "12px",
@@ -215,6 +218,8 @@ describe("the games of a file in tabs", () => {
     expect(await notation()).toBe("1. f3 e5 2. g4 Qh4#");
     expect(await browser.$$("main cg-board piece").length).toBe(32);
     expect(await browser.$$("main cg-board square.last-move").length).toBe(0);
+    expect(await form().isDisplayed()).toBe(false);
+    await tool("Show the game data").click();
     expect(await shownData()).toEqual({
       White: "Gamma",
       Black: "Delta",
@@ -224,6 +229,7 @@ describe("the games of a file in tabs", () => {
       Round: "2",
       Result: "0-1",
     });
+    await tool("Hide the game data").click();
     expect(await tool("Save").isEnabled()).toBe(false);
     expect(await tool("Save as new game").isEnabled()).toBe(true);
   });
@@ -288,6 +294,7 @@ describe("the games of a file in tabs", () => {
   });
 
   it("saves with Ctrl+S what a field of the form holds, and the list shows it", async () => {
+    await tool("Show the game data").click();
     await form().$("aria/White").setValue("Epsilon");
     await browser.keys(["Control", "s"]);
 
@@ -310,6 +317,7 @@ describe("the games of a file in tabs", () => {
     await expect(dot(1)).toExist();
 
     await tool("Save").click();
+    await confirmSave();
 
     await expect(dot(1)).not.toExist();
     await expect(refusedSave()).not.toExist();
@@ -469,6 +477,7 @@ describe("the games of a file in tabs", () => {
 
     await browser.keys(["Control", "s"]);
 
+    await confirmSave();
     await expect(tab(3)).toHaveText("New game");
     await expect(dot(3)).not.toExist();
     await closeButton(3).click();
@@ -498,6 +507,7 @@ describe("the games of a file in tabs", () => {
 
     await browser.keys(["Control", "s"]);
 
+    await confirmSave();
     await browser.waitUntil(
       async () => fileText() === `${firstGame}\n1. e4 {King's pawn} *\n`,
       { timeoutMsg: "the file did not get the comment that the field held" },

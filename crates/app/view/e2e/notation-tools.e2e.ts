@@ -77,17 +77,18 @@ describe("the tools above the notation", () => {
     await expect(board()).toExist();
   });
 
-  it("shows seven dim buttons above the notation of a new game", async () => {
+  it("shows seven dim tools and the game data toggle above a new game", async () => {
     expect(
       await browser
         .$$("main aside > div:first-child button")
         .map((button) => button.getComputedLabel()),
-    ).toEqual([...saveTools, ...allTools]);
+    ).toEqual([...saveTools, ...allTools, "Show the game data"]);
     expect(await seen()).toEqual({
       notation: "",
       dimTools: [...saveTools, ...allTools],
     });
     expect(await tool("Undo").isEnabled()).toBe(false);
+    expect(await tool("Show the game data").isEnabled()).toBe(true);
   });
 
   it("takes back the last change with Undo and brings it back with Redo", async () => {
@@ -161,6 +162,16 @@ describe("the tools above the notation", () => {
 
   it("makes the variation of the current move the line", async () => {
     await playMoves("g1f3");
+    await expect(board().$("piece.anim")).not.toExist();
+    expect(await browser.$("main aside form").isDisplayed()).toBe(false);
+    const mainLine = await browser.saveScreenshot(
+      `${screenshots}/notation.png`,
+    );
+    expect({
+      width: mainLine.readUInt32BE(16),
+      height: mainLine.readUInt32BE(20),
+    }).toEqual({ width: 1280, height: 800 });
+
     await tool("e4").click();
     await expectSoon(seen, {
       notation: "1. [e4] e5 2. Nf3",
@@ -256,6 +267,7 @@ describe("the tools above the notation", () => {
       promote: await left("Promote variation"),
       deleteVariation: await left("Delete variation"),
       deleteTheRest: await left("Delete the rest"),
+      showGameData: await left("Show the game data"),
     }).toEqual({
       // The two save buttons and the gap behind them stand before Undo.
       undo: 960 + 1 + 8 + 2 * 32 + 2 + 12,
@@ -263,6 +275,7 @@ describe("the tools above the notation", () => {
       promote: 960 + 1 + 8 + 4 * 32 + 2 * 2 + 2 * 12,
       deleteVariation: 960 + 1 + 8 + 5 * 32 + 3 * 2 + 2 * 12,
       deleteTheRest: 960 + 1 + 8 + 6 * 32 + 4 * 2 + 2 * 12,
+      showGameData: 1280 - 8 - 32,
     });
   });
 });

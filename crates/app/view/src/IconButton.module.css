@@ -19,3 +19,8 @@
 .iconButton:disabled {
   color: var(--dim-icon-button-color);
 }
+
+.iconButton[aria-pressed="true"] {
+  background-color: var(--current-entry-background-color);
+  color: var(--current-entry-color);
+}
