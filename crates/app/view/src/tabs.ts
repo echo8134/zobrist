@@ -30,6 +30,7 @@ export type Tab = {
   game: number;
   picture: GamePicture;
   bottomSide: Side;
+  gameData: "closed" | "open" | "openToSave";
   /** The last save, when it was refused and the game has not changed since. */
   refusedSave?: SaveRefusal;
 };
@@ -51,6 +52,7 @@ export type Change =
   | { type: "openTab"; game: number; picture: GamePicture }
   | { type: "showTab"; game: number }
   | { type: "turnBoard"; game: number }
+  | { type: "setGameData"; game: number; gameData: Tab["gameData"] }
   | { type: "drawPicture"; game: number; picture: GamePicture }
   | { type: "drawPlace"; game: number; picture: GamePicture }
   | { type: "refuseSave"; game: number; refusal: SaveRefusal }
@@ -94,12 +96,18 @@ export function apply(shown: Shown, change: Change): Shown {
                 game: change.game,
                 picture: change.picture,
                 bottomSide: "white",
+                gameData: "closed",
               },
             ],
         shownTab: change.game,
       };
     case "showTab":
       return { ...shown, shownTab: change.game };
+    case "setGameData":
+      return withChangedTab(shown, change.game, (tab) => ({
+        ...tab,
+        gameData: change.gameData,
+      }));
     case "turnBoard":
       return withChangedTab(shown, change.game, (tab) => ({
         ...tab,
@@ -337,7 +345,7 @@ export async function setResult(
   }
 }
 
-export type SaveTool = "Save" | "SaveAsNewGame";
+export type SaveTool = "Save" | "SaveAsNewGame" | "ConfirmSave";
 
 export function isSaveKey({
   key,
@@ -360,13 +368,19 @@ export async function save(
   tabNow: (game: number) => Tab | undefined,
   change: (change: Change) => void,
 ) {
-  // The player may have changed the game right before the save. The tab has such a change
-  // only after its answer.
-  await answersOnTheirWay(game);
-  const picture = tabNow(game)?.picture;
+  // Two confirmations can wait on the same field. When it arrives, the second must also
+  // wait for the first save, or both would append the game.
+  let pending = answersOnTheirWay(game);
+  while (pending !== undefined) {
+    await pending;
+    pending = answersOnTheirWay(game);
+  }
+  const tab = tabNow(game);
+  const picture = tab?.picture;
   // A game without a file and without changes is empty, and nothing saves it.
   if (
     picture === undefined ||
+    (tool === "ConfirmSave" && tab?.gameData !== "openToSave") ||
     (!picture.unsaved && (tool === "Save" || picture.file === null))
   ) {
     return false;
@@ -377,6 +391,9 @@ export async function save(
     ({ answer } = await ask({ type: "SaveGame", game }));
   } else if (path === undefined) {
     answer = { type: "Refusal", reason: "noFile", system: null };
+  } else if (picture.file === null && tool !== "ConfirmSave") {
+    change({ type: "setGameData", game, gameData: "openToSave" });
+    return false;
   } else {
     ({ answer } = await ask({ type: "SaveGameAs", game, path }));
   }
@@ -384,6 +401,9 @@ export async function save(
     change({ type: "refuseSave", game, refusal: answer });
   } else if (answer !== null) {
     change({ type: "drawPicture", game, picture: answer.picture });
+    if (tool === "ConfirmSave") {
+      change({ type: "setGameData", game, gameData: "closed" });
+    }
   }
   return answer?.type === "Saved";
 }

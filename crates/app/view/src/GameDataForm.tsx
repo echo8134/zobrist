@@ -1,12 +1,15 @@
 import { ChevronDown } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useState } from "react";
+import fileStyles from "./FilesPage.module.css";
 import styles from "./GameDataForm.module.css";
 import type { EditableTag } from "./generated/EditableTag";
 import type { GamePicture } from "./generated/GamePicture";
 import type { GameResult } from "./generated/GameResult";
-import { isSaveKey, tagValue } from "./tabs";
+import { isSaveKey, type Tab, tagValue } from "./tabs";
 
-const { form, field, fieldName, control, refused, hint, choice } = styles;
+const { form, field, fieldName, control, refused, hint, choice, actions } =
+  styles;
+const { button } = fileStyles;
 
 /** The fields in the order of the form, two in a row. */
 const fields = ["White", "Black", "Event", "Site", "Date", "Round"] as const;
@@ -23,14 +26,52 @@ const refusedDate =
 const refusedText = "This text cannot be written into a game file.";
 
 type Props = {
+  mode: Tab["gameData"];
   picture: GamePicture;
   /** Sends the text of a field and tells whether Rust took it. */
   onSetTag: (tag: EditableTag, text: string) => Promise<boolean>;
   onSetResult: (result: GameResult) => void;
+  onSave: () => void;
+  onCancel: () => void;
 };
 
-export function GameDataForm({ picture, onSetTag, onSetResult }: Props) {
+export function GameDataForm({
+  mode,
+  picture,
+  onSetTag,
+  onSetResult,
+  onSave,
+  onCancel,
+}: Props) {
   const resultId = useId();
+  useLayoutEffect(() => {
+    if (mode !== "openToSave") {
+      return;
+    }
+    const act = (event: KeyboardEvent) => {
+      const target = event.target;
+      const inField =
+        target instanceof HTMLElement &&
+        (target.matches("input, textarea, select") || target.isContentEditable);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (inField) {
+          target.blur();
+        }
+        onCancel();
+      } else if (event.key === "Enter" && !inField) {
+        event.preventDefault();
+        onSave();
+      }
+    };
+    // Escape must also reach the form while a field keeps other keys to itself.
+    document.addEventListener("keydown", act, true);
+    return () => document.removeEventListener("keydown", act, true);
+  }, [mode, onSave, onCancel]);
+
+  if (mode === "closed") {
+    return null;
+  }
 
   return (
     <form
@@ -80,6 +121,16 @@ export function GameDataForm({ picture, onSetTag, onSetResult }: Props) {
           <ChevronDown aria-hidden="true" />
         </div>
       </div>
+      {mode === "openToSave" && (
+        <div className={actions}>
+          <button className={button} type="button" onClick={onSave}>
+            Save
+          </button>
+          <button className={button} type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      )}
     </form>
   );
 }

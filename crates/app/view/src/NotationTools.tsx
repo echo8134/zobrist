@@ -1,5 +1,7 @@
 import {
   ArrowUp,
+  ChevronDown,
+  ChevronUp,
   type LucideIcon,
   Redo,
   Save,
@@ -56,9 +58,17 @@ type Props = {
   picture: GamePicture;
   onUse: (tool: NotationTool) => void;
   onSave: (tool: SaveTool) => void;
+  gameDataOpen: boolean;
+  onToggleGameData: () => void;
 };
 
-export function NotationTools({ picture, onUse, onSave }: Props) {
+export function NotationTools({
+  picture,
+  onUse,
+  onSave,
+  gameDataOpen,
+  onToggleGameData,
+}: Props) {
   const { file, unsaved } = picture;
   return (
     <div className={notationTools}>
@@ -90,6 +100,12 @@ export function NotationTools({ picture, onUse, onSave }: Props) {
           ))}
         </div>
       ))}
+      <IconButton
+        name={gameDataOpen ? "Hide the game data" : "Show the game data"}
+        icon={gameDataOpen ? ChevronUp : ChevronDown}
+        pressed={gameDataOpen}
+        onClick={onToggleGameData}
+      />
     </div>
   );
 }

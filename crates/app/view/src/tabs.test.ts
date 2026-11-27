@@ -64,7 +64,7 @@ test("a tab opens with the game that Rust answered and closes that game with its
 
   expect(vi.mocked(ask).mock.calls).toEqual([[{ type: "NewGame" }]]);
   expect(shown()).toEqual({
-    tabs: [{ game: 7, picture, bottomSide: "white" }],
+    tabs: [{ game: 7, picture, bottomSide: "white", gameData: "closed" }],
     page: "Home",
     shownTab: 7,
   });
@@ -80,8 +80,8 @@ test("a tab opens with the game that Rust answered and closes that game with its
 
 test("a turn changes the side at the bottom of one tab only", () => {
   const tabs = [
-    { game: 1, picture, bottomSide: "white" },
-    { game: 2, picture, bottomSide: "white" },
+    { game: 1, picture, bottomSide: "white", gameData: "closed" },
+    { game: 2, picture, bottomSide: "white", gameData: "closed" },
   ] as const;
   const shown: Shown = { tabs, page: "Home", shownTab: 2 };
 
@@ -101,8 +101,8 @@ test("a turn changes the side at the bottom of one tab only", () => {
 test("a move goes to Rust, and its tab takes the picture of the answer", async () => {
   const { change, shown } = tabState({
     tabs: [
-      { game: 7, picture, bottomSide: "black" },
-      { game: 8, picture, bottomSide: "white" },
+      { game: 7, picture, bottomSide: "black", gameData: "closed" },
+      { game: 8, picture, bottomSide: "white", gameData: "closed" },
     ],
     page: "Home",
     shownTab: 7,
@@ -119,8 +119,13 @@ test("a move goes to Rust, and its tab takes the picture of the answer", async (
   ]);
   expect(shown()).toEqual({
     tabs: [
-      { game: 7, picture: pictureAfterE4, bottomSide: "black" },
-      { game: 8, picture, bottomSide: "white" },
+      {
+        game: 7,
+        picture: pictureAfterE4,
+        bottomSide: "black",
+        gameData: "closed",
+      },
+      { game: 8, picture, bottomSide: "white", gameData: "closed" },
     ],
     page: "Home",
     shownTab: 7,
@@ -129,7 +134,7 @@ test("a move goes to Rust, and its tab takes the picture of the answer", async (
 
 test("an answer without a picture changes no tab", async () => {
   const atStart: Shown = {
-    tabs: [{ game: 8, picture, bottomSide: "white" }],
+    tabs: [{ game: 8, picture, bottomSide: "white", gameData: "closed" }],
     page: "Home",
     shownTab: 8,
   };
@@ -143,7 +148,7 @@ test("an answer without a picture changes no tab", async () => {
 
 test("a walk to a place goes to Rust, and its tab takes the picture of the answer", async () => {
   const { change, shown } = tabState({
-    tabs: [{ game: 7, picture, bottomSide: "white" }],
+    tabs: [{ game: 7, picture, bottomSide: "white", gameData: "closed" }],
     page: "Home",
     shownTab: 7,
   });
@@ -158,7 +163,12 @@ test("a walk to a place goes to Rust, and its tab takes the picture of the answe
     [{ type: "GoTo", game: 7, place: [0] }],
   ]);
   expect(shown().tabs).toEqual([
-    { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+    {
+      game: 7,
+      picture: pictureAfterE4,
+      bottomSide: "white",
+      gameData: "closed",
+    },
   ]);
 });
 
@@ -230,7 +240,12 @@ test("a tab has the names of both players, and the name New game until both are 
 
 test("a text of the game data goes to Rust, and the answer says whether Rust took it", async () => {
   const atStart = withPlayers("Alpha", undefined);
-  const tab = { game: 7, picture: atStart, bottomSide: "white" } as const;
+  const tab = {
+    game: 7,
+    picture: atStart,
+    bottomSide: "white",
+    gameData: "closed",
+  } as const;
   const { change, shown } = tabState({
     tabs: [tab],
     page: "Home",
@@ -257,7 +272,7 @@ test("a text of the game data goes to Rust, and the answer says whether Rust too
 
 test("a result goes to Rust, and the tab takes the picture of the answer", async () => {
   const { change, shown } = tabState({
-    tabs: [{ game: 7, picture, bottomSide: "white" }],
+    tabs: [{ game: 7, picture, bottomSide: "white", gameData: "closed" }],
     page: "Home",
     shownTab: 7,
   });
@@ -275,8 +290,8 @@ test("a result goes to Rust, and the tab takes the picture of the answer", async
 test("all shapes of the board go to Rust, and the tab takes the picture of the answer", async () => {
   const { change, shown } = tabState({
     tabs: [
-      { game: 7, picture, bottomSide: "white" },
-      { game: 8, picture, bottomSide: "white" },
+      { game: 7, picture, bottomSide: "white", gameData: "closed" },
+      { game: 8, picture, bottomSide: "white", gameData: "closed" },
     ],
     page: "Home",
     shownTab: 7,
@@ -295,8 +310,8 @@ test("all shapes of the board go to Rust, and the tab takes the picture of the a
     [{ type: "SetShapes", game: 7, squares, arrows }],
   ]);
   expect(shown().tabs).toEqual([
-    { game: 7, picture: withShapes, bottomSide: "white" },
-    { game: 8, picture, bottomSide: "white" },
+    { game: 7, picture: withShapes, bottomSide: "white", gameData: "closed" },
+    { game: 8, picture, bottomSide: "white", gameData: "closed" },
   ]);
 
   vi.mocked(ask).mockResolvedValueOnce({ type: "SetShapes", picture: null });
@@ -314,7 +329,7 @@ test.each([
   "the tool %s goes to Rust, and its tab takes the picture of the answer",
   async (tool) => {
     const { change, shown } = tabState({
-      tabs: [{ game: 7, picture, bottomSide: "white" }],
+      tabs: [{ game: 7, picture, bottomSide: "white", gameData: "closed" }],
       page: "Home",
       shownTab: 7,
     });
@@ -327,7 +342,12 @@ test.each([
 
     expect(vi.mocked(ask).mock.calls).toEqual([[{ type: tool, game: 7 }]]);
     expect(shown().tabs).toEqual([
-      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+      {
+        game: 7,
+        picture: pictureAfterE4,
+        bottomSide: "white",
+        gameData: "closed",
+      },
     ]);
   },
 );
@@ -363,7 +383,7 @@ test.each([
   "the annotation $type goes to Rust with its value, and its tab takes the picture of the answer",
   async (annotation) => {
     const { change, shown } = tabState({
-      tabs: [{ game: 7, picture, bottomSide: "white" }],
+      tabs: [{ game: 7, picture, bottomSide: "white", gameData: "closed" }],
       page: "Home",
       shownTab: 7,
     });
@@ -376,7 +396,12 @@ test.each([
 
     expect(vi.mocked(ask).mock.calls).toEqual([[{ ...annotation, game: 7 }]]);
     expect(shown().tabs).toEqual([
-      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+      {
+        game: 7,
+        picture: pictureAfterE4,
+        bottomSide: "white",
+        gameData: "closed",
+      },
     ]);
   },
 );
@@ -450,7 +475,7 @@ test("the comment of a game without moves is its start comment", () => {
 
 test("a game of a file opens in a tab, and a game that is open already gets no second tab", async () => {
   const { change, shown } = tabState({
-    tabs: [{ game: 3, picture, bottomSide: "black" }],
+    tabs: [{ game: 3, picture, bottomSide: "black", gameData: "closed" }],
     page: "Files",
     shownTab: undefined,
   });
@@ -466,8 +491,13 @@ test("a game of a file opens in a tab, and a game that is open already gets no s
   ]);
   expect(shown()).toEqual({
     tabs: [
-      { game: 3, picture, bottomSide: "black" },
-      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+      { game: 3, picture, bottomSide: "black", gameData: "closed" },
+      {
+        game: 7,
+        picture: pictureAfterE4,
+        bottomSide: "white",
+        gameData: "closed",
+      },
     ],
     page: "Files",
     shownTab: 7,
@@ -481,8 +511,13 @@ test("a game of a file opens in a tab, and a game that is open already gets no s
   expect(await openGame("/games/club.pgn", 1, change)).toBe(true);
   expect(shown()).toEqual({
     tabs: [
-      { game: 3, picture, bottomSide: "black" },
-      { game: 7, picture: pictureAfterE4, bottomSide: "white" },
+      { game: 3, picture, bottomSide: "black", gameData: "closed" },
+      {
+        game: 7,
+        picture: pictureAfterE4,
+        bottomSide: "white",
+        gameData: "closed",
+      },
     ],
     page: "Files",
     shownTab: 3,
@@ -521,7 +556,9 @@ const emptyWithoutFile = {
 
 function oneTab(ofTheTab: GamePicture) {
   const state = tabState({
-    tabs: [{ game: 7, picture: ofTheTab, bottomSide: "white" }],
+    tabs: [
+      { game: 7, picture: ofTheTab, bottomSide: "white", gameData: "closed" },
+    ],
     page: "Home",
     shownTab: 7,
   });
@@ -541,23 +578,80 @@ test("Save writes a game from a file back into its place", async () => {
 
   expect(vi.mocked(ask).mock.calls).toEqual([[{ type: "SaveGame", game: 7 }]]);
   expect(shown().tabs).toEqual([
-    { game: 7, picture: savedInFile, bottomSide: "white" },
+    { game: 7, picture: savedInFile, bottomSide: "white", gameData: "closed" },
   ]);
 });
 
-test("Save adds a game without a file to the file of the page Files", async () => {
+test.each(["Save", "SaveAsNewGame"] as const)(
+  "%s of a new game asks for its data before adding it to the file of the page Files",
+  async (tool) => {
+    const { change, shown, tabNow } = oneTab(changedWithoutFile);
+    expect(await save(7, tool, "/games/club.pgn", tabNow, change)).toBe(false);
+    expect(shown().tabs[0]?.gameData).toBe("openToSave");
+    expect(vi.mocked(ask)).not.toHaveBeenCalled();
+
+    vi.mocked(ask).mockResolvedValueOnce({
+      type: "SaveGameAs",
+      answer: { type: "Saved", picture: savedInFile },
+    });
+
+    expect(
+      await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change),
+    ).toBe(true);
+
+    expect(vi.mocked(ask).mock.calls).toEqual([
+      [{ type: "SaveGameAs", game: 7, path: "/games/club.pgn" }],
+    ]);
+    expect(shown().tabs[0]?.picture).toBe(savedInFile);
+    expect(shown().tabs[0]?.gameData).toBe("closed");
+  },
+);
+
+test("a refused first save keeps the form open to save and gives its reason", async () => {
   const { change, shown, tabNow } = oneTab(changedWithoutFile);
+  await save(7, "Save", "/games/club.pgn", tabNow, change);
   vi.mocked(ask).mockResolvedValueOnce({
     type: "SaveGameAs",
-    answer: { type: "Saved", picture: savedInFile },
+    answer: { type: "Refusal", reason: "cannotWrite", system: null },
   });
 
-  expect(await save(7, "Save", "/games/club.pgn", tabNow, change)).toBe(true);
+  expect(await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change)).toBe(
+    false,
+  );
+  expect(shown().tabs).toEqual([
+    {
+      game: 7,
+      picture: changedWithoutFile,
+      bottomSide: "white",
+      gameData: "openToSave",
+      refusedSave: { type: "Refusal", reason: "cannotWrite", system: null },
+    },
+  ]);
+});
 
+test("two confirmations waiting on the same field save only one copy", async () => {
+  const { change, tabNow } = oneTab(changedWithoutFile);
+  const confirm = () =>
+    save(7, "ConfirmSave", "/games/club.pgn", tabNow, change);
+  await save(7, "Save", "/games/club.pgn", tabNow, change);
+  let pending: Promise<void> | undefined = Promise.resolve().then(() => {
+    pending = undefined;
+  });
+  vi.mocked(answersOnTheirWay).mockImplementation(() => pending);
+  vi.mocked(ask).mockImplementationOnce(async () => {
+    pending = new Promise((resolve) => setTimeout(resolve)).then(() => {
+      pending = undefined;
+    });
+    return {
+      type: "SaveGameAs",
+      answer: { type: "Saved", picture: savedInFile },
+    };
+  });
+
+  expect(await Promise.all([confirm(), confirm()])).toEqual([true, false]);
   expect(vi.mocked(ask).mock.calls).toEqual([
     [{ type: "SaveGameAs", game: 7, path: "/games/club.pgn" }],
   ]);
-  expect(shown().tabs[0]?.picture).toBe(savedInFile);
 });
 
 test("Save as new game adds a game to the file that it came from", async () => {
@@ -595,6 +689,7 @@ test.each(["Save", "SaveAsNewGame"] as const)(
         game: 7,
         picture: changedWithoutFile,
         bottomSide: "white",
+        gameData: "closed",
         refusedSave: { type: "Refusal", reason: "noFile", system: null },
       },
     ]);
@@ -614,7 +709,12 @@ test("a game without changes is not saved, and an empty game is not saved as a n
 
   expect(vi.mocked(ask)).not.toHaveBeenCalled();
   expect(empty.shown().tabs).toEqual([
-    { game: 7, picture: emptyWithoutFile, bottomSide: "white" },
+    {
+      game: 7,
+      picture: emptyWithoutFile,
+      bottomSide: "white",
+      gameData: "closed",
+    },
   ]);
 });
 
@@ -633,7 +733,7 @@ test("a save takes the game as it is after the answers to the requests before it
 
   await save(7, "Save", undefined, tabNow, change);
 
-  expect(vi.mocked(answersOnTheirWay).mock.calls).toEqual([[7]]);
+  expect(vi.mocked(answersOnTheirWay).mock.calls).toEqual([[7], [7]]);
   expect(vi.mocked(ask).mock.calls).toEqual([[{ type: "SaveGame", game: 7 }]]);
   expect(shown().tabs[0]?.picture).toBe(savedInFile);
 });
@@ -655,6 +755,7 @@ test("a refused save stays as a line until the game changes or a save works", as
       game: 7,
       picture: changedFromFile,
       bottomSide: "white",
+      gameData: "closed",
       refusedSave: refusal,
     },
   ]);
@@ -684,7 +785,7 @@ test("a refused save stays as a line until the game changes or a save works", as
   });
   await save(7, "Save", undefined, tabNow, change);
   expect(shown().tabs).toEqual([
-    { game: 7, picture: savedInFile, bottomSide: "white" },
+    { game: 7, picture: savedInFile, bottomSide: "white", gameData: "closed" },
   ]);
   expect(shown().tabs[0]).not.toHaveProperty("refusedSave");
 });
@@ -696,7 +797,12 @@ test("a save whose game is no longer open changes nothing", async () => {
   expect(await save(7, "Save", undefined, tabNow, change)).toBe(false);
 
   expect(shown().tabs).toEqual([
-    { game: 7, picture: changedFromFile, bottomSide: "white" },
+    {
+      game: 7,
+      picture: changedFromFile,
+      bottomSide: "white",
+      gameData: "closed",
+    },
   ]);
 });
 
@@ -745,7 +851,14 @@ test("a tab without changes closes at once, and a tab with changes asks first", 
 
   expect(vi.mocked(ask)).toHaveBeenCalledTimes(1);
   expect(changed.shown()).toEqual({
-    tabs: [{ game: 7, picture: changedFromFile, bottomSide: "white" }],
+    tabs: [
+      {
+        game: 7,
+        picture: changedFromFile,
+        bottomSide: "white",
+        gameData: "closed",
+      },
+    ],
     page: "Home",
     shownTab: 7,
     asksToClose: 7,
@@ -767,7 +880,14 @@ test("a tab asks when a change of its game arrives while the close waits for it"
   await closed;
   expect(vi.mocked(ask)).not.toHaveBeenCalled();
   expect(shown()).toEqual({
-    tabs: [{ game: 7, picture: changedFromFile, bottomSide: "white" }],
+    tabs: [
+      {
+        game: 7,
+        picture: changedFromFile,
+        bottomSide: "white",
+        gameData: "closed",
+      },
+    ],
     page: "Home",
     shownTab: 7,
     asksToClose: 7,
@@ -777,8 +897,18 @@ test("a tab asks when a change of its game arrives while the close waits for it"
 test("the question ends with Keep, with the close of its tab, and when its game has no changes any more", () => {
   const asking: Shown = {
     tabs: [
-      { game: 7, picture: changedFromFile, bottomSide: "white" },
-      { game: 8, picture: changedWithoutFile, bottomSide: "white" },
+      {
+        game: 7,
+        picture: changedFromFile,
+        bottomSide: "white",
+        gameData: "closed",
+      },
+      {
+        game: 8,
+        picture: changedWithoutFile,
+        bottomSide: "white",
+        gameData: "closed",
+      },
     ],
     page: "Home",
     shownTab: 7,
@@ -787,7 +917,14 @@ test("the question ends with Keep, with the close of its tab, and when its game 
 
   expect(apply(asking, { type: "keepTab" })).not.toHaveProperty("asksToClose");
   expect(apply(asking, { type: "closeTab", game: 7 })).toEqual({
-    tabs: [{ game: 8, picture: changedWithoutFile, bottomSide: "white" }],
+    tabs: [
+      {
+        game: 8,
+        picture: changedWithoutFile,
+        bottomSide: "white",
+        gameData: "closed",
+      },
+    ],
     page: "Home",
     shownTab: 8,
   });
