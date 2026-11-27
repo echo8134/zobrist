@@ -18,6 +18,7 @@ pub use session::{BoardPicture, SessionRequest};
 
 use std::collections::BTreeMap;
 use std::io;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -454,6 +455,10 @@ pub enum Response {
         boards: Vec<BoardPicture>,
         /// The selected runtime game number, when a board was selected.
         selected: Option<usize>,
+        /// Where to find the original session if any part could not be restored.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        warning: Option<String>,
     },
     /// The session was written and the window can close.
     QuitWithBoards,
@@ -1064,7 +1069,8 @@ impl FirstStep {
 #[derive(Default)]
 pub struct SharedGames {
     games: Mutex<Games>,
-    one_save: Mutex<()>,
+    // A failed recovery must preserve this original before the next save of the boards.
+    one_save: Mutex<Option<PathBuf>>,
     restored_selection: OnceLock<Option<usize>>,
 }
 

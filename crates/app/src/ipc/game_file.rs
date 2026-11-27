@@ -24,7 +24,7 @@ pub(super) struct OpenGame {
 pub(super) struct InFile {
     /// The file with every symbolic link followed, so that two paths to one file are equal.
     pub(super) path: PathBuf,
-    pub(super) number: NonZeroU64,
+    number: NonZeroU64,
     /// The game as it was read from the file, or as it was last written into it.
     #[serde(with = "super::session::game_pgn")]
     held: Game,

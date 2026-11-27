@@ -288,6 +288,15 @@ fn bad_boards_leave_readable_boards_in_order_with_the_saved_selection() -> io::R
         assert!(next.get("warning").is_none());
         assert_eq!(fs::read(backup)?, original);
     }
+    let original = serde_json::to_vec(&json!({"boards":[missing_move],"selected":0}))?;
+    fs::write(directory.join("boards.json"), &original)?;
+    let backup = directory.join("boards-recovery-4.json");
+    assert_eq!(
+        restore(&SharedGames::default(), &directory)?,
+        json!({"type":"RestoreBoards","boards":[],"selected":null,"warning":format!(
+            "1 board could not be reopened. The original file was kept at {}.", backup.display())})
+    );
+    assert_eq!(fs::read(backup)?, original);
     fs::remove_dir_all(directory)
 }
 
@@ -306,7 +315,7 @@ fn an_invalid_selection_keeps_all_readable_boards() -> io::Result<()> {
         assert_eq!(
             answer["warning"],
             format!(
-                "Could not read the board session. The original file was kept at {}.",
+                "Could not restore the selected board. The original file was kept at {}.",
                 backup.display()
             )
         );
@@ -325,7 +334,7 @@ fn a_failed_backup_names_the_original_and_quit_retries_before_replacing_it() -> 
     assert_eq!(
         answer["warning"],
         format!(
-            "Could not read the board session. The original file was kept at {}.",
+            "Could not read the board session. The original file could not be moved and is still at {}.",
             record.display()
         )
     );
@@ -342,6 +351,25 @@ fn a_failed_backup_names_the_original_and_quit_retries_before_replacing_it() -> 
         b"original now accessible"
     );
     assert_eq!(restore(&SharedGames::default(), &directory)?["selected"], 1);
+    fs::remove_dir_all(directory)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dangling_session_link_is_preserved_as_a_link() -> io::Result<()> {
+    let directory = directory("dangling-link")?;
+    let record = directory.join("boards.json");
+    std::os::unix::fs::symlink("missing-target", &record)?;
+    let backup = directory.join("boards-recovery-1.json");
+    let games = SharedGames::default();
+    assert_eq!(
+        restore(&games, &directory)?,
+        json!({"type":"RestoreBoards","boards":[],"selected":null,"warning":format!(
+            "Could not read the board session. The original file was kept at {}.", backup.display())})
+    );
+    quit(&games, &directory, &[], None)?;
+    assert_eq!(fs::read_link(backup)?, Path::new("missing-target"));
+    assert!(!record.is_symlink());
     fs::remove_dir_all(directory)
 }
 

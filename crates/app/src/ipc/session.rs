@@ -5,9 +5,9 @@ use std::fs::{self, File};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::async_runtime::spawn_blocking;
 use ts_rs::TS;
 use zobrist_core::editor::{GameEditor, Place};
@@ -37,7 +37,7 @@ pub struct BoardPicture {
     picture: GamePicture,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 struct BoardSession {
     boards: Vec<SavedBoard>,
     selected: Option<usize>,
@@ -65,36 +65,43 @@ impl SharedGames {
         directory: PathBuf,
     ) -> io::Result<Response> {
         // A board snapshot needs the origin installed by any preceding Save.
-        let _one_save = self.one_save.lock().await;
+        let mut pending_backup = self.one_save.lock().await;
         match request {
             SessionRequest::RestoreBoards => {
-                if let Some(current) = self
-                    .games
-                    .lock()
-                    .await
-                    .live_boards(&self.restored_selection)
-                {
-                    return Ok(current);
+                if let Some(&selected) = self.restored_selection.get() {
+                    return Ok(self.games.lock().await.board_pictures(selected, None));
                 }
-                let (boards, selected) = spawn_blocking(move || BoardSession::read(&directory))
+                let restored = spawn_blocking(move || ReopenedBoards::read(&directory))
                     .await
-                    .map_err(io::Error::other)??;
+                    .map_err(io::Error::other)?;
+                *pending_backup = restored.pending_backup;
                 let mut games = self.games.lock().await;
-                if let Some(current) = games.live_boards(&self.restored_selection) {
-                    return Ok(current);
-                }
                 let mut selected_game = None;
-                for (index, open) in boards.into_iter().enumerate() {
-                    let game = games.insert(open);
-                    if selected == Some(index) {
-                        selected_game = Some(game);
+                // A game opened or closed while the session was loading belongs to this run.
+                if games.next_number == 1 {
+                    for (index, open) in restored.boards {
+                        let game = games.insert(open);
+                        if restored.selected == Some(index) {
+                            selected_game = Some(game);
+                        }
                     }
                 }
                 self.restored_selection.get_or_init(|| selected_game);
-                Ok(games.board_pictures(selected_game))
+                Ok(games.board_pictures(selected_game, restored.warning))
             }
             SessionRequest::QuitWithBoards { boards, selected } => {
                 let snapshot = self.games.lock().await.snapshot(&boards, selected)?;
+                if let Some(path) = pending_backup.clone() {
+                    let result = spawn_blocking(move || preserve_original(&path))
+                        .await
+                        .map_err(io::Error::other)?;
+                    match result {
+                        Ok(_) => (),
+                        Err(error) if error.kind() == ErrorKind::NotFound => (),
+                        Err(error) => return Err(error),
+                    }
+                    *pending_backup = None;
+                }
                 spawn_blocking(move || snapshot.write(&directory))
                     .await
                     .map_err(io::Error::other)??;
@@ -105,19 +112,7 @@ impl SharedGames {
 }
 
 impl Games {
-    fn live_boards(&self, restored_selection: &OnceLock<Option<usize>>) -> Option<Response> {
-        if let Some(&selected) = restored_selection.get() {
-            Some(self.board_pictures(selected))
-        } else if self.next_number > 1 {
-            // A game opened or closed while the session was loading belongs to this run.
-            restored_selection.get_or_init(|| None);
-            Some(self.board_pictures(None))
-        } else {
-            None
-        }
-    }
-
-    fn board_pictures(&self, selected: Option<usize>) -> Response {
+    fn board_pictures(&self, selected: Option<usize>, warning: Option<String>) -> Response {
         Response::RestoreBoards {
             boards: self
                 .open_games
@@ -128,6 +123,7 @@ impl Games {
                 })
                 .collect(),
             selected: selected.filter(|game| self.open_games.contains_key(game)),
+            warning,
         }
     }
 
@@ -173,53 +169,124 @@ impl Games {
     }
 }
 
-impl BoardSession {
-    fn read(directory: &Path) -> io::Result<(Vec<OpenGame>, Option<usize>)> {
+#[derive(Deserialize)]
+struct SessionRecord {
+    boards: Vec<Value>,
+    #[serde(default)]
+    selected: Value,
+}
+
+#[derive(Default)]
+struct ReopenedBoards {
+    boards: Vec<(usize, OpenGame)>,
+    selected: Option<usize>,
+    warning: Option<String>,
+    pending_backup: Option<PathBuf>,
+}
+
+impl ReopenedBoards {
+    fn read(directory: &Path) -> Self {
         let path = directory.join("boards.json");
-        let contents = match File::open(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok((Vec::new(), None)),
-            Err(error) => return Err(error),
-        };
-        let session: Self = serde_json::from_reader(io::BufReader::new(contents))?;
-        if session
-            .selected
-            .is_some_and(|index| index >= session.boards.len())
-        {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                "The saved board selection is out of range.",
-            ));
-        }
-        for origin in session
-            .boards
-            .iter()
-            .filter_map(|board| board.origin.as_ref())
-        {
-            if !origin.path.is_absolute() {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    "Invalid file origin in the board session.",
-                ));
+        let mut restored = Self::default();
+        let record = match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == ErrorKind::NotFound => return restored,
+            Ok(entry) if entry.is_file() || (entry.is_symlink() && path.is_file()) => {
+                File::open(&path)
+                    .ok()
+                    .and_then(|file| serde_json::from_reader(io::BufReader::new(file)).ok())
             }
-        }
-        let mut boards = Vec::with_capacity(session.boards.len());
-        for board in session.boards {
-            let mut editor = GameEditor::new(board.game);
-            editor.go_to(Place(board.place)).map_err(|_| {
-                io::Error::new(
-                    ErrorKind::InvalidData,
-                    "The saved move does not exist in the game.",
+            _ => None,
+        };
+        let problem = match record {
+            Some(record) => restored.reopen(record),
+            None => Some("Could not read the board session.".to_owned()),
+        };
+        if let Some(problem) = problem {
+            restored.warning = Some(if let Ok(backup) = preserve_original(&path) {
+                format!(
+                    "{problem} The original file was kept at {}.",
+                    backup.display()
                 )
-            })?;
-            boards.push(OpenGame {
-                editor,
-                file: board.origin,
+            } else {
+                let warning = format!(
+                    "{problem} The original file could not be moved and is still at {}.",
+                    path.display()
+                );
+                restored.pending_backup = Some(path);
+                warning
             });
         }
-        Ok((boards, session.selected))
+        restored
     }
 
+    fn reopen(&mut self, record: SessionRecord) -> Option<String> {
+        let count = record.boards.len();
+        self.selected = record
+            .selected
+            .as_u64()
+            .and_then(|number| usize::try_from(number).ok())
+            .filter(|&index| index < count);
+        self.boards = record
+            .boards
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, value)| {
+                let board: SavedBoard = serde_json::from_value(value).ok()?;
+                if board
+                    .origin
+                    .as_ref()
+                    .is_some_and(|origin| !origin.path.is_absolute())
+                {
+                    return None;
+                }
+                let mut editor = GameEditor::new(board.game);
+                editor.go_to(Place(board.place)).ok()?;
+                Some((
+                    index,
+                    OpenGame {
+                        editor,
+                        file: board.origin,
+                    },
+                ))
+            })
+            .collect();
+        match count - self.boards.len() {
+            0 if !record.selected.is_null() && self.selected.is_none() => {
+                Some("Could not restore the selected board.".to_owned())
+            }
+            0 => None,
+            1 => Some("1 board could not be reopened.".to_owned()),
+            lost => Some(format!("{lost} boards could not be reopened.")),
+        }
+    }
+}
+
+fn preserve_original(path: &Path) -> io::Result<PathBuf> {
+    let kind = fs::symlink_metadata(path)?.file_type();
+    if !kind.is_file() && !kind.is_symlink() {
+        return Err(io::Error::other("The board session is not a regular file."));
+    }
+    let mut number = 1_u64;
+    loop {
+        let backup = path.with_file_name(format!("boards-recovery-{number}.json"));
+        // Reserve the destination before rename, which would otherwise replace an earlier backup.
+        match File::create_new(&backup) {
+            Ok(reservation) => drop(reservation),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                number += 1;
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+        if let Err(error) = fs::rename(path, &backup) {
+            let _cleanup = fs::remove_file(backup);
+            return Err(error);
+        }
+        return Ok(backup);
+    }
+}
+
+impl BoardSession {
     fn write(&self, directory: &Path) -> io::Result<()> {
         fs::create_dir_all(directory)?;
         let contents = serde_json::to_vec(self)?;

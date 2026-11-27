@@ -22,7 +22,11 @@ boards: Array<BoardPicture>,
 /**
  * The selected runtime game number, when a board was selected.
  */
-selected: number | null, } | { "type": "QuitWithBoards" } | { "type": "Version", 
+selected: number | null, 
+/**
+ * Where to find the original session if any part could not be restored.
+ */
+warning?: string, } | { "type": "QuitWithBoards" } | { "type": "Version", 
 /**
  * The version of this crate.
  */
