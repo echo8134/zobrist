@@ -471,3 +471,76 @@ fn keeps_distinct_owners_when_two_path_keys_collide() -> io::Result<()> {
     }
     fs::remove_dir_all(root)
 }
+
+#[test]
+fn refuses_a_save_and_restore_while_another_handle_holds_the_history_lock() -> io::Result<()> {
+    let root = target("held-history-lock");
+    fs::create_dir(&root)?;
+    let file = root.join("Club.pgn");
+    fs::write(&file, OLD_GAME)?;
+    let new = game(NEW_GAME)?;
+    let old = game(OLD_GAME)?;
+    replace_pgn_game(&file, number(1)?, &new, Some(&old), Some(history(&root)))?;
+    let stamp = prepare_pgn_restore(&file, &root, 1)?;
+    let folder = fs::read_dir(root.join("pgn-history"))?
+        .next()
+        .unwrap()?
+        .path();
+    let first_state = fs::read(folder.join("1.state"))?;
+
+    let refuse = |result: io::Result<()>| result.map_err(|error| error.to_string());
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        let owner = fs::File::open(folder.join("owner"))?;
+        owner.lock()?;
+        scope.spawn(|| {
+            send.send(refuse(
+                replace_pgn_game(
+                    &file,
+                    NonZeroU64::MIN,
+                    &old,
+                    Some(&new),
+                    Some(history(&root)),
+                )
+                .map(drop),
+            ))
+            .ok();
+        });
+        scope.spawn(|| {
+            send.send(refuse(restore_pgn_state(&file, history(&root), 1, &stamp)))
+                .ok();
+        });
+        // Leave room for worker scheduling around the five-second lock deadline.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+        for _ in 0..2 {
+            let answer =
+                receive.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
+            assert_eq!(
+                answer,
+                Ok(Err(
+                    "Another change to this file is still running. Try again.".to_owned()
+                ))
+            );
+        }
+        assert_eq!(fs::read(&file)?, NEW_GAME);
+        assert_eq!(fs::read(folder.join("1.state"))?, first_state);
+        assert!(!folder.join("2.state").try_exists()?);
+        Ok::<(), io::Error>(())
+    })?;
+
+    assert_eq!(
+        replace_pgn_game(&file, number(1)?, &old, Some(&new), Some(history(&root)))?,
+        None
+    );
+    let stamp = prepare_pgn_restore(&file, &root, 2)?;
+    restore_pgn_state(&file, history(&root), 2, &stamp)?;
+    assert_eq!(fs::read(&file)?, NEW_GAME);
+    assert_eq!(
+        pgn_states(&file, &root)?
+            .iter()
+            .map(|state| state.number)
+            .collect::<Vec<_>>(),
+        [3, 2, 1]
+    );
+    fs::remove_dir_all(root)
+}

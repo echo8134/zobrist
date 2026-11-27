@@ -1,9 +1,10 @@
-use std::fs::{self, File};
+use std::fs::{self, File, TryLockError};
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::pgn_file::{Staged, open};
-use crate::{StagingDirectory, copy_with_checksum, read_bytes};
+use crate::{PgnWriteConflict, StagingDirectory, copy_with_checksum, read_bytes};
 
 const MAGIC: &[u8; 8] = b"ZPGNHST\x01";
 const HEADER_BYTES: u64 = 28;
@@ -47,6 +48,18 @@ struct HistoryFailure {
 }
 
 impl HistoryFailure {
+    fn contended(&self) -> bool {
+        PgnWriteConflict::from_io_error(&self.reason) == Some(PgnWriteConflict::HistoryLocked)
+    }
+
+    fn listing_error(self) -> io::Error {
+        if self.contended() {
+            self.reason
+        } else {
+            list_error(&self.path)
+        }
+    }
+
     fn read_only(&self) -> bool {
         matches!(
             self.reason.kind(),
@@ -70,7 +83,10 @@ impl HistoryFailure {
         )
     }
 
-    fn restore_error(&self, number: u64) -> io::Error {
+    fn restore_error(self, number: u64) -> io::Error {
+        if self.contended() {
+            return self.reason;
+        }
         let advice = if self.read_only() {
             " Allow writing to this folder and try again."
         } else {
@@ -109,6 +125,7 @@ impl StateFolder {
         let parent = root.join("pgn-history");
         let owner = destination.as_os_str().as_encoded_bytes();
         let key = format!("{:08x}", crc32fast::hash(owner));
+        let deadline = Instant::now() + Duration::from_secs(5);
         for collision in 0_u64.. {
             let name = if collision == 0 {
                 key.clone()
@@ -149,7 +166,19 @@ impl StateFolder {
                 return Err(unreadable_owner(ErrorKind::InvalidData.into()));
             }
             let mut identity = File::open(&owner_path).map_err(unreadable_owner)?;
-            identity.lock().map_err(failed)?;
+            loop {
+                match identity.try_lock() {
+                    Ok(()) => break,
+                    Err(TryLockError::WouldBlock) => {}
+                    Err(TryLockError::Error(error)) if error.kind() == ErrorKind::Interrupted => {}
+                    Err(TryLockError::Error(error)) => return Err(failed(error)),
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(failed(PgnWriteConflict::HistoryLocked.into()));
+                }
+                std::thread::sleep(remaining.min(Duration::from_millis(25)));
+            }
             let mut stored_owner = Vec::new();
             (&mut identity)
                 .take(owner.len() as u64 + 1)
@@ -310,17 +339,22 @@ pub(super) struct SaveTarget {
 }
 
 impl SaveTarget {
-    pub(super) fn new(path: PathBuf, history: Option<PgnHistory<'_>>) -> Self {
-        let history = history.map(|history| {
-            let folder = StateFolder::open(history.root, &path, true).and_then(|folder| {
-                folder.ok_or_else(|| HistoryFailure {
-                    path: history.root.join("pgn-history"),
-                    reason: io::Error::from(ErrorKind::NotFound),
-                })
-            });
-            (history.captured_at, folder)
-        });
-        Self { path, history }
+    pub(super) fn new(path: PathBuf, history: Option<PgnHistory<'_>>) -> io::Result<Self> {
+        let history = history
+            .map(|history| {
+                let folder = StateFolder::open(history.root, &path, true).and_then(|folder| {
+                    folder.ok_or_else(|| HistoryFailure {
+                        path: history.root.join("pgn-history"),
+                        reason: io::Error::from(ErrorKind::NotFound),
+                    })
+                });
+                match folder {
+                    Err(failure) if failure.contended() => Err(failure.reason),
+                    folder => Ok((history.captured_at, folder)),
+                }
+            })
+            .transpose()?;
+        Ok(Self { path, history })
     }
 
     pub(super) fn publish(self, staged: Staged) -> io::Result<Option<String>> {
@@ -392,7 +426,8 @@ fn equal_bytes(mut left: &File, mut right: &File) -> io::Result<bool> {
 /// Lists a PGN's earlier states, newest first. Opening the list never creates a history.
 pub fn pgn_states(target: &Path, root: &Path) -> io::Result<Vec<PgnState>> {
     let target = target.canonicalize()?;
-    let Some(folder) = StateFolder::open(root, &target, false).map_err(|e| list_error(&e.path))?
+    let Some(folder) =
+        StateFolder::open(root, &target, false).map_err(HistoryFailure::listing_error)?
     else {
         return Ok(Vec::new());
     };
@@ -425,7 +460,7 @@ fn stamp(path: &Path, file: &mut File) -> io::Result<String> {
 pub fn prepare_pgn_restore(target: &Path, root: &Path, number: u64) -> io::Result<String> {
     let target = target.canonicalize()?;
     let folder = StateFolder::open(root, &target, false)
-        .map_err(|e| list_error(&e.path))?
+        .map_err(HistoryFailure::listing_error)?
         .ok_or_else(|| list_error(&root.join("pgn-history")))?;
     read_state(&folder.state(number), io::sink())?;
     stamp(&target, &mut File::open(&target)?)

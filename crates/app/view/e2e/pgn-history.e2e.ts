@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -9,6 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -230,6 +232,61 @@ describe("earlier PGN states", function () {
       await restore(session, 22);
       await session.waitUntil(() => contents(path) === game("21"));
       expect(contents(path)).toBe(game("21"));
+    });
+  });
+
+  it("refuses a busy save, keeps the edit and lets the player save it again", async () => {
+    const path = join(work, "Busy.pgn");
+    const other = join(work, "Other.pgn");
+    await visitPage(work, "Files", async (session) => {
+      await selectFile(session, path, "New");
+      await appendGame(session, "Ada");
+      await editWhite(session, "Bea");
+
+      const folder = firstHistoryFolder(work);
+      const owner = await open(join(folder, "owner"), "r");
+      const watchdog = setTimeout(() => void owner.close(), 15_000);
+      try {
+        // flock locks the open file description shared with the test's handle.
+        execFileSync("flock", ["--exclusive", "--nonblock", "3"], {
+          stdio: ["ignore", "ignore", "pipe", owner.fd],
+        });
+        const started = performance.now();
+        await session.keys(["Control", "s"]);
+        await expect(session.$('main aside [role="alert"]')).toHaveText(
+          "Another change to this file is still running. Try again.",
+          { wait: 8_000 },
+        );
+        expect(performance.now() - started).toBeGreaterThanOrEqual(5_000);
+        expect(owner.fd).not.toBe(-1);
+        expect(contents(path)).toBe(game("Ada"));
+        expect(existsSync(join(folder, "2.state"))).toBe(false);
+        await expect(
+          session.$('header [aria-selected="true"] span:empty'),
+        ).toExist();
+
+        await session.$("nav").$("aria/Files").click();
+        await selectFile(session, other, "New");
+        await appendGame(session, "Cy");
+        expect(contents(other)).toBe(game("Cy"));
+        expect(owner.fd).not.toBe(-1);
+      } finally {
+        clearTimeout(watchdog);
+        await owner.close();
+      }
+
+      await session.$('header [role="tab"]').click();
+      await session.keys(["Control", "s"]);
+      await expect(
+        session.$('header [aria-selected="true"] span:empty'),
+      ).not.toExist();
+      expect(contents(path)).toBe(game("Bea"));
+      await session.$("nav").$("aria/Files").click();
+      await selectFile(session, path);
+      await showHistory(session);
+      await checkStateNumbers(session, [2, 1]);
+      await restore(session, 2);
+      await session.waitUntil(() => contents(path) === game("Ada"));
     });
   });
 

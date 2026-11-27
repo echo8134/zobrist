@@ -8,7 +8,7 @@ use serde::Serialize;
 use ts_rs::TS;
 use zobrist_core::editor::GameEditor;
 use zobrist_core::game::{Game, MainLine};
-use zobrist_store::{PgnHistory, add_pgn_game, read_pgn_game, replace_pgn_game};
+use zobrist_store::{PgnHistory, PgnWriteConflict, add_pgn_game, read_pgn_game, replace_pgn_game};
 
 use super::{FirstStep, GamePicture, Games, Response, file_collection::history_at, pgn_file};
 
@@ -104,6 +104,8 @@ pub enum GameFileRefusal {
     NoFile,
     /// The file changed since the game was opened or last saved.
     FileChanged,
+    /// Another change holds the history lock beyond the wait allowed for a save.
+    ChangeInProgress,
     /// The game in the file cannot be replaced.
     CannotReplace,
     /// The file cannot be written.
@@ -126,6 +128,28 @@ impl Refused {
     fn cannot_read(error: &io::Error) -> Self {
         Self {
             reason: GameFileRefusal::CannotRead,
+            system: Some(error.to_string()),
+        }
+    }
+
+    fn writing(error: &io::Error, replacing: Option<&Path>) -> Self {
+        if let Some(conflict) = PgnWriteConflict::from_io_error(error) {
+            return Self::without_text(match conflict {
+                PgnWriteConflict::GameChanged => GameFileRefusal::FileChanged,
+                PgnWriteConflict::HistoryLocked => GameFileRefusal::ChangeInProgress,
+            });
+        }
+        let mut reason = GameFileRefusal::CannotWrite;
+        if let Some(path) = replacing {
+            if let Err(read_error) = std::fs::File::open(path) {
+                return Self::cannot_read(&read_error);
+            }
+            if error.kind() == io::ErrorKind::InvalidInput {
+                reason = GameFileRefusal::CannotReplace;
+            }
+        }
+        Self {
+            reason,
             system: Some(error.to_string()),
         }
     }
@@ -291,24 +315,8 @@ fn write_in_place(
     game: &Game,
     history: Option<PgnHistory<'_>>,
 ) -> Result<Option<String>, Refused> {
-    replace_pgn_game(path, number, game, Some(held), history).map_err(|error| {
-        if error.kind() == io::ErrorKind::ResourceBusy {
-            return Refused::without_text(GameFileRefusal::FileChanged);
-        }
-        if let Err(read_error) = std::fs::File::open(path) {
-            return Refused::cannot_read(&read_error);
-        }
-        Refused {
-            // The function refuses with this kind when it cannot place the game or when the
-            // new file would not read back.
-            reason: if error.kind() == io::ErrorKind::InvalidInput {
-                GameFileRefusal::CannotReplace
-            } else {
-                GameFileRefusal::CannotWrite
-            },
-            system: Some(error.to_string()),
-        }
-    })
+    replace_pgn_game(path, number, game, Some(held), history)
+        .map_err(|error| Refused::writing(&error, Some(path)))
 }
 
 pub(super) fn save_as(
@@ -338,10 +346,8 @@ fn write_as_last(
     history: Option<PgnHistory<'_>>,
 ) -> Result<(InFile, Option<String>), Refused> {
     let path = pgn_file::resolve(typed);
-    let (number, warning) = add_pgn_game(&path, &game, history).map_err(|error| Refused {
-        reason: GameFileRefusal::CannotWrite,
-        system: Some(error.to_string()),
-    })?;
+    let (number, warning) =
+        add_pgn_game(&path, &game, history).map_err(|error| Refused::writing(&error, None))?;
     let path = path
         .canonicalize()
         .map_err(|error| Refused::cannot_read(&error))?;
@@ -353,4 +359,18 @@ fn write_as_last(
         },
         warning,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reports_a_busy_write_as_a_system_error() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let busy = io::Error::new(io::ErrorKind::ResourceBusy, "Device or resource busy");
+        let refusal = Refused::writing(&busy, Some(&path));
+        assert_eq!(refusal.reason, GameFileRefusal::CannotWrite);
+        assert_eq!(refusal.system.as_deref(), Some("Device or resource busy"));
+    }
 }

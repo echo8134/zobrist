@@ -451,6 +451,7 @@ const refusedSaves: Record<GameFileRefusal, string> = {
   noFile: "Open a file on the page Files first.",
   fileChanged:
     "The file changed since this game was opened. Save it as a new game.",
+  changeInProgress: "Another change to this file is still running. Try again.",
   cannotReplace: "The game cannot be replaced in its file.",
   cannotWrite: "The file cannot be written.",
 };

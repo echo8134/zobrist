@@ -9,6 +9,42 @@ use zobrist_core::pgn::{self, Entry};
 use crate::StagingDirectory;
 use crate::pgn_history::{PgnHistory, SaveTarget};
 
+/// A PGN change refused before publication.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PgnWriteConflict {
+    /// The game in this row differs from the one the board opened.
+    GameChanged,
+    /// Another change still holds the file's history lock.
+    HistoryLocked,
+}
+
+impl PgnWriteConflict {
+    /// Identifies store refusals among the errors returned by a PGN write.
+    #[must_use]
+    pub fn from_io_error(error: &io::Error) -> Option<Self> {
+        error.get_ref()?.downcast_ref::<Self>().copied()
+    }
+}
+
+impl std::fmt::Display for PgnWriteConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::GameChanged => {
+                "The file changed since this game was opened. Save it as a new game."
+            }
+            Self::HistoryLocked => "Another change to this file is still running. Try again.",
+        })
+    }
+}
+
+impl std::error::Error for PgnWriteConflict {}
+
+impl From<PgnWriteConflict> for io::Error {
+    fn from(conflict: PgnWriteConflict) -> Self {
+        Self::other(conflict)
+    }
+}
+
 /// Adds the supplied games to a PGN file, creating the target if necessary.
 /// Follows symbolic links and stages the new file beside the destination.
 /// Calls `supply` with a function that writes one game at a time. An error from
@@ -19,7 +55,7 @@ pub fn add_pgn_games<E: From<io::Error>>(
     history: Option<PgnHistory<'_>>,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<(u64, Option<String>), E> {
-    let target = SaveTarget::new(destination(target)?, history);
+    let target = SaveTarget::new(destination(target)?, history)?;
     let (staged, games) = stage_with_added(&target.path, supply)?;
     let warning = target.publish(staged)?;
     Ok((games, warning))
@@ -37,7 +73,7 @@ pub fn add_pgn_game(
     game: &Game,
     history: Option<PgnHistory<'_>>,
 ) -> io::Result<(NonZeroU64, Option<String>)> {
-    let target = SaveTarget::new(destination(target)?, history);
+    let target = SaveTarget::new(destination(target)?, history)?;
     let (staged, _) = stage_with_added(&target.path, |add| add(game))?;
     (&staged.file).rewind()?;
     let mut games = 0;
@@ -111,7 +147,8 @@ fn stage_with_added<E: From<io::Error>>(
 
 /// Replaces game `number` of a PGN file, counting from 1, and keeps every other byte of the
 /// file. Returns any warning about capturing the previous state. If supplied, the expected
-/// game must still occupy that row. A mismatch returns `ResourceBusy`. The new game stands where the old one stood, written as [`pgn::write_game`] writes it.
+/// game must still occupy that row. A mismatch returns [`PgnWriteConflict::GameChanged`].
+/// The new game stands where the old one stood, written as [`pgn::write_game`] writes it.
 /// Follows symbolic links and stages the new file beside the destination.
 ///
 /// Refuses, and leaves the target as it was, when the file has no game with that number, when
@@ -128,7 +165,7 @@ pub fn replace_pgn_game(
     pgn::write_game(game, &mut text)?;
     // The line break behind the old game stays in the file.
     text.pop();
-    let target = SaveTarget::new(destination(target)?, history);
+    let target = SaveTarget::new(destination(target)?, history)?;
     // A pipe used as an external PGN must see EOF when its writer closes.
     let mut old = File::open(&target.path)?;
     let mut games = 0;
@@ -147,7 +184,7 @@ pub fn replace_pgn_game(
         }
     })?;
     if !expected_matches {
-        return Err(io::Error::from(io::ErrorKind::ResourceBusy));
+        return Err(PgnWriteConflict::GameChanged.into());
     }
     let range = match found {
         Some(Some(range)) => range,
