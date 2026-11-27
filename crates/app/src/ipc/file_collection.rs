@@ -1,6 +1,6 @@
 //! The player's collection of PGN files and folders at their original locations.
 
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
@@ -9,18 +9,9 @@ use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
 
-use super::{PgnFile, PgnFileAnswer, RefusalReason, Request, Response, pgn_file};
-
-/// The command routes game requests and desktop file requests to their owners.
-#[derive(Deserialize, TS)]
-#[serde(untagged)]
-#[ts(export)]
-pub enum DesktopRequest {
-    /// Requests answered by the games and PGN editor.
-    Editor(Request),
-    /// Requests about the player's collection or the system picker.
-    Collection(CollectionRequest),
-}
+use super::{
+    PgnFile, PgnFileAnswer, RefusalReason, Response, local_data::LockedDataFile, pgn_file,
+};
 
 /// An operation on the Files page that needs the desktop environment.
 #[derive(Deserialize, TS)]
@@ -348,15 +339,7 @@ fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {
-    fs::create_dir_all(directory)?;
-    // Separate app windows and processes may add to the same collection.
-    let lock = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(directory.join("files.lock"))?;
-    lock.lock()?;
+    let list = LockedDataFile::open(directory, "files.json")?;
     let mut entries = collection(directory)?;
     if let Some(previous) = entries
         .iter_mut()
@@ -369,16 +352,11 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
     } else {
         entries.push(entry.clone());
     }
-    let staged = directory.join("files.tmp");
-    let mut file = File::create(&staged)?;
     let paths: Vec<_> = entries
         .iter()
         .map(|entry| (entry.kind, &entry.path))
         .collect();
-    serde_json::to_writer(&mut file, &paths)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(staged, directory.join("files.json"))?;
+    list.write(&paths)?;
     Ok(entries)
 }
 

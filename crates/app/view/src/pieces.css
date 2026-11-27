@@ -1,0 +1,77 @@
+[data-piece-set="cburnett"] {
+  & .cg-wrap .white.pawn {
+    background-image: url("/pieces/cburnett/wP.svg");
+  }
+  & .cg-wrap .white.knight {
+    background-image: url("/pieces/cburnett/wN.svg");
+  }
+  & .cg-wrap .white.bishop {
+    background-image: url("/pieces/cburnett/wB.svg");
+  }
+  & .cg-wrap .white.rook {
+    background-image: url("/pieces/cburnett/wR.svg");
+  }
+  & .cg-wrap .white.queen {
+    background-image: url("/pieces/cburnett/wQ.svg");
+  }
+  & .cg-wrap .white.king {
+    background-image: url("/pieces/cburnett/wK.svg");
+  }
+  & .cg-wrap .black.pawn {
+    background-image: url("/pieces/cburnett/bP.svg");
+  }
+  & .cg-wrap .black.knight {
+    background-image: url("/pieces/cburnett/bN.svg");
+  }
+  & .cg-wrap .black.bishop {
+    background-image: url("/pieces/cburnett/bB.svg");
+  }
+  & .cg-wrap .black.rook {
+    background-image: url("/pieces/cburnett/bR.svg");
+  }
+  & .cg-wrap .black.queen {
+    background-image: url("/pieces/cburnett/bQ.svg");
+  }
+  & .cg-wrap .black.king {
+    background-image: url("/pieces/cburnett/bK.svg");
+  }
+}
+
+[data-piece-set="chessnut"] {
+  & .cg-wrap .white.pawn {
+    background-image: url("/pieces/chessnut/wP.svg");
+  }
+  & .cg-wrap .white.knight {
+    background-image: url("/pieces/chessnut/wN.svg");
+  }
+  & .cg-wrap .white.bishop {
+    background-image: url("/pieces/chessnut/wB.svg");
+  }
+  & .cg-wrap .white.rook {
+    background-image: url("/pieces/chessnut/wR.svg");
+  }
+  & .cg-wrap .white.queen {
+    background-image: url("/pieces/chessnut/wQ.svg");
+  }
+  & .cg-wrap .white.king {
+    background-image: url("/pieces/chessnut/wK.svg");
+  }
+  & .cg-wrap .black.pawn {
+    background-image: url("/pieces/chessnut/bP.svg");
+  }
+  & .cg-wrap .black.knight {
+    background-image: url("/pieces/chessnut/bN.svg");
+  }
+  & .cg-wrap .black.bishop {
+    background-image: url("/pieces/chessnut/bB.svg");
+  }
+  & .cg-wrap .black.rook {
+    background-image: url("/pieces/chessnut/bR.svg");
+  }
+  & .cg-wrap .black.queen {
+    background-image: url("/pieces/chessnut/bQ.svg");
+  }
+  & .cg-wrap .black.king {
+    background-image: url("/pieces/chessnut/bK.svg");
+  }
+}

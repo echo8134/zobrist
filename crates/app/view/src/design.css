@@ -77,6 +77,13 @@
   --version-line-gap: 8px;
   --version-line-color: #6b6b6b;
 
+  --settings-width: 440px;
+  --settings-gap: 24px;
+  --settings-row-height: 48px;
+  --settings-choice-width: 144px;
+  --board-green-light: #eeeed2;
+  --board-green-dark: #769656;
+
   --user-content-width: 560px;
   --user-section-gap: 28px;
   --user-row-gap: 12px;

@@ -1,4 +1,5 @@
 import { type ReactNode, Suspense, use } from "react";
+import { BoardSettingsForm } from "./BoardSettings";
 import { FilesPage } from "./FilesPage";
 import { ask } from "./ipc";
 import styles from "./PageArea.module.css";
@@ -34,6 +35,7 @@ const contents: Record<Exclude<Page, "Files">, ReactNode> = {
   Settings: (
     <Suspense>
       <VersionLine />
+      <BoardSettingsForm />
     </Suspense>
   ),
 };
