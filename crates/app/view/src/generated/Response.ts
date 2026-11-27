@@ -2,6 +2,7 @@
 import type { AddedPgnPath } from "./AddedPgnPath";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { EngineEntry } from "./EngineEntry";
+import type { FileCollection } from "./FileCollection";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
 import type { OpenGameLinkAnswer } from "./OpenGameLinkAnswer";
@@ -117,9 +118,13 @@ entries: Array<EngineEntry>, } | { "type": "PickPgnPath",
  */
 path: string | null, } | { "type": "GetFileCollection", 
 /**
- * The root entries of the collection.
+ * The list or the available recovery action.
  */
-entries: Array<CollectionEntry>, } | { "type": "AddPgnPath", 
+collection: FileCollection, } | { "type": "RecoverFileCollection", 
+/**
+ * The recovered entries or the reason recovery could not complete.
+ */
+collection: FileCollection, } | { "type": "AddPgnPath", 
 /**
  * The new selection or the reason the file operation was refused.
  */

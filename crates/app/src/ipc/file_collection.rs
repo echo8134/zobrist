@@ -1,7 +1,7 @@
 //! The player's collection of PGN files and folders at their original locations.
 
 use std::fs::{self, File};
-use std::io::{self, ErrorKind};
+use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,8 @@ pub enum CollectionRequest {
     },
     /// Load the references the player has kept.
     GetFileCollection,
+    /// Recover the collection after the player chooses its last good copy.
+    RecoverFileCollection,
     /// Open or create the chosen item and keep it in the collection.
     AddPgnPath {
         /// Which picker supplied the path.
@@ -89,6 +91,24 @@ pub struct CollectionEntry {
     kind: EntryKind,
     path: PathBuf,
     name: String,
+}
+
+/// The collection or the recovery options available for its current files.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "type")]
+pub enum FileCollection {
+    /// The collection was read successfully.
+    Ready {
+        /// The entries in their saved order.
+        entries: Vec<CollectionEntry>,
+    },
+    /// The live collection could not be loaded or recovered.
+    Unavailable {
+        /// Describes the problem and what the player can do.
+        message: String,
+        /// The last good copy can be used to retry recovery.
+        recoverable: bool,
+    },
 }
 
 impl CollectionEntry {
@@ -175,13 +195,24 @@ impl CollectionRequest {
                 }
                 Ok(Response::PickPgnPath { path })
             }
-            Self::GetFileCollection => {
+            Self::GetFileCollection | Self::RecoverFileCollection => {
                 let directory = window
                     .path()
                     .app_local_data_dir()
                     .map_err(io::Error::other)?;
-                Ok(Response::GetFileCollection {
-                    entries: collection(&directory)?,
+                let recover = matches!(self, Self::RecoverFileCollection);
+                let lock = lock_collection(&directory, "files.lock").ok();
+                let collection = match read_collection(&directory, lock.as_ref(), recover) {
+                    Ok(entries) => FileCollection::Ready { entries },
+                    Err((error, recoverable)) => FileCollection::Unavailable {
+                        message: error.to_string(),
+                        recoverable,
+                    },
+                };
+                Ok(if recover {
+                    Response::RecoverFileCollection { collection }
+                } else {
+                    Response::GetFileCollection { collection }
                 })
             }
             Self::AddPgnPath {
@@ -357,30 +388,118 @@ fn children(path: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
+    let lock = lock_collection(directory, "files.lock").ok();
+    read_collection(directory, lock.as_ref(), false).map_err(|(error, _)| error)
+}
+
+fn parse_collection(bytes: &[u8]) -> io::Result<Vec<CollectionEntry>> {
+    let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(bytes)?;
+    paths
+        .into_iter()
+        .map(|(kind, path)| CollectionEntry::new(kind, path))
+        .collect()
+}
+
+fn read_collection(
+    directory: &Path,
+    lock: Option<&File>,
+    recover: bool,
+) -> Result<Vec<CollectionEntry>, (io::Error, bool)> {
     let list = directory.join("files.json");
-    let entries = fs::read(&list).and_then(|bytes| {
-        let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(&bytes)?;
-        paths
-            .into_iter()
-            .map(|(kind, path)| CollectionEntry::new(kind, path))
-            .collect()
-    });
-    match entries {
-        Ok(entries) => Ok(entries),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(io::Error::new(
-            error.kind(),
-            format!(
-                "Could not read the file collection at {}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.",
-                list.display()
+    let backup = directory.join("files.last-good.json");
+    let live = fs::read(&list);
+    let kind = match &live {
+        Ok(bytes) => match parse_collection(bytes) {
+            Ok(entries) => {
+                if lock.is_some() {
+                    refresh_backup(&backup, bytes);
+                }
+                return Ok(entries);
+            }
+            Err(error) => error.kind(),
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => error.kind(),
+    };
+    let problem = format!(
+        "Could not read the file collection at {}. Your existing PGN files are untouched.",
+        list.display()
+    );
+    let (entries, bytes) = fs::read(&backup)
+        .and_then(|bytes| Ok((parse_collection(&bytes)?, bytes)))
+        .map_err(|error| {
+            let manual = format!(
+                "{problem} Restore the list from a backup or move it aside, then reopen Files."
+            );
+            let message = if error.kind() == ErrorKind::NotFound {
+                manual
+            } else {
+                format!(
+                    "{manual} The last good copy at {} could not be read.",
+                    backup.display()
+                )
+            };
+            (io::Error::new(kind, message), false)
+        })?;
+    if !recover {
+        return Err((
+            io::Error::new(
+                kind,
+                format!("{problem} Choose Recover file list to restore the last good copy."),
             ),
-        )),
+            true,
+        ));
+    }
+    let recovery_error = |error: io::Error, action: &str| {
+        (
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "Could not {action} at {}. Your existing PGN files are untouched. Allow writing to the app data folder and try again.",
+                    list.display()
+                ),
+            ),
+            true,
+        )
+    };
+    let preserve_error = |error| recovery_error(error, "preserve the damaged list");
+    if lock.is_none() {
+        return Err(preserve_error(ErrorKind::PermissionDenied.into()));
+    }
+    preserve_damaged(directory, &live.map_err(preserve_error)?).map_err(preserve_error)?;
+    publish_bytes(&list, &bytes)
+        .map_err(|error| recovery_error(error, "restore the file collection"))?;
+    Ok(entries)
+}
+
+fn preserve_damaged(directory: &Path, bytes: &[u8]) -> io::Result<()> {
+    for number in 1_u64.. {
+        let path = directory.join(format!("files.damaged-{number}.json"));
+        let mut file = match File::create_new(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        let result = file.write_all(bytes).and_then(|()| file.sync_all());
+        drop(file);
+        if result.is_err() {
+            fs::remove_file(path).ok();
+        }
+        return result;
+    }
+    Err(io::Error::other("No unused damaged list name."))
+}
+
+fn refresh_backup(path: &Path, bytes: &[u8]) {
+    if !fs::read(path).is_ok_and(|previous| previous == bytes) {
+        // The valid live list stays usable even if the backup folder cannot be written.
+        publish_bytes(path, bytes).ok();
     }
 }
 
 fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {
-    let _lock = lock_collection(directory, "files.lock")?;
-    let mut entries = collection(directory)?;
+    let lock = lock_collection(directory, "files.lock")?;
+    let mut entries = read_collection(directory, Some(&lock), false).map_err(|(error, _)| error)?;
     if let Some(previous) = entries
         .iter_mut()
         .find(|previous| previous.path == entry.path)
@@ -396,7 +515,9 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
         .iter()
         .map(|entry| (entry.kind, &entry.path))
         .collect();
-    publish_collection(&directory.join("files.json"), &paths)?;
+    let bytes = serde_json::to_vec(&paths)?;
+    publish_bytes(&directory.join("files.json"), &bytes)?;
+    refresh_backup(&directory.join("files.last-good.json"), &bytes);
     Ok(entries)
 }
 
@@ -414,9 +535,19 @@ pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<Fi
 }
 
 pub(super) fn publish_collection(path: &Path, contents: &impl Serialize) -> io::Result<()> {
+    publish_bytes(path, &serde_json::to_vec(contents)?)
+}
+
+fn publish_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let staged = path.with_extension("tmp");
-    let mut file = File::create(&staged)?;
-    serde_json::to_writer(&mut file, contents)?;
+    // Writers hold the collection lock. A leftover staging file may be a link.
+    if let Err(error) = fs::remove_file(&staged)
+        && error.kind() != ErrorKind::NotFound
+    {
+        return Err(error);
+    }
+    let mut file = File::create_new(&staged)?;
+    file.write_all(bytes)?;
     file.sync_all()?;
     drop(file);
     fs::rename(staged, path)
@@ -561,6 +692,78 @@ mod tests {
         );
         assert_eq!(fs::read(list)?, b"[[");
         assert_eq!(fs::read(game)?, b"1. e4 *\n");
+        fs::remove_dir_all(directory)
+    }
+
+    #[test]
+    fn a_missing_list_has_no_bytes_to_back_up_and_a_valid_empty_list_can_be_recovered()
+    -> io::Result<()> {
+        let directory = env::temp_dir().join(format!("zobrist-empty-backup-{}", process::id()));
+        let list = directory.join("files.json");
+        let backup = directory.join("files.last-good.json");
+        assert_eq!(json!(collection(&directory)?), json!([]));
+        assert!(!backup.try_exists()?);
+        fs::write(&backup, b"[ ]\n")?;
+        assert_eq!(json!(collection(&directory)?), json!([]));
+        assert_eq!(fs::read(&backup)?, b"[ ]\n");
+        fs::write(&list, b"[[")?;
+
+        let lock = lock_collection(&directory, "files.lock")?;
+        assert_eq!(
+            json!(read_collection(&directory, Some(&lock), true).unwrap()),
+            json!([])
+        );
+        assert_eq!(fs::read(&list)?, b"[ ]\n");
+        assert_eq!(fs::read(backup)?, b"[ ]\n");
+        assert_eq!(fs::read(directory.join("files.damaged-1.json"))?, b"[[");
+        drop(lock);
+        fs::remove_dir_all(directory)
+    }
+
+    #[test]
+    fn recovery_keeps_the_list_already_repaired_by_another_window() -> io::Result<()> {
+        let directory = env::temp_dir().join(format!("zobrist-repaired-list-{}", process::id()));
+        fs::create_dir(&directory)?;
+        let list = directory.join("files.json");
+        let backup = directory.join("files.last-good.json");
+        fs::write(&list, b"[[")?;
+        fs::write(&backup, b"[]")?;
+        assert_eq!(
+            collection(&directory).unwrap_err().to_string(),
+            format!(
+                "Could not read the file collection at {}. Your existing PGN files are untouched. Choose Recover file list to restore the last good copy.",
+                list.display()
+            )
+        );
+
+        let folder = directory.join("Club");
+        let repaired = serde_json::to_string_pretty(&json!([["Folder", folder]]))?;
+        fs::write(&list, &repaired)?;
+        let lock = lock_collection(&directory, "files.lock")?;
+        assert_eq!(
+            json!(read_collection(&directory, Some(&lock), true).unwrap()),
+            json!([{"kind":"Folder", "name":"Club", "path":folder}])
+        );
+        assert_eq!(fs::read_to_string(list)?, repaired);
+        assert_eq!(fs::read_to_string(backup)?, repaired);
+        assert!(!directory.join("files.damaged-1.json").try_exists()?);
+        drop(lock);
+        fs::remove_dir_all(directory)
+    }
+
+    #[test]
+    fn a_failed_backup_refresh_keeps_the_previous_good_copy_and_the_live_list() -> io::Result<()> {
+        let directory = env::temp_dir().join(format!("zobrist-failed-backup-{}", process::id()));
+        fs::create_dir(&directory)?;
+        let list = directory.join("files.json");
+        let backup = directory.join("files.last-good.json");
+        fs::write(&list, b"[ ]\n")?;
+        fs::write(&backup, b"[]")?;
+        fs::create_dir(directory.join("files.last-good.tmp"))?;
+
+        assert_eq!(json!(collection(&directory)?), json!([]));
+        assert_eq!(fs::read(list)?, b"[ ]\n");
+        assert_eq!(fs::read(backup)?, b"[]");
         fs::remove_dir_all(directory)
     }
 

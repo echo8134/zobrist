@@ -12,7 +12,8 @@ mod pgn_file;
 pub use accounts::AccountRequest;
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
-    AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
+    AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, FileCollection,
+    PickerChoice,
 };
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SavedState};
@@ -584,8 +585,13 @@ pub enum Response {
     },
     /// The saved references.
     GetFileCollection {
-        /// The root entries of the collection.
-        entries: Vec<CollectionEntry>,
+        /// The list or the available recovery action.
+        collection: FileCollection,
+    },
+    /// The result of the player's request to recover the collection list.
+    RecoverFileCollection {
+        /// The recovered entries or the reason recovery could not complete.
+        collection: FileCollection,
     },
     /// The collection and the selected file or folder after applying the picker result.
     AddPgnPath {
