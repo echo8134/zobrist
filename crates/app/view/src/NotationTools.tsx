@@ -84,7 +84,9 @@ export function NotationTools({
           icon={SavePlus}
           // A game without a file and without changes is empty.
           disabled={file === null && !unsaved}
-          onClick={() => onSave("SaveAsNewGame")}
+          onClick={({ detail }) => {
+            if (detail <= 1) onSave("SaveAsNewGame");
+          }}
         />
       </div>
       {groups.map((buttons) => (

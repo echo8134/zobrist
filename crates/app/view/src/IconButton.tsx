@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import type { MouseEventHandler } from "react";
 import styles from "./IconButton.module.css";
 
 const { iconButton } = styles;
@@ -8,7 +9,7 @@ type Props = {
   icon: LucideIcon;
   disabled?: boolean;
   pressed?: boolean;
-  onClick: () => void;
+  onClick: MouseEventHandler<HTMLButtonElement>;
 };
 
 export function IconButton({
