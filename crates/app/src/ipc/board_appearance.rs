@@ -1,13 +1,13 @@
 //! Board preferences shared by all games on this device.
 
-use std::fs;
-use std::io::{self, ErrorKind};
+use std::io;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{Response, local_data::LockedDataFile};
+use super::Response;
+use super::local_data::{LockedDataFile, read_or_default};
 
 /// The board preferences shown on the Settings page and saved on this device.
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -61,11 +61,12 @@ impl AppearanceRequest {
         let name = "settings.json";
         match self {
             Self::GetBoardAppearance => {
-                let appearance = match fs::read(directory.join(name)) {
-                    Ok(bytes) => serde_json::from_slice(&bytes)?,
-                    Err(error) if error.kind() == ErrorKind::NotFound => BoardAppearance::default(),
-                    Err(error) => return Err(error),
-                };
+                let appearance = read_or_default(
+                    &directory.join(name),
+                    "the board settings",
+                    "Restore the file from a backup or move it aside, then restart zobrist.",
+                    |bytes| Ok(serde_json::from_slice(bytes)?),
+                )?;
                 Ok(Response::GetBoardAppearance { appearance })
             }
             Self::SetBoardAppearance { appearance } => {
@@ -78,7 +79,7 @@ impl AppearanceRequest {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, process};
+    use std::{env, fs, process};
 
     use serde_json::{Value, json};
 
@@ -90,6 +91,24 @@ mod tests {
             return Err(io::Error::other("Expected a board appearance request."));
         };
         Ok(json!(request.answer(directory)?))
+    }
+
+    #[test]
+    fn explains_how_to_recover_unreadable_board_settings() -> io::Result<()> {
+        let directory = env::temp_dir().join(format!("zobrist-damaged-settings-{}", process::id()));
+        fs::create_dir(&directory)?;
+        let path = directory.join("settings.json");
+        fs::write(&path, b"{")?;
+        let error = ask(json!({"type":"GetBoardAppearance"}), &directory).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Could not read the board settings at {}. Restore the file from a backup or move it aside, then restart zobrist.",
+                path.display()
+            )
+        );
+        assert_eq!(fs::read(&path)?, b"{");
+        fs::remove_dir_all(directory)
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
@@ -101,12 +102,26 @@ async function expectChessnutBoard(app: WebdriverIO.Browser) {
   expect(palette.value).toContain("rgb(118, 150, 86)");
 }
 
+async function expectDefaultBoard(app: WebdriverIO.Browser) {
+  const board = app.$("main cg-board");
+  await expect(board).toBeDisplayed();
+  await expectKnight(
+    app,
+    "cg-board piece.white.knight",
+    "/pieces/cburnett/wN.svg",
+  );
+  const colour = await board.getCSSProperty("background-color");
+  expect(colour.parsed.hex).toBe("#f0d9b5");
+  expect(await coordinates(app)).toEqual(["abcdefgh", "12345678"]);
+}
+
 describe("board appearance", () => {
+  const { ZOBRIST_TEST_DATA: runDirectory } = process.env;
+  if (!runDirectory)
+    throw new Error("The window test needs its isolated data folder");
+
   it("uses the choices on open and new boards and after quitting the app", async function () {
     this.timeout(60000);
-    const { ZOBRIST_TEST_DATA: runDirectory } = process.env;
-    if (!runDirectory)
-      throw new Error("The window test needs its isolated data folder");
     const data = `${runDirectory}/board-appearance`;
     await withApp(data, async (app) => {
       await settings(app).click();
@@ -117,17 +132,8 @@ describe("board appearance", () => {
       await expect(control(app, "Board colours")).toHaveValue("brown");
       await expect(control(app, "Show coordinates")).toBeChecked();
       await openBoard(app, 1);
+      await expectDefaultBoard(app);
       const board = app.$("main cg-board");
-      await expect(board).toBeDisplayed();
-      expect((await board.getCSSProperty("background-color")).parsed.hex).toBe(
-        "#f0d9b5",
-      );
-      await expectKnight(
-        app,
-        "cg-board piece.white.knight",
-        "/pieces/cburnett/wN.svg",
-      );
-      expect(await coordinates(app)).toEqual(["abcdefgh", "12345678"]);
       const square = (await board.getSize("width")) / 8;
       await board.click({ x: 0.5 * square, y: 2.5 * square });
       await board.click({ x: 0.5 * square, y: 0.5 * square });
@@ -181,5 +187,22 @@ describe("board appearance", () => {
         "/pieces/chessnut/wN.svg",
       );
     });
+  });
+
+  it("shows the default board and explains how to recover the settings file", async () => {
+    const data = `${runDirectory}/damaged-board-settings`;
+    const directory = `${data}/io.github.echo8134.zobrist`;
+    const path = `${directory}/settings.json`;
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(path, "{");
+    await withApp(data, async (app) => {
+      await openBoard(app, 1);
+      await expectDefaultBoard(app);
+      await settings(app).click();
+      await expect(app.$("main [role=alert]")).toHaveText(
+        `Could not read the board settings at ${path}. Restore the file from a backup or move it aside, then restart zobrist.`,
+      );
+    });
+    expect(readFileSync(path, "utf8")).toBe("{");
   });
 });

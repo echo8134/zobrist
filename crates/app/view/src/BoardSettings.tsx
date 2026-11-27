@@ -11,7 +11,7 @@ const initial = ask({ type: "GetBoardAppearance" }).then<Settings, Settings>(
   ({ appearance }) => ({ appearance, error: null }),
   (error: unknown) => ({
     appearance: null,
-    error: `Could not read board settings. ${String(error)}`,
+    error: error instanceof Error ? error.message : String(error),
   }),
 );
 
