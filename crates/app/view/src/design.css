@@ -232,3 +232,28 @@ body {
   color: var(--text-color);
   background-color: var(--background-color);
 }
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--files-toolbar-gap);
+  height: var(--button-height);
+  padding: var(--button-padding);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background-color: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.actionButton svg {
+  flex: none;
+  width: var(--icon-button-icon-size);
+  height: var(--icon-button-icon-size);
+  stroke-width: var(--icon-button-icon-stroke);
+}
+
+.actionButton:hover {
+  background-color: var(--top-bar-background-color);
+}
