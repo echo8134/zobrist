@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::Response;
-use super::local_data::{LockedDataFile, read_or_default};
+use super::file_collection::{lock_collection, publish_collection, read_or_default};
 
 /// The board preferences shown on the Settings page and saved on this device.
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -70,7 +70,8 @@ impl AppearanceRequest {
                 Ok(Response::GetBoardAppearance { appearance })
             }
             Self::SetBoardAppearance { appearance } => {
-                LockedDataFile::open(directory, name)?.write(&appearance)?;
+                let _lock = lock_collection(directory, "settings.lock")?;
+                publish_collection(&directory.join(name), &appearance)?;
                 Ok(Response::SetBoardAppearance { appearance })
             }
         }

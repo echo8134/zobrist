@@ -2,6 +2,7 @@
 import type { AddedPgnPath } from "./AddedPgnPath";
 import type { BoardAppearance } from "./BoardAppearance";
 import type { CollectionEntry } from "./CollectionEntry";
+import type { EngineEntry } from "./EngineEntry";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
 import type { OpenedGame } from "./OpenedGame";
@@ -98,7 +99,15 @@ appearance: BoardAppearance, } | { "type": "SetBoardAppearance",
 /**
  * The preferences to apply to every board.
  */
-appearance: BoardAppearance, } | { "type": "PickPgnPath", 
+appearance: BoardAppearance, } | { "type": "PickEnginePath", 
+/**
+ * Absent after cancellation.
+ */
+path: string | null, } | { "type": "EngineInventory", 
+/**
+ * The default comes first.
+ */
+entries: Array<EngineEntry>, } | { "type": "PickPgnPath", 
 /**
  * The absolute path returned by the system.
  */

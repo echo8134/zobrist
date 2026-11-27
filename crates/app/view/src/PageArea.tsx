@@ -1,5 +1,6 @@
 import { type ReactNode, Suspense, use } from "react";
 import { BoardSettingsForm } from "./BoardSettings";
+import { EnginesPage } from "./EnginesPage";
 import { FilesPage } from "./FilesPage";
 import { ask } from "./ipc";
 import styles from "./PageArea.module.css";
@@ -30,7 +31,7 @@ const contents: Record<Exclude<Page, "Files">, ReactNode> = {
   Home: null,
   Databases: null,
   Events: null,
-  Engines: null,
+  Engines: <EnginesPage />,
   User: <UserPage />,
   Settings: (
     <Suspense>
