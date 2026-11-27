@@ -1,0 +1,112 @@
+.panel {
+  display: grid;
+  gap: var(--position-group-gap);
+  padding: var(--position-panel-padding);
+}
+
+.palette:global(.cg-wrap) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--setup-piece-gap);
+  width: auto;
+  height: auto;
+}
+
+.group,
+.palette:global(.cg-wrap) {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.pieceButton {
+  display: grid;
+  place-items: center;
+  width: var(--setup-piece-size);
+  height: var(--setup-piece-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--button-corner-radius);
+  background: transparent;
+  color: var(--icon-button-color);
+}
+
+.pieceButton[aria-pressed="true"] {
+  background: var(--set-symbol-button-background-color);
+}
+
+.palette:global(.cg-wrap) .pieceImage {
+  position: static;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pieceButton svg {
+  width: var(--icon-button-icon-size);
+  height: var(--icon-button-icon-size);
+  stroke-width: var(--icon-button-icon-stroke);
+}
+
+.group legend,
+.field {
+  padding: 0;
+  color: var(--game-data-name-color);
+  font-size: var(--game-data-name-size);
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--setup-piece-gap) var(--position-group-gap);
+  margin-top: var(--game-data-name-gap);
+}
+
+.option,
+.buttonGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--position-button-gap);
+}
+
+.option input {
+  margin: 0;
+}
+
+.field {
+  display: grid;
+  gap: var(--game-data-name-gap);
+  min-width: 0;
+}
+
+.control {
+  width: 100%;
+  height: var(--field-height);
+  padding: var(--field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
+  font: inherit;
+  font-size: var(--text-size);
+  color: var(--text-color);
+  background: var(--background-color);
+}
+
+.control[size] {
+  width: var(--setup-square-width);
+}
+
+.control[aria-invalid="true"] {
+  border-color: var(--refusal-color);
+}
+
+.refusal {
+  margin: 0;
+  color: var(--refusal-color);
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--position-group-gap);
+}

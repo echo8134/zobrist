@@ -37,6 +37,11 @@ pub enum Request {
     Version,
     /// Open a game at the starting position.
     NewGame,
+    /// Describe the position being set up.
+    DescribePosition {
+        /// Text from the FEN field or the edited board fields.
+        input: PositionInput,
+    },
     /// Start the open game again from a FEN position.
     SetStartPosition {
         /// The open game's number.
@@ -177,6 +182,83 @@ pub enum Request {
         /// The path of the file. Rust creates the file when nothing is there.
         path: String,
     },
+}
+
+/// Text or board controls supplied by the player setting up a position.
+#[derive(Clone, Deserialize, TS)]
+#[serde(tag = "type")]
+pub enum PositionInput {
+    /// The contents of the FEN field.
+    Fen {
+        /// The text to read.
+        fen: String,
+    },
+    /// The current board and its controls.
+    Fields {
+        /// The edited values.
+        fields: PositionFields,
+    },
+}
+
+/// The fields the player can edit on the board or beside it.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "The board has four independent castling checkboxes."
+)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionFields {
+    pieces: String,
+    turn: Side,
+    white_short: bool,
+    white_long: bool,
+    black_short: bool,
+    black_long: bool,
+    en_passant: Option<String>,
+}
+
+/// A complete description of the position being set up.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PositionDraft {
+    fen: String,
+    fields: PositionFields,
+}
+
+impl PositionInput {
+    fn describe(self) -> Option<PositionDraft> {
+        use zobrist_core::position::PositionDraft as Draft;
+
+        let draft = match self {
+            Self::Fen { fen } => Draft::from_fen(&fen),
+            Self::Fields { fields } => Draft::from_fields(
+                &fields.pieces,
+                match fields.turn {
+                    Side::White => Color::White,
+                    Side::Black => Color::Black,
+                },
+                [
+                    fields.white_short,
+                    fields.white_long,
+                    fields.black_short,
+                    fields.black_long,
+                ],
+                fields.en_passant.as_deref(),
+            ),
+        }?;
+        let [white_short, white_long, black_short, black_long] = draft.castling;
+        Some(PositionDraft {
+            fen: draft.fen,
+            fields: PositionFields {
+                pieces: draft.pieces,
+                turn: draft.turn.into(),
+                white_short,
+                white_long,
+                black_short,
+                black_long,
+                en_passant: draft.en_passant.map(|square| square.to_string()),
+            },
+        })
+    }
 }
 
 mod start_position {
@@ -371,6 +453,11 @@ pub enum Response {
         /// The picture at the starting position.
         picture: GamePicture,
     },
+    /// The position being set up, including its FEN.
+    DescribePosition {
+        /// Absent when the input does not have the form of a position.
+        draft: Option<PositionDraft>,
+    },
     /// The position after accepting or refusing the FEN.
     SetStartPosition {
         /// Absent when the game is no longer open.
@@ -564,7 +651,7 @@ struct CurrentPlace {
     position_symbol: Option<PositionSymbol>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "lowercase")]
 enum Side {
     White,
@@ -827,6 +914,9 @@ impl Games {
                 let (game, picture) = self.open(new, None);
                 Response::NewGame { game, picture }
             }
+            Request::DescribePosition { input } => Response::DescribePosition {
+                draft: input.describe(),
+            },
             Request::SetStartPosition { game, fen } => Response::SetStartPosition {
                 change: self.open_games.get_mut(&game).map(|open| {
                     let refused = fen

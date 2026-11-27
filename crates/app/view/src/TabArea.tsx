@@ -8,9 +8,12 @@ import type { GameResult } from "./generated/GameResult";
 import { IconButton } from "./IconButton";
 import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
+import { PositionPanel, PositionTools } from "./PositionTools";
+import type { SetupEdit } from "./positionSetup";
 import styles from "./TabArea.module.css";
 import {
   type Annotation,
+  type Change,
   isSaveKey,
   type Move,
   type NotationTool,
@@ -34,6 +37,8 @@ const {
 
 type Props = {
   tab: Tab;
+  change: (change: Change) => void;
+  onEditSetup: (edit: SetupEdit) => void;
   onTurnBoard: () => void;
   onMove: (move: Move) => void;
   onGoTo: (place: number[]) => void;
@@ -48,6 +53,8 @@ type Props = {
 
 export function TabArea({
   tab,
+  change,
+  onEditSetup,
   onTurnBoard,
   onMove,
   onGoTo,
@@ -59,10 +66,11 @@ export function TabArea({
   onSetTag,
   onSetResult,
 }: Props) {
-  const { picture } = tab;
+  const { panel, picture } = tab;
   // A layout effect, so that a key right after a new picture is drawn starts from that picture.
   // A plain effect runs later, and until then the key would start from the picture before.
   useLayoutEffect(() => {
+    if (panel !== undefined) return;
     const act = (event: KeyboardEvent) => {
       // The key of Save works in a field too. The field sends its text first.
       if (isSaveKey(event)) {
@@ -90,7 +98,7 @@ export function TabArea({
     };
     document.addEventListener("keydown", act);
     return () => document.removeEventListener("keydown", act);
-  }, [picture, onGoTo, onTool, onSave]);
+  }, [panel, picture, onGoTo, onTool, onSave]);
 
   // The board keeps focus on a mouse press. A button can also receive a click without a
   // mouse press. In both cases the field must send its text before the action.
@@ -119,6 +127,17 @@ export function TabArea({
       <div className={boardPart}>
         <div className={boardColumn}>
           <Board
+            key={panel?.type === "setup" ? "setup" : "game"}
+            inert={panel?.type !== "paste" && panel?.status === "pending"}
+            setup={
+              panel?.type === "setup"
+                ? {
+                    draft: panel.draft,
+                    onPieces: (pieces) =>
+                      onEditSetup({ type: "Fields", fields: { pieces } }),
+                  }
+                : undefined
+            }
             picture={picture}
             bottomSide={tab.bottomSide}
             onMove={onMove}
@@ -130,10 +149,16 @@ export function TabArea({
               icon={ArrowUpDown}
               onClick={onTurnBoard}
             />
+            <PositionTools tab={tab} change={change} />
           </div>
         </div>
       </div>
-      <aside className={notationArea}>
+      <PositionPanel
+        onEditSetup={onEditSetup}
+        tab={tab}
+        change={change}
+        className={notationArea}
+      >
         <NotationTools
           picture={picture}
           onUse={onTool}
@@ -165,7 +190,7 @@ export function TabArea({
           />
         </div>
         <AnnotationPanel picture={picture} onAnnotate={onAnnotate} />
-      </aside>
+      </PositionPanel>
     </main>
   );
 }

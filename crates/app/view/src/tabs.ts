@@ -10,6 +10,7 @@ import type { SaveGameAnswer } from "./generated/SaveGameAnswer";
 import type { Side } from "./generated/Side";
 import { answersOnTheirWay, ask } from "./ipc";
 import type { Page } from "./PageArea";
+import type { PositionSetup } from "./positionSetup";
 
 /** The value of a tag of the game, or the empty text when the game has no such tag. */
 export function tagValue(picture: GamePicture, name: EditableTag) {
@@ -26,10 +27,18 @@ export function tabName(picture: GamePicture) {
 /** Why Rust did not save a game. */
 export type SaveRefusal = Extract<SaveGameAnswer, { type: "Refusal" }>;
 
+export type PositionPanelState = (
+  | { type: "openingSetup" }
+  | { type: "setup"; draft: PositionSetup }
+  | { type: "paste"; text: string }
+) & { status?: "pending" | "refused" };
+
 export type Tab = {
   game: number;
   picture: GamePicture;
   bottomSide: Side;
+  panel?: PositionPanelState | undefined;
+  openingProblem?: string | null | undefined;
   gameData: "closed" | "open" | "openToSave";
   /** The last save, when it was refused and the game has not changed since. */
   refusedSave?: SaveRefusal;
@@ -49,7 +58,13 @@ export type Move = { from: string; to: string; promotion: Promotion | null };
 export type Shapes = Pick<GamePicture, "squares" | "arrows">;
 
 export type Change =
-  | { type: "openTab"; game: number; picture: GamePicture }
+  | {
+      type: "openTab";
+      game: number;
+      picture: GamePicture;
+      openingProblem?: string | null;
+    }
+  | { type: "setPanel"; game: number; panel: PositionPanelState | undefined }
   | { type: "showTab"; game: number }
   | { type: "turnBoard"; game: number }
   | { type: "setGameData"; game: number; gameData: Tab["gameData"] }
@@ -96,11 +111,17 @@ export function apply(shown: Shown, change: Change): Shown {
                 game: change.game,
                 picture: change.picture,
                 bottomSide: "white",
+                openingProblem: change.openingProblem,
                 gameData: "closed",
               },
             ],
         shownTab: change.game,
       };
+    case "setPanel":
+      return withChangedTab(shown, change.game, (tab) => ({
+        ...tab,
+        panel: change.panel,
+      }));
     case "showTab":
       return { ...shown, shownTab: change.game };
     case "setGameData":

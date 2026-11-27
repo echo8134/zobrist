@@ -1,0 +1,56 @@
+.setupArea {
+  --notation-area-width: var(--setup-area-width);
+}
+
+.textButton {
+  flex: none;
+  height: var(--button-height);
+  padding: var(--position-button-padding);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+}
+
+.textButton:disabled {
+  color: var(--dim-icon-button-color);
+}
+
+.pastePanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--position-group-gap);
+  margin: 0;
+  padding: var(--position-panel-padding);
+  border: 0;
+}
+
+.pgnField {
+  display: block;
+  width: 100%;
+  height: var(--pgn-field-height);
+  padding: var(--comment-field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
+  color: inherit;
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  gap: var(--position-button-gap);
+}
+
+.problem {
+  margin: 0;
+  color: var(--refusal-color);
+  font-size: var(--refused-save-size);
+}
+
+.openingProblem {
+  margin: 0;
+  padding: var(--refused-save-padding);
+  color: var(--refusal-color);
+  font-size: var(--refused-save-size);
+}

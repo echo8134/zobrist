@@ -45,6 +45,7 @@ need() {
 }
 need cargo-nextest "Install with: cargo install --locked cargo-nextest"
 need cargo-deny "Install with: cargo install --locked cargo-deny"
+need python3 "Install Python 3 with the system package manager"
 need jq "Install it with the system package manager"
 need node "Install Node.js $(jq --raw-output .engines.node "$view/package.json")"
 need pnpm "Install with: npm install --global $(jq --raw-output .packageManager "$view/package.json")"
