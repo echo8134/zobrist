@@ -31,6 +31,7 @@ The first user interface and the agents' test bed.
 Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for the games and on `store` for the games that it reads from a PGN file and saves into one. It holds the lock on its open games only for the steps that touch them, and works on a file between those steps.
 
 On a normal quit the shell keeps the open boards in boards.json beside files.json in the app's local data directory. For a board from a PGN file it also keeps the game as last read or saved there, so Save can detect a change to the file even after a restart.
+If a saved session is damaged, the app opens the boards it can read and tells the player where it kept the original file.
 
 ### `scripts/`
 

@@ -46,6 +46,7 @@ export function Frame() {
     restoring.current = ask({ type: "RestoreBoards" }).then(
       (answer) => {
         change(answer);
+        setProblem(answer.warning);
         return true;
       },
       (error: unknown) => {

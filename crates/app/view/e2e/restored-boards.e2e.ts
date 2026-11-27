@@ -138,6 +138,44 @@ describe("boards after quitting and starting zobrist", function () {
   });
   afterEach(() => rmSync(work, { recursive: true, force: true }));
 
+  it("opens Home or the readable board and tells the player where the original session is kept", async () => {
+    const directory = `${work}/io.github.echo8134.zobrist`;
+    mkdirSync(directory);
+    const session = `${directory}/boards.json`;
+    const truncated = '{"boards":[';
+    writeFileSync(session, truncated);
+    const firstBackup = `${directory}/boards-recovery-1.json`;
+    await runApp(work, async (app) => {
+      await expectHome(app);
+      await expect(app.$('[role="alert"]')).toHaveText(
+        `Could not read the board session. The original file was kept at ${firstBackup}.`,
+      );
+      await newBoard(app);
+      await expect(selected(app)).toHaveText("New game");
+    });
+    expect(readFileSync(firstBackup, "utf8")).toBe(truncated);
+
+    const mixed = JSON.stringify({
+      boards: [
+        { game: "1. e4 e5 2. e5 *\n", place: [], origin: null },
+        { game: "1. d4 *\n", place: [0], origin: null },
+        { game: "*\n", place: [0], origin: null },
+      ],
+      selected: 1,
+    });
+    writeFileSync(session, mixed);
+    const secondBackup = `${directory}/boards-recovery-2.json`;
+    await runApp(work, async (app) => {
+      await expect(tabs(app)).toBeElementsArrayOfSize(1);
+      await expectMove(app, "d4");
+      await expect(app.$('[role="alert"]')).toHaveText(
+        `2 boards could not be reopened. The original file was kept at ${secondBackup}.`,
+      );
+    });
+    expect(readFileSync(firstBackup, "utf8")).toBe(truncated);
+    expect(readFileSync(secondBackup, "utf8")).toBe(mixed);
+  });
+
   it("restores all three boards, saves game two in place and remembers the last closed tab", async () => {
     await runApp(work, async (app) => {
       await expectHome(app);
