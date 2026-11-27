@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
@@ -82,7 +83,7 @@ async function expectCoordinates(
   );
 }
 
-async function expectKnight(
+async function expectPiece(
   app: WebdriverIO.Browser,
   selector: string,
   image: string,
@@ -104,7 +105,7 @@ async function expectKnight(
 }
 
 async function expectChessnutBoard(app: WebdriverIO.Browser) {
-  await expectKnight(
+  await expectPiece(
     app,
     "cg-board piece.white.knight",
     "/pieces/chessnut/wN.svg",
@@ -127,7 +128,7 @@ async function expectChessnutBoard(app: WebdriverIO.Browser) {
 async function expectDefaultBoard(app: WebdriverIO.Browser) {
   const board = app.$("main cg-board");
   await expect(board).toBeDisplayed();
-  await expectKnight(
+  await expectPiece(
     app,
     "cg-board piece.white.knight",
     "/pieces/cburnett/wN.svg",
@@ -142,6 +143,59 @@ describe("board appearance", () => {
   if (!runDirectory)
     throw new Error("The window test needs its isolated data folder");
 
+  for (const set of [
+    {
+      name: "cburnett",
+      credit: "Cburnett chess pieces by Colin M.L. Burnett",
+      license: "GPL-2.0-or-later",
+      heading: "GNU GENERAL PUBLIC LICENSE",
+      licenseDigest:
+        "00d857bed08903a4f02325061f98ded6340800f1a18706e0473f656ecb884bbe",
+    },
+    {
+      name: "chessnut",
+      credit: "Chessnut chess pieces by Alexis Luengas",
+      license: "Apache-2.0",
+      heading: "Apache License",
+      licenseDigest:
+        "0ffddef9e48f8a09aed5caf2d44f7ba1c1be2d9b8e0a6f693b1635b2d5566645",
+    },
+  ]) {
+    it(`bundles every ${set.name} piece, its credit and the full ${set.license} text`, () => {
+      const folder = new URL(`../dist/pieces/${set.name}/`, import.meta.url);
+      const images = readdirSync(folder, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".svg"))
+        .map((entry) => entry.name)
+        .sort();
+      expect(images).toEqual([
+        "bB.svg",
+        "bK.svg",
+        "bN.svg",
+        "bP.svg",
+        "bQ.svg",
+        "bR.svg",
+        "wB.svg",
+        "wK.svg",
+        "wN.svg",
+        "wP.svg",
+        "wQ.svg",
+        "wR.svg",
+      ]);
+      const license = readFileSync(new URL("LICENSE.txt", folder), "utf8");
+      expect(license.split(/\r?\n/).slice(0, 2)).toEqual([
+        set.credit,
+        set.license,
+      ]);
+      // Pin the published license text independently of line wrapping and the source links above it.
+      const words = license.trim().replace(/\s+/g, " ");
+      const start = words.indexOf(set.heading);
+      expect(start).toBeGreaterThan(0);
+      expect(
+        createHash("sha256").update(words.slice(start)).digest("hex"),
+      ).toBe(set.licenseDigest);
+    });
+  }
+
   it("uses the choices on open and new boards and after quitting the app", async function () {
     this.timeout(60000);
     const data = `${runDirectory}/board-appearance`;
@@ -152,6 +206,12 @@ describe("board appearance", () => {
         expect(await control(app, label).getComputedLabel()).toBe(label);
       }
       await expect(control(app, "Board colours")).toHaveValue("brown");
+      await expect(
+        control(app, "Piece set").$("option:checked"),
+      ).toHaveElementProperty("label", "Cburnett");
+      await expect(
+        control(app, "Board colours").$("option:checked"),
+      ).toHaveElementProperty("label", "Brown");
       await expect(control(app, "Show coordinates")).toBeChecked();
       await openBoard(app, 1);
       await expectDefaultBoard(app);
@@ -203,28 +263,56 @@ describe("board appearance", () => {
       await expectChessnutBoard(app);
       await expectCoordinates(app, "abcdefgh", "12345678");
       await app.$("main").$("aria/Set up position").click();
-      await expectKnight(
+      await expectPiece(
         app,
         'button[aria-label="White knight"] piece',
         "/pieces/chessnut/wN.svg",
       );
+      await control(app, "FEN").setValue("7k/P7/8/8/8/8/8/4K3 w - - 0 1");
+      await expect(app.$$("cg-board piece")).toBeElementsArrayOfSize(3);
+      await app.$("main").$("aria/Use position").click();
+      await expect(app.$("main").$("aria/Set up position")).toBeEnabled();
+      const board = app.$("main cg-board");
+      const square = (await board.getSize("width")) / 8;
+      await board.click({ x: -3.5 * square, y: -2.5 * square });
+      await board.click({ x: -3.5 * square, y: -3.5 * square });
+      for (const [role, file] of Object.entries({
+        Queen: "wQ.svg",
+        Knight: "wN.svg",
+        Rook: "wR.svg",
+        Bishop: "wB.svg",
+      })) {
+        await expectPiece(
+          app,
+          `button[aria-label="${role}"] piece`,
+          `/pieces/chessnut/${file}`,
+        );
+      }
     });
   });
 
-  it("shows the default board and explains how to recover the settings file", async () => {
-    const data = `${runDirectory}/damaged-board-settings`;
-    const directory = `${data}/io.github.echo8134.zobrist`;
-    const path = `${directory}/settings.json`;
-    mkdirSync(directory, { recursive: true });
-    writeFileSync(path, "{");
-    await withApp(data, async (app) => {
-      await openBoard(app, 1);
-      await expectDefaultBoard(app);
-      await settings(app).click();
-      await expect(app.$("main [role=alert]")).toHaveText(
-        `Could not read the board settings at ${path}. Restore the file from a backup or move it aside, then restart zobrist.`,
-      );
+  for (const [problem, contents] of Object.entries({
+    "malformed JSON": "{",
+    "an unknown piece set":
+      '{"pieceSet":"marble","boardPalette":"green","showCoordinates":false}',
+    "an unknown palette":
+      '{"pieceSet":"chessnut","boardPalette":"blue","showCoordinates":false}',
+  })) {
+    it(`shows the default board and explains how to recover settings with ${problem}`, async () => {
+      const data = `${runDirectory}/damaged-board-settings`;
+      const directory = `${data}/io.github.echo8134.zobrist`;
+      const path = `${directory}/settings.json`;
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(path, contents);
+      await withApp(data, async (app) => {
+        await openBoard(app, 1);
+        await expectDefaultBoard(app);
+        await settings(app).click();
+        await expect(app.$("main [role=alert]")).toHaveText(
+          `Could not read the board settings at ${path}. Restore the file from a backup or move it aside, then restart zobrist.`,
+        );
+      });
+      expect(readFileSync(path, "utf8")).toBe(contents);
     });
-    expect(readFileSync(path, "utf8")).toBe("{");
-  });
+  }
 });
