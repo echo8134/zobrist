@@ -5,13 +5,13 @@ import sys
 
 
 keys = {
-    "copy": (b"Return",),
+    "enter": (b"Return",),
+    "tab": (b"Tab",),
     "copy-selection": (b"Control_L", b"c"),
     "paste": (b"Control_L", b"v"),
 }[sys.argv[1]]
 
-# The driver's keys are DOM events. Clipboard access needs a user gesture,
-# and paste needs the window system to deliver the text to the focused field.
+# DOM key events cannot drive native focus navigation or grant clipboard access.
 display_library = ctypes.CDLL("libX11.so.6")
 input_library = ctypes.CDLL("libXtst.so.6")
 display_library.XOpenDisplay.restype = ctypes.c_void_p

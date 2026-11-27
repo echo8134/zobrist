@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import type { TauriCapabilities } from "@wdio/tauri-service";
@@ -7,6 +8,8 @@ let exportsServer: Server | undefined;
 
 const target = fileURLToPath(new URL("../../../target", import.meta.url));
 
+const data = `${target}/e2e/data/${process.pid}`;
+
 const app: TauriCapabilities = {
   browserName: "tauri",
   "tauri:options": { application: `${target}/debug/zobrist-app` },
@@ -14,11 +17,9 @@ const app: TauriCapabilities = {
 
 export const config: WebdriverIO.Config = {
   runner: "local",
+  runnerEnv: { ZOBRIST_TEST_DATA: data },
   onPrepare: async () => {
     exportsServer = await startGameExports();
-  },
-  onComplete: () => {
-    exportsServer?.close();
   },
   // The caller provides the display. Without this line the runner would start one of its own.
   autoXvfb: false,
@@ -30,6 +31,10 @@ export const config: WebdriverIO.Config = {
     await browser.switchToWindow("main");
     await browser.refresh();
   },
+  onComplete: () => {
+    exportsServer?.close();
+    rmSync(data, { recursive: true, force: true });
+  },
   framework: "mocha",
   reporters: ["spec"],
   logLevel: "warn",
@@ -40,7 +45,7 @@ export const config: WebdriverIO.Config = {
       {
         // The app under test keeps its data out of the home directory.
         env: {
-          XDG_DATA_HOME: `${target}/e2e/data`,
+          XDG_DATA_HOME: data,
           XDG_CACHE_HOME: `${target}/e2e/cache`,
         },
       },

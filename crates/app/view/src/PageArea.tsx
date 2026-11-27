@@ -4,9 +4,10 @@ import formStyles from "./FilesPage.module.css";
 import { ask } from "./ipc";
 import styles from "./PageArea.module.css";
 import { type Change, openGame } from "./tabs";
+import { UserPage } from "./UserPage";
 
-const { area, heading, versionLine } = styles;
-const { pathRow, field, button, line, refusal } = formStyles;
+const { area, heading, versionLine, gameLink } = styles;
+const { toolbar, button, line, refusal } = formStyles;
 
 /** The pages in the order of their entries in the icon bar. */
 export const upperPages = [
@@ -45,9 +46,9 @@ function GameLinkForm({ change }: Pick<Props, "change">) {
 
   return (
     <>
-      <form className={pathRow} action={submit}>
+      <form className={toolbar} action={submit}>
         <input
-          className={field}
+          className={gameLink}
           type="text"
           inputMode="url"
           aria-label="Lichess game link"
@@ -75,7 +76,7 @@ const contents: Record<Exclude<Page, "Files" | "Home">, ReactNode> = {
   Databases: null,
   Events: null,
   Engines: null,
-  User: null,
+  User: <UserPage />,
   Settings: (
     <Suspense>
       <VersionLine />

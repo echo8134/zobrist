@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { browser, expect } from "@wdio/globals";
+import { pick } from "./file-picker";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
@@ -319,11 +320,12 @@ describe("the data of a game", () => {
     mkdirSync(`${screenshots}/game-data`, { recursive: true });
     rmSync(file, { force: true });
     await browser.$("nav").$("aria/Files").click();
-    await browser.$("aria/Path of a PGN file").setValue(file);
-    await browser.$("aria/Create").click();
-    await expect(browser.$('main [role="status"]')).toHaveText(
-      "The file has no games.",
+    await pick("New", file);
+    await expect(browser.$('section[aria-label="Selection"] h2')).toHaveText(
+      "new.pgn",
     );
+    await expect(browser.$("main").$(`p=${file}`)).toBeDisplayed();
+    await expect(browser.$("main").$("span=0 games")).toBeDisplayed();
     await browser.$("header").$("aria/New board").click();
     await expect(tab(3)).toHaveAttribute("aria-selected", "true");
     await playMove("e2", "e4");

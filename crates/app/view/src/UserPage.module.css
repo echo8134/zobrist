@@ -1,0 +1,110 @@
+.content {
+  max-width: var(--user-content-width);
+  margin-top: var(--user-section-gap);
+}
+
+.profile,
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--user-row-gap);
+}
+
+.profileIcon,
+.piece {
+  display: grid;
+  flex: none;
+  place-items: center;
+  border-radius: var(--user-icon-radius);
+}
+
+.profileIcon {
+  width: var(--user-profile-icon-size);
+  height: var(--user-profile-icon-size);
+  background: var(--top-bar-background-color);
+  color: var(--icon-button-color);
+}
+
+.profileIcon svg,
+.piece svg {
+  width: var(--user-glyph-size);
+  height: var(--user-glyph-size);
+  stroke-width: var(--entry-icon-stroke);
+}
+
+.title,
+.name {
+  font-weight: var(--top-bar-name-weight);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--user-title-size);
+}
+
+.secondary,
+.description,
+.status {
+  color: var(--version-line-color);
+}
+
+.secondary {
+  margin: var(--user-caption-gap) 0 0;
+}
+
+.accounts {
+  margin-top: var(--user-section-gap);
+}
+
+.list {
+  margin-top: var(--list-gap-above);
+  border-top: 1px solid var(--list-line-color);
+}
+
+.provider {
+  border-bottom: 1px solid var(--list-line-color);
+}
+
+.row {
+  min-height: var(--user-row-height);
+  padding: var(--user-row-padding);
+  list-style: none;
+  cursor: pointer;
+}
+
+.row::-webkit-details-marker {
+  display: none;
+}
+
+.row:hover,
+.row:focus-visible {
+  background: var(--top-bar-background-color);
+}
+
+.piece {
+  width: var(--user-piece-size);
+  height: var(--user-piece-size);
+  border: 1px solid var(--list-line-color);
+  background: var(--background-color);
+}
+
+.status {
+  margin-left: auto;
+  text-align: end;
+}
+
+.chevron {
+  flex: none;
+  width: var(--game-data-chevron-size);
+  height: var(--game-data-chevron-size);
+  color: var(--game-data-chevron-color);
+}
+
+.provider[open] .chevron {
+  transform: rotate(180deg);
+}
+
+.description {
+  margin: 0 var(--user-row-inset) var(--user-detail-gap)
+    calc(var(--user-row-inset) + var(--user-piece-size) + var(--user-row-gap));
+}

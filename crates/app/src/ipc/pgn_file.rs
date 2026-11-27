@@ -14,14 +14,14 @@ use super::{FirstStep, Games, Response};
 
 pub(super) fn open(typed: String) -> FirstStep {
     FirstStep::blocking_work(move || {
-        let answer = opened(&typed);
+        let answer = opened(&resolve(&typed));
         move |_: &mut Games| Response::OpenPgnFile { answer }
     })
 }
 
 pub(super) fn create(typed: String) -> FirstStep {
     FirstStep::blocking_work(move || {
-        let answer = created(&typed);
+        let answer = created(&resolve(&typed));
         move |_: &mut Games| Response::CreatePgnFile { answer }
     })
 }
@@ -31,14 +31,7 @@ pub(super) fn create(typed: String) -> FirstStep {
 #[serde(tag = "type")]
 pub enum PgnFileAnswer {
     /// The file and the list of its games.
-    File {
-        /// The path as Rust resolved it.
-        path: String,
-        /// One row per game, in the order of the file.
-        rows: Vec<GameRow>,
-        /// How many games have a problem.
-        problems: usize,
-    },
+    File(PgnFile),
     /// Rust did not open or create the file.
     Refusal {
         /// Why.
@@ -46,6 +39,15 @@ pub enum PgnFileAnswer {
         /// What the system said, when it said more than the reason.
         system: Option<String>,
     },
+}
+
+/// A PGN file and the rows shown in its game table.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+pub struct PgnFile {
+    /// The path on disk.
+    pub(super) path: String,
+    rows: Vec<GameRow>,
+    problems: usize,
 }
 
 /// Why Rust did not open or create a PGN file.
@@ -86,14 +88,13 @@ impl From<PgnGameRow> for GameRow {
     }
 }
 
-fn opened(typed: &str) -> PgnFileAnswer {
-    let path = resolve(typed);
-    match list(&path) {
-        Ok((rows, problems)) => PgnFileAnswer::File {
+pub(super) fn opened(path: &Path) -> PgnFileAnswer {
+    match list(path) {
+        Ok((rows, problems)) => PgnFileAnswer::File(PgnFile {
             path: path.to_string_lossy().into_owned(),
             rows,
             problems,
-        },
+        }),
         Err(error) => PgnFileAnswer::Refusal {
             reason: RefusalReason::CannotRead,
             system: Some(error.to_string()),
@@ -101,15 +102,14 @@ fn opened(typed: &str) -> PgnFileAnswer {
     }
 }
 
-fn created(typed: &str) -> PgnFileAnswer {
-    let path = resolve(typed);
+pub(super) fn created(path: &Path) -> PgnFileAnswer {
     // `create_new` fails when anything is at the path, so it never replaces a file.
-    match File::create_new(&path) {
-        Ok(_) => PgnFileAnswer::File {
+    match File::create_new(path) {
+        Ok(_) => PgnFileAnswer::File(PgnFile {
             path: path.to_string_lossy().into_owned(),
             rows: Vec::new(),
             problems: 0,
-        },
+        }),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => PgnFileAnswer::Refusal {
             reason: RefusalReason::ExistsAlready,
             system: None,

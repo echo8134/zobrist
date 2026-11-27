@@ -77,6 +77,20 @@
   --version-line-gap: 8px;
   --version-line-color: #6b6b6b;
 
+  --user-content-width: 560px;
+  --user-section-gap: 28px;
+  --user-row-gap: 12px;
+  --user-row-inset: 8px;
+  --user-row-padding: 8px var(--user-row-inset);
+  --user-row-height: 58px;
+  --user-profile-icon-size: 44px;
+  --user-piece-size: 34px;
+  --user-glyph-size: 22px;
+  --user-icon-radius: 7px;
+  --user-title-size: 15px;
+  --user-caption-gap: 3px;
+  --user-detail-gap: 14px;
+
   --board-part-padding: 24px;
   --board-squares-per-side: 8;
   --button-row-gap: 12px;
@@ -153,10 +167,17 @@
   --promotion-chooser-line-color: #e2e2e2;
   --promotion-chooser-background-color: #ffffff;
 
-  --path-row-gap-above: 16px;
-  --path-row-gap: 8px;
+  --files-toolbar-gap-above: 16px;
+  --files-toolbar-gap: 8px;
+  --collection-width: 240px;
+  --collection-gap: 24px;
+  --collection-inset: 12px;
+  --collection-indent: 16px;
+  --collection-menu-width: 150px;
+  --collection-min-height: 240px;
+  --collection-heading-size: 15px;
 
-  --field-width: 480px;
+  --game-link-width: 480px;
   --field-height: 28px;
   --field-padding: 0 8px;
   --field-line-color: #e2e2e2;
