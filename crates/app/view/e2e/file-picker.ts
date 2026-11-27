@@ -3,19 +3,22 @@ import { browser, expect } from "@wdio/globals";
 type Choice = "File" | "Folder" | "New";
 
 /** WebDriver cannot drive the system dialog. Only its next answer is supplied by the test. */
-export async function pick(choice: Choice, path: string | null) {
+export async function answerNextPicker(
+  type: "PickPgnPath" | "PickDatabasePath",
+  path: string | null,
+) {
   await browser.execute(
     `
-      const [path] = arguments;
+      const [type, path] = arguments;
       const original = window.fetch;
       const endpoint = window.__TAURI_INTERNALS__.convertFileSrc("answer", "ipc");
       window.fetch = function(input, options) {
         if (String(input) === endpoint && typeof options?.body === "string") {
           const request = JSON.parse(options.body).request;
-          if (request?.type === "PickPgnPath") {
+          if (request?.type === type) {
             window.fetch = original;
             window.pickerRequest = request;
-            return Promise.resolve(Response.json({ type: "PickPgnPath", path }, {
+            return Promise.resolve(Response.json({ type, path }, {
               headers: { "Tauri-Response": "ok" },
             }));
           }
@@ -24,8 +27,13 @@ export async function pick(choice: Choice, path: string | null) {
       };
       delete window.pickerRequest;
     `,
+    type,
     path,
   );
+}
+
+export async function pick(choice: Choice, path: string | null) {
+  await answerNextPicker("PickPgnPath", path);
   if (choice === "New") {
     await browser.$("main").$("aria/New PGN…").click();
   } else {

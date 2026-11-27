@@ -28,7 +28,7 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for the games and on `store` for the games that it reads from a PGN file and saves into one. It holds the lock on its open games only for the steps that touch them, and works on a file between those steps.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for the games and on `store` for the games that it reads from a PGN file and saves into one. It holds the lock on its open games only for the steps that touch them, and works on a file between those steps. The Databases page keeps references to native files in the app's data directory and asks `store` to verify and count a selected collection.
 
 ### `scripts/`
 

@@ -71,6 +71,11 @@ enum PgnCommand {
 
 #[derive(Subcommand)]
 enum DatabaseCommand {
+    /// Print how many games a database holds.
+    Info {
+        /// The database file to inspect.
+        database: PathBuf,
+    },
     /// Store every game of a PGN file and print the import report.
     Create {
         /// The PGN file to read.
@@ -127,6 +132,7 @@ fn main() -> ExitCode {
             } => exit_code(&source, replace_game(&target, number, &source)),
         },
         Command::Database { command } => match command {
+            DatabaseCommand::Info { database } => exit_code(&database, info(&database)),
             DatabaseCommand::Create { pgn, database } => exit_code(&pgn, create(&pgn, &database)),
             DatabaseCommand::Export { database } => exit_code(&database, export(&database)),
         },
@@ -457,8 +463,17 @@ impl Drop for ProblemLog {
     }
 }
 
+fn cannot_read(error: zobrist_store::OpenError) -> Failure {
+    Failure::Read(io::Error::other(error))
+}
+
+fn info(path: &Path) -> Result<usize, Failure> {
+    let database = Database::open(path).map_err(cannot_read)?;
+    writeln!(io::stdout().lock(), "games: {}", database.game_count())?;
+    Ok(0)
+}
+
 fn export(path: &Path) -> Result<usize, Failure> {
-    let cannot_read = |error| Failure::Read(io::Error::other(error));
     let mut database = Database::open(path).map_err(cannot_read)?;
     let mut output = PgnOutput::new(io::stdout().lock());
     for game in database.games().map_err(cannot_read)? {

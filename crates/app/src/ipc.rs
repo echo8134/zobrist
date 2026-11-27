@@ -3,10 +3,12 @@
 //! The view sends a [`DesktopRequest`] and gets back the [`Response`] case with the same name. The
 //! TypeScript types of the view are generated from these two types.
 
+mod database_collection;
 mod file_collection;
 mod game_file;
 mod pgn_file;
 
+pub use database_collection::{DatabaseEntry, DatabaseRequest};
 pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
 };
@@ -545,6 +547,35 @@ pub enum Response {
     PickPgnPath {
         /// The absolute path returned by the system.
         path: Option<std::path::PathBuf>,
+    },
+    /// The chosen native database, or nothing after cancellation.
+    PickDatabasePath {
+        /// The absolute path returned by the system.
+        path: Option<std::path::PathBuf>,
+    },
+    /// The native databases registered on this device.
+    ListDatabases {
+        /// Names and locations of the registered collections.
+        entries: Vec<DatabaseEntry>,
+    },
+    /// The updated list and count from the selected database.
+    AddDatabase {
+        /// Names and locations after registration.
+        entries: Vec<DatabaseEntry>,
+        /// The verified number of games in the database.
+        #[ts(type = "number")]
+        games: u64,
+    },
+    /// The result of opening the selected native database.
+    InspectDatabase {
+        /// The verified number of games in the database.
+        #[ts(type = "number")]
+        games: u64,
+    },
+    /// The remaining databases after forgetting an entry.
+    RemoveDatabase {
+        /// Names and locations after removal.
+        entries: Vec<DatabaseEntry>,
     },
     /// The saved references.
     GetFileCollection {

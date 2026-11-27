@@ -1,4 +1,5 @@
 import { type ReactNode, Suspense, use } from "react";
+import { DatabasesPage } from "./DatabasesPage";
 import { FilesPage } from "./FilesPage";
 import { ask } from "./ipc";
 import styles from "./PageArea.module.css";
@@ -27,7 +28,7 @@ function VersionLine() {
 
 const contents: Record<Exclude<Page, "Files">, ReactNode> = {
   Home: null,
-  Databases: null,
+  Databases: <DatabasesPage />,
   Events: null,
   Engines: null,
   User: <UserPage />,

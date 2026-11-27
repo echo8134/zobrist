@@ -20,6 +20,8 @@ pub enum DesktopRequest {
     Editor(Request),
     /// Requests about the player's collection or the system picker.
     Collection(CollectionRequest),
+    /// Requests about native databases registered on this device.
+    Databases(super::DatabaseRequest),
 }
 
 /// An operation on the Files page that needs the desktop environment.
@@ -33,6 +35,8 @@ pub enum CollectionRequest {
         /// The selected folder, when choosing a new file.
         folder: Option<PathBuf>,
     },
+    /// Choose a native database to add to the Databases page.
+    PickDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Open or create the chosen item and keep it in the collection.
@@ -131,9 +135,7 @@ impl CollectionRequest {
                         dialog.blocking_save_file()
                     }
                 };
-                let path = selected
-                    .map(|file| file.into_path().map_err(io::Error::other))
-                    .transpose()?;
+                let path = picker_path(selected)?;
                 if matches!(choice, PickerChoice::File)
                     && path.as_deref().is_some_and(|file| !is_pgn(file))
                 {
@@ -143,6 +145,17 @@ impl CollectionRequest {
                     ));
                 }
                 Ok(Response::PickPgnPath { path })
+            }
+            Self::PickDatabasePath => {
+                let selected = window
+                    .dialog()
+                    .file()
+                    .set_parent(window)
+                    .add_filter("zobrist databases", &["zobrist"])
+                    .blocking_pick_file();
+                Ok(Response::PickDatabasePath {
+                    path: picker_path(selected)?,
+                })
             }
             Self::GetFileCollection => {
                 let directory = window
@@ -290,6 +303,12 @@ fn add(
     })
 }
 
+fn picker_path(selected: Option<tauri_plugin_dialog::FilePath>) -> io::Result<Option<PathBuf>> {
+    selected
+        .map(|file| file.into_path().map_err(io::Error::other))
+        .transpose()
+}
+
 fn suggested_folder(documents: Option<&Path>) -> Option<PathBuf> {
     let directory = documents?.join("zobrist");
     match fs::create_dir(&directory) {
@@ -347,7 +366,7 @@ fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
     }
 }
 
-fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {
+pub(super) fn lock_collection(directory: &Path, name: &str) -> io::Result<File> {
     fs::create_dir_all(directory)?;
     // Separate app windows and processes may add to the same collection.
     let lock = File::options()
@@ -355,8 +374,13 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
         .write(true)
         .create(true)
         .truncate(false)
-        .open(directory.join("files.lock"))?;
+        .open(directory.join(name))?;
     lock.lock()?;
+    Ok(lock)
+}
+
+fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {
+    let _lock = lock_collection(directory, "files.lock")?;
     let mut entries = collection(directory)?;
     if let Some(previous) = entries
         .iter_mut()
@@ -369,17 +393,21 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
     } else {
         entries.push(entry.clone());
     }
-    let staged = directory.join("files.tmp");
-    let mut file = File::create(&staged)?;
     let paths: Vec<_> = entries
         .iter()
         .map(|entry| (entry.kind, &entry.path))
         .collect();
-    serde_json::to_writer(&mut file, &paths)?;
+    save_collection(&directory.join("files.json"), &paths)?;
+    Ok(entries)
+}
+
+pub(super) fn save_collection(path: &Path, paths: &impl Serialize) -> io::Result<()> {
+    let staged = path.with_extension("tmp");
+    let mut file = File::create(&staged)?;
+    serde_json::to_writer(&mut file, paths)?;
     file.sync_all()?;
     drop(file);
-    fs::rename(staged, directory.join("files.json"))?;
-    Ok(entries)
+    fs::rename(staged, path)
 }
 
 #[cfg(test)]

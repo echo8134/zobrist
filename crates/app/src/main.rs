@@ -14,6 +14,10 @@ async fn answer(
             .answer(request)
             .await
             .map_err(|error| error.to_string()),
+        DesktopRequest::Databases(request) => spawn_blocking(move || request.answer(&window))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string()),
         DesktopRequest::Collection(request) => spawn_blocking(move || request.answer(&window))
             .await
             .map_err(|error| error.to_string())?
