@@ -213,32 +213,135 @@ fn empty_boards_and_closed_tabs_survive_repeated_restarts() -> io::Result<()> {
 }
 
 #[test]
-fn a_damaged_record_installs_no_games_and_can_be_retried() -> io::Result<()> {
-    let directory = directory("damaged")?;
-    let record = directory.join("boards.json");
-    let board = json!({"game":"*\n","place":[],"origin":null});
-    let invalid_place = json!({"game":"*\n","place":[0],"origin":null});
-    let invalid_game = json!({"game":"1. e4 e5 2. e5 *\n","place":[],"origin":null});
+fn a_truncated_session_keeps_its_bytes_beside_earlier_backups_and_allows_a_normal_quit()
+-> io::Result<()> {
+    let directory = directory("truncated")?;
+    let original = br#"{"boards":["#;
+    let earlier = directory.join("boards-recovery-1.json");
+    let backup = directory.join("boards-recovery-2.json");
+    fs::write(directory.join("boards.json"), original)?;
+    fs::write(&earlier, b"earlier recovery")?;
     let games = SharedGames::default();
-    for bad in [
-        json!({"boards":[board],"selected":1}),
-        json!({"boards":[board,invalid_place],"selected":0}),
-        json!({"boards":[board,invalid_game],"selected":0}),
-    ] {
-        let bytes = serde_json::to_vec(&bad)?;
-        fs::write(&record, &bytes)?;
-        assert!(restore(&games, &directory).is_err());
-        assert!(!games.is_restored());
-        assert_eq!(fs::read(&record)?, bytes);
-    }
-    fs::write(
-        record,
-        serde_json::to_vec(&json!({"boards":[board],"selected":0}))?,
-    )?;
-    let answer = restore(&games, &directory)?;
-    assert_eq!(answer["selected"], 1);
+    assert_eq!(
+        restore(&games, &directory)?,
+        json!({"type":"RestoreBoards","boards":[],"selected":null,"warning":format!(
+            "Could not read the board session. The original file was kept at {}.", backup.display())})
+    );
     assert!(games.is_restored());
-    assert_eq!(answer["boards"].as_array().unwrap().len(), 1);
+    assert!(!directory.join("boards.json").exists());
+    ask(&games, &directory, json!({"type":"NewGame"}))?;
+    quit(&games, &directory, &[1], Some(1))?;
+    let next = restore(&SharedGames::default(), &directory)?;
+    assert_eq!(next["selected"], 1);
+    assert_eq!(next["boards"].as_array().unwrap().len(), 1);
+    assert!(next.get("warning").is_none());
+    assert_eq!(fs::read(backup)?, original);
+    assert_eq!(fs::read(earlier)?, b"earlier recovery");
+    fs::remove_dir_all(directory)
+}
+
+#[test]
+fn bad_boards_leave_readable_boards_in_order_with_the_saved_selection() -> io::Result<()> {
+    let directory = directory("partial")?;
+    let illegal = json!({"game":"1. e4 e5 2. e5 *\n","place":[],"origin":null});
+    let missing_move = json!({"game":"*\n","place":[0],"origin":null});
+    let first = json!({"game":"1. d4 *\n","place":[0],"origin":null});
+    let second = json!({"game":"1. e4 *\n","place":[],"origin":null});
+    for (number, boards, selected, lost) in [
+        (1, json!([illegal, first]), 1, "1 board"),
+        (2, json!([missing_move, first]), 1, "1 board"),
+        (
+            3,
+            json!([illegal, first, missing_move, second]),
+            3,
+            "2 boards",
+        ),
+    ] {
+        let original = serde_json::to_vec(&json!({"boards":boards,"selected":selected}))?;
+        fs::write(directory.join("boards.json"), &original)?;
+        let backup = directory.join(format!("boards-recovery-{number}.json"));
+        let games = SharedGames::default();
+        let answer = restore(&games, &directory)?;
+        assert_eq!(
+            answer["warning"],
+            format!(
+                "{lost} could not be reopened. The original file was kept at {}.",
+                backup.display()
+            )
+        );
+        let boards = answer["boards"].as_array().unwrap();
+        assert_eq!(boards[0]["picture"]["notation"][0]["text"], "d4");
+        assert_eq!(boards[0]["picture"]["place"], json!([0]));
+        if number == 3 {
+            assert_eq!(boards.len(), 2);
+            assert_eq!(boards[1]["picture"]["notation"][0]["text"], "e4");
+            assert_eq!(answer["selected"], 2);
+            quit(&games, &directory, &[1, 2], Some(2))?;
+        } else {
+            assert_eq!(boards.len(), 1);
+            assert_eq!(answer["selected"], 1);
+            quit(&games, &directory, &[1], Some(1))?;
+        }
+        let next = restore(&SharedGames::default(), &directory)?;
+        assert_eq!(next["boards"], answer["boards"]);
+        assert_eq!(next["selected"], answer["selected"]);
+        assert!(next.get("warning").is_none());
+        assert_eq!(fs::read(backup)?, original);
+    }
+    fs::remove_dir_all(directory)
+}
+
+#[test]
+fn an_invalid_selection_keeps_all_readable_boards() -> io::Result<()> {
+    let directory = directory("bad-selection")?;
+    let board = json!({"game":"1. d4 *\n","place":[],"origin":null});
+    for (number, selected) in [(1, json!(4)), (2, json!("invalid"))] {
+        let original = serde_json::to_vec(&json!({"boards":[board],"selected":selected}))?;
+        fs::write(directory.join("boards.json"), &original)?;
+        let backup = directory.join(format!("boards-recovery-{number}.json"));
+        let answer = restore(&SharedGames::default(), &directory)?;
+        assert_eq!(answer["boards"].as_array().unwrap().len(), 1);
+        assert_eq!(answer["boards"][0]["picture"]["notation"][0]["text"], "d4");
+        assert_eq!(answer["selected"], Value::Null);
+        assert_eq!(
+            answer["warning"],
+            format!(
+                "Could not read the board session. The original file was kept at {}.",
+                backup.display()
+            )
+        );
+        assert_eq!(fs::read(backup)?, original);
+    }
+    fs::remove_dir_all(directory)
+}
+
+#[test]
+fn a_failed_backup_names_the_original_and_quit_retries_before_replacing_it() -> io::Result<()> {
+    let directory = directory("failed-backup")?;
+    let record = directory.join("boards.json");
+    fs::create_dir(&record)?;
+    let games = SharedGames::default();
+    let answer = restore(&games, &directory)?;
+    assert_eq!(
+        answer["warning"],
+        format!(
+            "Could not read the board session. The original file was kept at {}.",
+            record.display()
+        )
+    );
+    assert!(games.is_restored());
+    ask(&games, &directory, json!({"type":"NewGame"}))?;
+    assert!(quit(&games, &directory, &[1], Some(1)).is_err());
+    assert!(record.is_dir());
+    assert!(!directory.join("boards-recovery-1.json").exists());
+    fs::remove_dir(&record)?;
+    fs::write(&record, b"original now accessible")?;
+    quit(&games, &directory, &[1], Some(1))?;
+    assert_eq!(
+        fs::read(directory.join("boards-recovery-1.json"))?,
+        b"original now accessible"
+    );
+    assert_eq!(restore(&SharedGames::default(), &directory)?["selected"], 1);
     fs::remove_dir_all(directory)
 }
 
