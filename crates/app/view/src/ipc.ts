@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Request } from "./generated/Request";
+import type { DesktopRequest as Request } from "./generated/DesktopRequest";
 import type { Response } from "./generated/Response";
 
 // For each game, the answers that are still on their way. An entry leaves when its answers

@@ -1,14 +1,18 @@
 //! Everything that crosses between the view and Rust.
 //!
-//! The view sends a [`Request`] and gets back the [`Response`] case with the same name. The
+//! The view sends a [`DesktopRequest`] and gets back the [`Response`] case with the same name. The
 //! TypeScript types of the view are generated from these two types.
 
+mod file_collection;
 mod game_file;
 mod pgn_file;
 
+pub use file_collection::{
+    AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
+};
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SavedState};
-pub use pgn_file::{GameRow, PgnFileAnswer, RefusalReason};
+pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
 
 use std::collections::HashMap;
 use std::io;
@@ -537,6 +541,26 @@ pub enum Response {
     },
     /// The game is closed.
     CloseGame,
+    /// The path the player chose, or nothing after cancellation.
+    PickPgnPath {
+        /// The absolute path returned by the system.
+        path: Option<std::path::PathBuf>,
+    },
+    /// The saved references.
+    GetFileCollection {
+        /// The root entries of the collection.
+        entries: Vec<CollectionEntry>,
+    },
+    /// The collection and the selected file or folder after applying the picker result.
+    AddPgnPath {
+        /// The new selection or the reason the file operation was refused.
+        answer: AddedPgnPath,
+    },
+    /// The immediate PGN files and subfolders of a folder.
+    ReadPgnFolder {
+        /// Folders first, then files, in name order.
+        entries: Vec<CollectionEntry>,
+    },
     /// The file with its games, or the refusal.
     OpenPgnFile {
         /// What the page Files shows next.

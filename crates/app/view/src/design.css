@@ -167,10 +167,16 @@
   --promotion-chooser-line-color: #e2e2e2;
   --promotion-chooser-background-color: #ffffff;
 
-  --path-row-gap-above: 16px;
-  --path-row-gap: 8px;
+  --files-toolbar-gap-above: 16px;
+  --files-toolbar-gap: 8px;
+  --collection-width: 240px;
+  --collection-gap: 24px;
+  --collection-inset: 12px;
+  --collection-indent: 16px;
+  --collection-menu-width: 150px;
+  --collection-min-height: 240px;
+  --collection-heading-size: 15px;
 
-  --field-width: 480px;
   --field-height: 28px;
   --field-padding: 0 8px;
   --field-line-color: #e2e2e2;
