@@ -40,6 +40,15 @@ pub struct EngineEntry {
     path: PathBuf,
 }
 
+/// The first registered executable is the default in the Engines page.
+pub(super) fn default_program(directory: &Path) -> io::Result<PathBuf> {
+    read(&directory.join("engines.json"))?
+        .into_iter()
+        .next()
+        .map(|entry| entry.path)
+        .ok_or_else(|| io::Error::other("Choose a default engine on the Engines page."))
+}
+
 impl EngineAction {
     pub(super) fn apply(self, directory: &Path) -> io::Result<Vec<EngineEntry>> {
         let inventory = directory.join("engines.json");

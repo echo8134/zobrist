@@ -59,7 +59,7 @@ fn second_game_at_its_start(path: &Path, number: u64) -> Value {
     let mut legal_moves = start_moves();
     legal_moves.sort_by_key(Value::to_string);
     json!({
-        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "revision": 0, "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         "turn": "white", "inCheck": false,
         "legalMoves": legal_moves,
         "canUndo": false, "canRedo": false, "inVariation": false, "hasNextMove": true,
@@ -192,6 +192,7 @@ fn open_and_comment(games: &SharedGames, clean: &Path) -> io::Result<Value> {
 /// The picture of game 2 of `clean.pgn` at its last move, with the comment.
 fn second_game_with_comment(path: &Path, unsaved: bool) -> Value {
     let mut picture = second_game_at_its_start(path, 2);
+    picture["revision"] = json!(1);
     picture["fen"] = json!("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3");
     picture["inCheck"] = json!(true);
     picture["legalMoves"] = json!([]);
