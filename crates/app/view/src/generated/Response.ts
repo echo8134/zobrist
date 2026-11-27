@@ -4,6 +4,7 @@ import type { CollectionEntry } from "./CollectionEntry";
 import type { EngineEntry } from "./EngineEntry";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
+import type { OpenGameLinkAnswer } from "./OpenGameLinkAnswer";
 import type { OpenedGame } from "./OpenedGame";
 import type { PgnExport } from "./PgnExport";
 import type { PgnFileAnswer } from "./PgnFileAnswer";
@@ -38,7 +39,11 @@ change: PositionChange | null, } | { "type": "OpenPgnText",
 /**
  * Absent when the text contains no game.
  */
-opened: OpenedGame | null, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
+opened: OpenedGame | null, } | { "type": "OpenGameLink", 
+/**
+ * The outcome of the fetch.
+ */
+answer: OpenGameLinkAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
 /**
  * Absent when the game is no longer open.
  */
