@@ -85,7 +85,7 @@ fn start_picture() -> Value {
         "canUndo": false, "canRedo": false, "inVariation": false, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
         "file": null, "unsaved": false,
-        "startComments": [], "moveSymbol": null, "positionSymbol": null,
+        "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": null, "place": [], "notation": []
     })
 }
@@ -99,7 +99,7 @@ fn after_e4() -> Value {
         "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
         "file": null, "unsaved": true,
-        "startComments": [], "moveSymbol": null, "positionSymbol": null,
+        "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": {"from": "e2", "to": "e4"}, "place": [0],
         "notation": [{"place": [0], "number": 1, "side": "white", "text": "e4",
                       "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": []}]
@@ -107,6 +107,15 @@ fn after_e4() -> Value {
 }
 
 fn after_c5_in_variation() -> Value {
+    let notation = json!([
+        {"place": [0], "number": 1, "side": "white", "text": "e4",
+         "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": []},
+        {"place": [0, 0], "number": 1, "side": "black", "text": "e5",
+         "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": [
+            [{"place": [0, 1], "number": 1, "side": "black", "text": "c5",
+              "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": []}]
+        ]}
+    ]);
     json!({
         "fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
         "turn": "white", "inCheck": false,
@@ -115,17 +124,9 @@ fn after_c5_in_variation() -> Value {
         "canUndo": true, "canRedo": false, "inVariation": true, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
         "file": null, "unsaved": true,
-        "startComments": [], "moveSymbol": null, "positionSymbol": null,
+        "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": {"from": "c7", "to": "c5"}, "place": [0, 1],
-        "notation": [
-            {"place": [0], "number": 1, "side": "white", "text": "e4",
-             "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": []},
-            {"place": [0, 0], "number": 1, "side": "black", "text": "e5",
-             "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": [
-                [{"place": [0, 1], "number": 1, "side": "black", "text": "c5",
-                  "commentsBefore": [], "commentsAfter": [], "symbols": [], "variations": []}]
-            ]}
-        ]
+        "notation": notation
     })
 }
 
@@ -318,6 +319,7 @@ fn comments_and_symbols_follow_the_current_move() -> serde_json::Result<()> {
     let mut games = Games::default();
     play_line(&mut games, "e2e4")?;
     let mut expected = after_e4();
+    expected["comment"] = json!("Best by test");
     expected["notation"][0]["commentsAfter"] = json!(["Best by test"]);
     for text in ["Best by test", "invalid }"] {
         assert_picture(
@@ -352,6 +354,7 @@ fn comments_and_symbols_follow_the_current_move() -> serde_json::Result<()> {
         json!({"type": "GoTo", "game": 1, "place": []}),
         &start,
     )?;
+    start["comment"] = json!("Start");
     start["notation"][0]["commentsBefore"] = json!(["Start"]);
     assert_picture(
         &mut games,
@@ -379,6 +382,7 @@ fn comments_and_symbols_follow_the_current_move() -> serde_json::Result<()> {
         json!({"type": "SetPositionSymbol", "game": 1, "symbol": null}),
         &expected,
     )?;
+    expected["comment"] = json!("");
     expected["notation"][0]["commentsAfter"] = json!([]);
     assert_picture(
         &mut games,
@@ -401,6 +405,7 @@ fn shapes_follow_the_current_place_and_leave_the_move_comment_readable() -> serd
                "arrows": expected["arrows"]}),
         &expected,
     )?;
+    expected["comment"] = json!("Center");
     expected["notation"][0]["commentsAfter"] = json!(["Center"]);
     assert_picture(
         &mut games,
@@ -447,6 +452,7 @@ fn the_start_of_an_empty_game_has_a_comment_and_refuses_symbols() -> serde_json:
     ask(&mut games, json!({"type": "NewGame"}))?;
     let mut start = start_picture();
     start["canUndo"] = json!(true);
+    start["comment"] = json!("Start");
     start["startComments"] = json!(["Start"]);
     start["unsaved"] = json!(true);
     assert_picture(
@@ -481,7 +487,7 @@ fn the_board_offers_one_promotion_and_the_player_chooses_the_piece() -> serde_js
         "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
         "tags": [], "result": "unknown", "squares": [], "arrows": [],
         "file": null, "unsaved": true,
-        "startComments": [], "moveSymbol": null, "positionSymbol": null,
+        "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": {"from": "a6", "to": "a5"}, "place": [0, 0, 0, 0, 0, 0, 0, 0],
         "notation": main_line("h4 g5 hxg5 h6 gxh6 a6 h7 a5")
     }});
@@ -500,7 +506,7 @@ fn the_board_offers_one_promotion_and_the_player_chooses_the_piece() -> serde_js
             "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
             "tags": [], "result": "unknown", "squares": [], "arrows": [],
             "file": null, "unsaved": true,
-            "startComments": [], "moveSymbol": null, "positionSymbol": null,
+            "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
             "lastMove": {"from": "h7", "to": "g8"}, "place": [0, 0, 0, 0, 0, 0, 0, 0, 0],
             "notation": main_line("h4 g5 hxg5 h6 gxh6 a6 h7 a5 hxg8=N")
         }})
@@ -524,7 +530,7 @@ fn both_castling_gestures_give_the_same_picture_and_the_board_offers_one() -> se
                 "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
                 "tags": [], "result": "unknown", "squares": [], "arrows": [],
                 "file": null, "unsaved": true,
-                "startComments": [], "moveSymbol": null, "positionSymbol": null,
+                "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
                 "lastMove": {"from": "f8", "to": "c5"}, "place": [0, 0, 0, 0, 0, 0],
                 "notation": main_line("e4 e5 Nf3 Nc6 Bc4 Bc5")
             }})
@@ -540,7 +546,7 @@ fn both_castling_gestures_give_the_same_picture_and_the_board_offers_one() -> se
                 "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
                 "tags": [], "result": "unknown", "squares": [], "arrows": [],
                 "file": null, "unsaved": true,
-                "startComments": [], "moveSymbol": null, "positionSymbol": null,
+                "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
                 "lastMove": {"from": "e1", "to": "g1"}, "place": [0, 0, 0, 0, 0, 0, 0],
                 "notation": main_line("e4 e5 Nf3 Nc6 Bc4 Bc5 O-O")
             }})
@@ -560,7 +566,7 @@ fn a_mated_side_is_in_check_and_has_no_legal_move() -> serde_json::Result<()> {
             "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
             "tags": [], "result": "unknown", "squares": [], "arrows": [],
             "file": null, "unsaved": true,
-            "startComments": [], "moveSymbol": null, "positionSymbol": null,
+            "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
             "lastMove": {"from": "h5", "to": "f7"}, "place": [0, 0, 0, 0, 0, 0, 0],
             "notation": main_line("e4 e5 Qh5 Nc6 Bc4 Nf6 Qxf7#")
         }})

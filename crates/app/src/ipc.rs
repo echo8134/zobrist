@@ -27,6 +27,7 @@ use shakmaty::{
 };
 use tauri::async_runtime::{Mutex, spawn_blocking};
 use ts_rs::TS;
+use zobrist_core::comment::MoveReadings;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
 use zobrist_core::game::{Game, GameBuilder, MainLine, Move};
 use zobrist_core::pgn::{self, Entry};
@@ -704,6 +705,7 @@ pub struct GamePicture {
     current: CurrentPlace,
     #[serde(flatten)]
     shapes: BoardShapes,
+    comment: String,
     can_undo: bool,
     can_redo: bool,
     start_comments: Vec<String>,
@@ -727,6 +729,18 @@ struct CurrentPlace {
     last_move: Option<MoveSquares>,
     move_symbol: Option<MoveSymbol>,
     position_symbol: Option<PositionSymbol>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    evaluation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    clock: Option<RecordedClock>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+struct RecordedClock {
+    side: Side,
+    time: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -829,13 +843,27 @@ impl NotationMove {
         } else {
             node.comments_before().to_vec()
         };
+        let mut readings = MoveReadings::default();
+        let comments_after = node
+            .comments_after()
+            .iter()
+            .map(|comment| readings.read_comment(comment))
+            .filter(|text| !text.is_empty())
+            .collect();
+        if is_current {
+            current.evaluation = readings.evaluation;
+            current.clock = readings.clock.map(|time| RecordedClock {
+                side: before.turn().into(),
+                time,
+            });
+        }
         Self {
             place: place.0,
             number: before.fullmoves().get(),
             side: before.turn().into(),
             text: placed.step().notation().to_string(),
             comments_before,
-            comments_after: comment_texts(node.comments_after()),
+            comments_after,
             symbols,
             variations: placed
                 .variations()
@@ -851,6 +879,7 @@ impl NotationMove {
 impl GamePicture {
     fn from_editor(editor: &GameEditor, file: Option<&InFile>) -> Self {
         let position = editor.position();
+        let (comment, shapes) = editor.comment();
         let mut current = CurrentPlace {
             in_variation: editor.in_variation(),
             has_next_move: editor.has_next_move(),
@@ -892,7 +921,8 @@ impl GamePicture {
             in_check: position.is_check(),
             legal_moves,
             current,
-            shapes: BoardShapes::from(&editor.comment().1),
+            shapes: BoardShapes::from(&shapes),
+            comment,
             can_undo: editor.can_undo(),
             can_redo: editor.can_redo(),
             start_comments: match editor.game().main_line() {
@@ -1166,6 +1196,54 @@ mod tests {
             }
         })?;
         Ok(imported.unwrap())
+    }
+
+    #[test]
+    fn recorded_values_follow_the_selected_move_and_leave_its_comment_editable() -> io::Result<()> {
+        let mut editor = import(b"1. e4 {Centre. [%eval 0.34,18] [%clk 0:04:59]} e5 {[%clk 0:04:56]} (1... c5 {[%eval -0.25]}) 2. Nf3 *")?;
+        for (place, evaluation, clock, comment) in [
+            (
+                vec![0],
+                Some("+0.34"),
+                json!({"side":"white","time":"0:04:59"}),
+                "Centre. [%eval 0.34,18] [%clk 0:04:59]",
+            ),
+            (
+                vec![0, 0],
+                None,
+                json!({"side":"black","time":"0:04:56"}),
+                "[%clk 0:04:56]",
+            ),
+            (vec![0, 1], Some("-0.25"), json!(null), "[%eval -0.25]"),
+            (vec![0, 0, 0], None, json!(null), ""),
+            (vec![], None, json!(null), ""),
+        ] {
+            editor.go_to(Place(place)).unwrap();
+            let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
+            assert_eq!(picture["evaluation"], json!(evaluation));
+            assert_eq!(picture["clock"], clock);
+            assert_eq!(picture["comment"], comment);
+            assert_eq!(picture["notation"][0]["commentsAfter"], json!(["Centre."]));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_editable_comment_follows_the_move_or_the_starting_position() -> io::Result<()> {
+        let mut editor =
+            import(b"{A short game} 1. e4 {Best} {by test} e5 (1... c5 {Sicilian}) *")?;
+        for (place, comment) in [
+            (vec![], "A short game"),
+            (vec![0], "Best by test"),
+            (vec![0, 1], "Sicilian"),
+            (vec![0, 0], ""),
+        ] {
+            editor.go_to(Place(place)).unwrap();
+            assert_eq!(GamePicture::from_editor(&editor, None).comment, comment);
+        }
+        let empty = import(b"{Not} {played} *")?;
+        assert_eq!(GamePicture::from_editor(&empty, None).comment, "Not played");
+        Ok(())
     }
 
     #[test]
