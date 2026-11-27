@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::Response;
-use super::file_collection::{publish_collection, read_list};
+use super::file_collection::{list_recovery, publish_collection, read_list};
 
 /// Offline operations on the local account preference.
 #[derive(Deserialize, TS)]
@@ -62,9 +62,8 @@ impl AccountRequest {
 fn read(path: &Path) -> io::Result<Accounts> {
     read_list(
         path,
-        "account list",
-        "PGN files and online accounts",
-        "User",
+        "the account list",
+        &list_recovery("PGN files and online accounts", "User"),
         |bytes| Ok(serde_json::from_slice(bytes)?),
     )
 }

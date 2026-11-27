@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::file_collection::{lock_collection, publish_collection, read_list};
+use super::file_collection::{list_recovery, lock_collection, publish_collection, read_list};
 
 /// A change to the ordered inventory, or a request to read it.
 #[derive(Deserialize, TS)]
@@ -132,9 +132,8 @@ fn entry(path: PathBuf) -> io::Result<EngineEntry> {
 fn read(inventory: &Path) -> io::Result<Vec<EngineEntry>> {
     read_list(
         inventory,
-        "engine list",
-        "engine programs",
-        "Engines",
+        "the engine list",
+        &list_recovery("engine programs", "Engines"),
         |bytes| {
             let paths: Vec<PathBuf> = serde_json::from_slice(bytes)?;
             let mut distinct = HashSet::new();

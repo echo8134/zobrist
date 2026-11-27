@@ -9,29 +9,30 @@ async fn answer(
     games: State<'_, SharedGames>,
     window: Window,
 ) -> Result<Response, String> {
-    match request {
+    let data_directory = |window: &Window| {
+        window
+            .path()
+            .app_local_data_dir()
+            .map_err(std::io::Error::other)
+    };
+    let task = match request {
         DesktopRequest::Editor(request) => {
             return games
                 .answer(request)
                 .await
                 .map_err(|error| error.to_string());
         }
-        DesktopRequest::Collection(request) => {
-            spawn_blocking(move || request.answer(&window)).await
-        }
+        DesktopRequest::Collection(request) => spawn_blocking(move || request.answer(&window)),
         DesktopRequest::Account(request) => {
-            spawn_blocking(move || {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(std::io::Error::other)?;
-                request.answer(&directory)
-            })
-            .await
+            spawn_blocking(move || request.answer(&data_directory(&window)?))
         }
-    }
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+        DesktopRequest::Appearance(request) => {
+            spawn_blocking(move || request.answer(&data_directory(&window)?))
+        }
+    };
+    task.await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 fn main() -> tauri::Result<()> {
