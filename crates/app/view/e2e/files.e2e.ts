@@ -360,4 +360,30 @@ describe("the page Files", () => {
     await expect(pathLine(clean)).toBeDisplayed();
     expect(await cellTexts()).toEqual(cleanRows);
   });
+
+  it("clears the collection error after the list is restored and Files is reopened", async () => {
+    const files = () => browser.$("nav").$("aria/Files").click();
+    const home = () => browser.$("nav").$("aria/Home").click();
+    const { ZOBRIST_TEST_DATA: data } = process.env;
+    const collection = `${data}/io.github.echo8134.zobrist/files.json`;
+    await files();
+    await open(clean);
+    await expect(pathLine(clean)).toBeDisplayed();
+    await home();
+    const original = readFileSync(collection);
+    try {
+      writeFileSync(collection, "[[");
+      await files();
+      await expect(line()).toHaveText(
+        `Could not read the file collection at ${collection}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.`,
+      );
+    } finally {
+      writeFileSync(collection, original);
+    }
+
+    await home();
+    await files();
+    await expect(heading()).toHaveText("Files");
+    await expect(line()).not.toExist();
+  });
 });

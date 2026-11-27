@@ -52,7 +52,7 @@ type Kept = {
   roots: CollectionEntry[];
   expanded: Map<string, CollectionEntry[]>;
   selected: Selection | null;
-  error: string | null;
+  error: { source: "collection" | "selection"; message: string } | null;
 };
 
 // A board can be shown while a file is still being read. Its answer belongs to the
@@ -102,11 +102,14 @@ async function loadCollection() {
   try {
     const { entries } = await ask({ type: "GetFileCollection" });
     if (request === collectionRequest) {
-      keep({ roots: entries });
+      keep({
+        roots: entries,
+        error: kept.error?.source === "collection" ? null : kept.error,
+      });
     }
   } catch (error) {
     if (request === collectionRequest) {
-      keep({ error: errorText(error) });
+      keep({ error: { source: "collection", message: errorText(error) } });
     }
   }
 }
@@ -132,12 +135,15 @@ export async function readFileAgain() {
       if (answer.type === "File") {
         keep({ selected: { ...selected, file: answer }, error: null });
       } else {
-        keep({ selected: null, error: refusalText(answer) });
+        keep({
+          selected: null,
+          error: { source: "selection", message: refusalText(answer) },
+        });
       }
     }
   } catch (error) {
     if (kept.selected === selected && request === refreshRequest) {
-      keep({ error: errorText(error) });
+      keep({ error: { source: "selection", message: errorText(error) } });
     }
   }
 }
@@ -156,7 +162,7 @@ function failedSelection(
   if (request === selectionRequest) {
     keep({
       selected: previous?.kind === "Opening" ? null : previous,
-      error: errorText(error),
+      error: { source: "selection", message: errorText(error) },
     });
   }
 }
@@ -396,7 +402,7 @@ export function FilesPage({ onOpenGame }: Props) {
           )}
           {error && (
             <p className={`${line} ${refusal}`} role="status">
-              {error}
+              {error.message}
             </p>
           )}
           {selected?.kind === "Opening" && (

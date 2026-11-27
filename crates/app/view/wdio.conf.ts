@@ -13,6 +13,7 @@ const app: TauriCapabilities = {
 
 export const config: WebdriverIO.Config = {
   runner: "local",
+  runnerEnv: { ZOBRIST_TEST_DATA: data },
   // The caller provides the display. Without this line the runner would start one of its own.
   autoXvfb: false,
   specs: ["./e2e/*.e2e.ts"],
