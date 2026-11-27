@@ -59,7 +59,7 @@ export function GameDataForm({
           target.blur();
         }
         onCancel();
-      } else if (event.key === "Enter" && !inField) {
+      } else if (event.key === "Enter" && target === document.body) {
         event.preventDefault();
         onSave();
       }

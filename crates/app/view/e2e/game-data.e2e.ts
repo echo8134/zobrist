@@ -410,4 +410,32 @@ describe("the data of a game", () => {
     expect(await form().isDisplayed()).toBe(false);
     expect(fileText()).toBe('[White "Gamma"]\n\n1. e4 e5 *\n\n1. d4 *\n');
   });
+
+  it("cancels the first save when Enter is pressed on Cancel", async () => {
+    const before = fileText();
+    await browser.$("header").$("aria/New board").click();
+    await expect(tab(5)).toHaveAttribute("aria-selected", "true");
+    await playMove("c2", "c4");
+    await browser.keys(["Control", "s"]);
+    await expect(cancelButton()).toBeDisplayed();
+    await browser.execute("arguments[0].focus();", await cancelButton());
+    await expect(cancelButton()).toBeFocused();
+
+    // A synthetic Enter does not activate a button. Apply its default click only if
+    // the key reaches the focused button and the app leaves it uncancelled.
+    await browser.execute(`
+      const button = document.activeElement;
+      button.addEventListener("keydown", (event) => {
+        queueMicrotask(() => {
+          if (event.key === "Enter" && !event.defaultPrevented) button.click();
+        });
+      }, { once: true });
+    `);
+    await browser.keys("Enter");
+
+    await expect(showData()).toBeDisplayed();
+    expect(await form().isDisplayed()).toBe(false);
+    expect(fileText()).toBe(before);
+    await expect(tab(5).$("span:empty")).toExist();
+  });
 });
