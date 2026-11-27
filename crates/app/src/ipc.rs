@@ -3,12 +3,14 @@
 //! The view sends a [`DesktopRequest`] and gets back the [`Response`] case with the same name. The
 //! TypeScript types of the view are generated from these two types.
 
+mod accounts;
 mod database_collection;
 mod engines;
 mod file_collection;
 mod game_file;
 mod pgn_file;
 
+pub use accounts::AccountRequest;
 pub use database_collection::{DatabaseEntry, DatabaseRequest};
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
@@ -63,6 +65,11 @@ pub enum Request {
     OpenPgnText {
         /// The PGN to read.
         text: String,
+    },
+    /// Open a finished game from its public link.
+    OpenGameLink {
+        /// The link entered by the player.
+        link: String,
     },
     /// Get the current game as PGN text.
     GamePgn {
@@ -449,6 +456,18 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// The public Lichess name saved on this device.
+    GetLichessName {
+        /// Absent when the player has not saved a name.
+        name: Option<String>,
+    },
+    /// The name after trimming and saving.
+    SaveLichessName {
+        /// The exact name now on disk.
+        name: String,
+    },
+    /// The name has been removed from this device.
+    RemoveLichessName,
     /// The version of zobrist.
     Version {
         /// The version of this crate.
@@ -475,6 +494,11 @@ pub enum Response {
     OpenPgnText {
         /// Absent when the text contains no game.
         opened: Option<OpenedGame>,
+    },
+    /// The fetched game or the reason it could not be opened.
+    OpenGameLink {
+        /// The outcome of the fetch.
+        answer: OpenGameLinkAnswer,
     },
     /// The PGN text or the reason it could not be written.
     GamePgn(PgnExport),
@@ -644,6 +668,24 @@ pub struct OpenedGame {
     game: usize,
     picture: GamePicture,
     problem: Option<String>,
+}
+
+/// The result of opening a public game link.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "type")]
+pub enum OpenGameLinkAnswer {
+    /// The game was opened without a local file.
+    Opened {
+        /// The game's number for this run of the app.
+        game: usize,
+        /// The picture at the starting position.
+        picture: Box<GamePicture>,
+    },
+    /// The link did not produce a finished game.
+    Refused {
+        /// The reason to show the player.
+        reason: String,
+    },
 }
 
 /// The result of writing an open game to PGN.
@@ -959,18 +1001,18 @@ impl Games {
     }
 
     /// Answers a request one step after the other. The app does not call this, because it
-    /// would hold the lock on its games while a file is read. It calls
+    /// would hold the lock on its games during file or network I/O. It calls
     /// [`SharedGames::answer`].
     #[must_use]
     pub fn answer(&mut self, request: Request) -> Response {
         match self.begin(request) {
             FirstStep::Answer(response) => *response,
-            FirstStep::FileWork(work) => work()(self),
+            FirstStep::BlockingWork(work) => work()(self),
         }
     }
 
     /// Applies the view's request and builds its answer before another request can edit the
-    /// game. A request that works on a file only starts here.
+    /// game. A request that waits for I/O only starts here.
     fn begin(&mut self, request: Request) -> FirstStep {
         let response = match request {
             Request::Version => Response::Version {
@@ -997,6 +1039,7 @@ impl Games {
             Request::OpenPgnText { text } => Response::OpenPgnText {
                 opened: self.open_pgn(&text),
             },
+            Request::OpenGameLink { link } => return open_game_link(link),
             Request::GamePgn { game } => {
                 let open = self.open_games.get(&game);
                 Response::GamePgn(PgnExport::from_editor(open.map(|open| &open.editor)))
@@ -1065,22 +1108,41 @@ impl Games {
     }
 }
 
+fn open_game_link(link: String) -> FirstStep {
+    FirstStep::blocking_work(move || {
+        let fetched = zobrist_online::fetch_game(&link);
+        move |games: &mut Games| Response::OpenGameLink {
+            answer: match fetched {
+                Ok(fetched) => {
+                    let (game, picture) = games.open(fetched, None);
+                    OpenGameLinkAnswer::Opened {
+                        game,
+                        picture: Box::new(picture),
+                    }
+                }
+                Err(refusal) => OpenGameLinkAnswer::Refused {
+                    reason: refusal.to_string(),
+                },
+            },
+        }
+    })
+}
+
 /// How far a request got in its first step, which has the games.
 enum FirstStep {
     Answer(Box<Response>),
-    /// Work on a file. It needs no game and can take long, so it runs without the lock on the
-    /// games. What it returns is the last step, which has the games again.
-    FileWork(Box<dyn FnOnce() -> LastStep + Send>),
+    /// Only the final step of a file or network operation needs the games lock again.
+    BlockingWork(Box<dyn FnOnce() -> LastStep + Send>),
 }
 
 type LastStep = Box<dyn FnOnce(&mut Games) -> Response + Send>;
 
 impl FirstStep {
-    fn file_work<Last>(work: impl FnOnce() -> Last + Send + 'static) -> Self
+    fn blocking_work<Last>(work: impl FnOnce() -> Last + Send + 'static) -> Self
     where
         Last: FnOnce(&mut Games) -> Response + Send + 'static,
     {
-        Self::FileWork(Box::new(move || Box::new(work())))
+        Self::BlockingWork(Box::new(move || Box::new(work())))
     }
 }
 
@@ -1093,7 +1155,7 @@ pub struct SharedGames {
 
 impl SharedGames {
     /// Answers a request. It holds the lock on the games only for the steps that touch them.
-    /// Work on a file runs between those steps, on a thread that may wait.
+    /// File and network I/O run between those steps, on a thread that may wait.
     pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
         // A save publishes its file whole. Two saves into one file that overlap would each
         // publish it without the game of the other, so a save waits for the save before it.
@@ -1109,7 +1171,7 @@ impl SharedGames {
         let first = self.games.lock().await.begin(request);
         match first {
             FirstStep::Answer(response) => Ok(*response),
-            FirstStep::FileWork(work) => {
+            FirstStep::BlockingWork(work) => {
                 let last = spawn_blocking(work).await?;
                 Ok(last(&mut *self.games.lock().await))
             }

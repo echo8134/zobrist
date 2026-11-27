@@ -90,6 +90,7 @@
 
 .status {
   margin-left: auto;
+  overflow-wrap: anywhere;
   text-align: end;
 }
 
@@ -107,4 +108,44 @@
 .description {
   margin: 0 var(--user-row-inset) var(--user-detail-gap)
     calc(var(--user-row-inset) + var(--user-piece-size) + var(--user-row-gap));
+}
+
+.nameForm {
+  display: grid;
+  gap: var(--game-data-name-gap);
+  margin: 0 var(--user-row-inset) var(--user-detail-gap)
+    calc(var(--user-row-inset) + var(--user-piece-size) + var(--user-row-gap));
+}
+
+.nameForm input {
+  width: 100%;
+  height: var(--field-height);
+  padding: var(--field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
+  color: inherit;
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  gap: var(--user-row-gap);
+  margin-top: var(--user-caption-gap);
+}
+
+.actions button {
+  height: var(--button-height);
+  padding: var(--button-padding);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+}
+.actions button:disabled {
+  color: var(--dim-icon-button-color);
+}
+
+.refusal {
+  color: var(--refusal-color);
 }
