@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { browser, expect } from "@wdio/globals";
 import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
+import { nativeKey } from "./native-key";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
@@ -95,19 +95,12 @@ async function expectPanelTools() {
   expect(await notation().isDisplayed()).toBe(false);
 }
 
-function nativeKey(action: "copy" | "paste" | "copy-selection") {
-  execFileSync("python3", [
-    fileURLToPath(new URL("./clipboard-key.py", import.meta.url)),
-    action,
-  ]);
-}
-
 async function copyFrom(name: string) {
   const button = await named(name).getElement();
   await expect(button).toBeEnabled();
   await browser.execute("arguments[0].focus()", button);
   await expect(button).toBeFocused();
-  nativeKey("copy");
+  nativeKey("enter");
   return button;
 }
 
