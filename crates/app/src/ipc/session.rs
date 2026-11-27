@@ -202,19 +202,19 @@ impl ReopenedBoards {
             None => Some("Could not read the board session.".to_owned()),
         };
         if let Some(problem) = problem {
-            restored.warning = Some(if let Ok(backup) = preserve_original(&path) {
-                format!(
-                    "{problem} The original file was kept at {}.",
-                    backup.display()
-                )
+            let location = if let Ok(backup) = preserve_original(&path) {
+                format!("The original file was kept at {}.", backup.display())
             } else {
-                let warning = format!(
-                    "{problem} The original file could not be moved and is still at {}.",
+                let location = format!(
+                    "The original file could not be moved and is still at {}.",
                     path.display()
                 );
                 restored.pending_backup = Some(path);
-                warning
-            });
+                location
+            };
+            restored.warning = Some(format!(
+                "{problem} {location} Your PGN files are untouched. You can open a board and keep playing."
+            ));
         }
         restored
     }

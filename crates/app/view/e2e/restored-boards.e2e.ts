@@ -148,7 +148,7 @@ describe("boards after quitting and starting zobrist", function () {
     await runApp(work, async (app) => {
       await expectHome(app);
       await expect(app.$('[role="alert"]')).toHaveText(
-        `Could not read the board session. The original file was kept at ${firstBackup}.`,
+        `Could not read the board session. The original file was kept at ${firstBackup}. Your PGN files are untouched. You can open a board and keep playing.`,
       );
       await newBoard(app);
       await expect(selected(app)).toHaveText("New game");
@@ -169,7 +169,7 @@ describe("boards after quitting and starting zobrist", function () {
       await expect(tabs(app)).toBeElementsArrayOfSize(1);
       await expectMove(app, "d4");
       await expect(app.$('[role="alert"]')).toHaveText(
-        `2 boards could not be reopened. The original file was kept at ${secondBackup}.`,
+        `2 boards could not be reopened. The original file was kept at ${secondBackup}. Your PGN files are untouched. You can open a board and keep playing.`,
       );
     });
     expect(readFileSync(firstBackup, "utf8")).toBe(truncated);

@@ -225,7 +225,7 @@ fn a_truncated_session_keeps_its_bytes_beside_earlier_backups_and_allows_a_norma
     assert_eq!(
         restore(&games, &directory)?,
         json!({"type":"RestoreBoards","boards":[],"selected":null,"warning":format!(
-            "Could not read the board session. The original file was kept at {}.", backup.display())})
+            "Could not read the board session. The original file was kept at {}. Your PGN files are untouched. You can open a board and keep playing.", backup.display())})
     );
     assert!(games.is_restored());
     assert!(!directory.join("boards.json").exists());
@@ -265,7 +265,7 @@ fn bad_boards_leave_readable_boards_in_order_with_the_saved_selection() -> io::R
         assert_eq!(
             answer["warning"],
             format!(
-                "{lost} could not be reopened. The original file was kept at {}.",
+                "{lost} could not be reopened. The original file was kept at {}. Your PGN files are untouched. You can open a board and keep playing.",
                 backup.display()
             )
         );
@@ -294,7 +294,7 @@ fn bad_boards_leave_readable_boards_in_order_with_the_saved_selection() -> io::R
     assert_eq!(
         restore(&SharedGames::default(), &directory)?,
         json!({"type":"RestoreBoards","boards":[],"selected":null,"warning":format!(
-            "1 board could not be reopened. The original file was kept at {}.", backup.display())})
+            "1 board could not be reopened. The original file was kept at {}. Your PGN files are untouched. You can open a board and keep playing.", backup.display())})
     );
     assert_eq!(fs::read(backup)?, original);
     fs::remove_dir_all(directory)
@@ -315,7 +315,7 @@ fn an_invalid_selection_keeps_all_readable_boards() -> io::Result<()> {
         assert_eq!(
             answer["warning"],
             format!(
-                "Could not restore the selected board. The original file was kept at {}.",
+                "Could not restore the selected board. The original file was kept at {}. Your PGN files are untouched. You can open a board and keep playing.",
                 backup.display()
             )
         );
@@ -334,7 +334,7 @@ fn a_failed_backup_names_the_original_and_quit_retries_before_replacing_it() -> 
     assert_eq!(
         answer["warning"],
         format!(
-            "Could not read the board session. The original file could not be moved and is still at {}.",
+            "Could not read the board session. The original file could not be moved and is still at {}. Your PGN files are untouched. You can open a board and keep playing.",
             record.display()
         )
     );
@@ -365,7 +365,7 @@ fn a_dangling_session_link_is_preserved_as_a_link() -> io::Result<()> {
     assert_eq!(
         restore(&games, &directory)?,
         json!({"type":"RestoreBoards","boards":[],"selected":null,"warning":format!(
-            "Could not read the board session. The original file was kept at {}.", backup.display())})
+            "Could not read the board session. The original file was kept at {}. Your PGN files are untouched. You can open a board and keep playing.", backup.display())})
     );
     quit(&games, &directory, &[], None)?;
     assert_eq!(fs::read_link(backup)?, Path::new("missing-target"));
