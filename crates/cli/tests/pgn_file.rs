@@ -115,6 +115,26 @@ fn adds_after_an_unterminated_game_and_keeps_games_with_problems() -> io::Result
 }
 
 #[test]
+fn adding_games_refuses_an_open_comment_and_preserves_the_target() -> io::Result<()> {
+    let target = temporary_path("open-comment");
+    let old = b"1. d4 {unfinished";
+    fs::write(&target, old)?;
+    let reason = format!(
+        "zobrist: cannot add games to {}: the added games would not read back \
+         as separate games after the existing games\n",
+        target.display()
+    );
+    assert_output(
+        &pgn("add", &[&target, Path::new(CLEAN)])?,
+        2,
+        b"",
+        reason.as_bytes(),
+    );
+    assert_eq!(fs::read(&target)?, old);
+    fs::remove_file(target)
+}
+
+#[test]
 fn file_failures_name_the_path_and_preserve_the_target() -> io::Result<()> {
     let target = temporary_path("failure");
     let absent = Path::new("missing-source.pgn");
