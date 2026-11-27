@@ -62,12 +62,24 @@ async function choose(app: WebdriverIO.Browser, label: string, text: string) {
   );
 }
 
-async function coordinates(app: WebdriverIO.Browser) {
-  return app.execute(`
-    const labels = (kind) => [...document.querySelectorAll("main coords." + kind + " coord")]
-      .filter(coord => coord.getClientRects().length).map(coord => coord.textContent).sort().join("");
-    return [labels("files"), labels("ranks")];
-  `);
+async function expectCoordinates(
+  app: WebdriverIO.Browser,
+  files: string,
+  ranks: string,
+) {
+  await app.waitUntil(
+    () =>
+      app.execute<boolean, [string, string]>(
+        `
+        const labels = (kind) => [...document.querySelectorAll("main coords." + kind + " coord")]
+          .filter(coord => coord.getClientRects().length).map(coord => coord.textContent).sort().join("");
+        return labels("files") === arguments[0] && labels("ranks") === arguments[1];
+      `,
+        files,
+        ranks,
+      ),
+    { timeoutMsg: `Expected board coordinates "${files}" and "${ranks}"` },
+  );
 }
 
 async function expectKnight(
@@ -97,9 +109,19 @@ async function expectChessnutBoard(app: WebdriverIO.Browser) {
     "cg-board piece.white.knight",
     "/pieces/chessnut/wN.svg",
   );
-  const palette = await app.$("cg-board").getCSSProperty("background-image");
-  expect(palette.value).toContain("rgb(238, 238, 210)");
-  expect(palette.value).toContain("rgb(118, 150, 86)");
+  await app.waitUntil(
+    async () => {
+      const { value } = await app
+        .$("cg-board")
+        .getCSSProperty("background-image");
+      return (
+        typeof value === "string" &&
+        value.includes("rgb(238, 238, 210)") &&
+        value.includes("rgb(118, 150, 86)")
+      );
+    },
+    { timeoutMsg: "Expected green board squares #eeeed2 and #769656" },
+  );
 }
 
 async function expectDefaultBoard(app: WebdriverIO.Browser) {
@@ -112,7 +134,7 @@ async function expectDefaultBoard(app: WebdriverIO.Browser) {
   );
   const colour = await board.getCSSProperty("background-color");
   expect(colour.parsed.hex).toBe("#f0d9b5");
-  expect(await coordinates(app)).toEqual(["abcdefgh", "12345678"]);
+  await expectCoordinates(app, "abcdefgh", "12345678");
 }
 
 describe("board appearance", () => {
@@ -145,7 +167,7 @@ describe("board appearance", () => {
       await control(app, "Show coordinates").click();
       await shownTab(app).click();
       await expectChessnutBoard(app);
-      expect(await coordinates(app)).toEqual(["", ""]);
+      await expectCoordinates(app, "", "");
       expect(await drawnBoard(app)).toEqual([
         "rnbqkbnr",
         "pppppppp",
@@ -159,13 +181,13 @@ describe("board appearance", () => {
       await openBoard(app, 2);
       await expectChessnutBoard(app);
       expect(await drawnBoard(app)).toEqual(startPositionWithWhiteAtBottom);
-      expect(await coordinates(app)).toEqual(["", ""]);
+      await expectCoordinates(app, "", "");
     });
 
     await withApp(data, async (app) => {
       await openBoard(app, 1);
       await expectChessnutBoard(app);
-      expect(await coordinates(app)).toEqual(["", ""]);
+      await expectCoordinates(app, "", "");
       const image = await app.saveScreenshot(
         `${target}/e2e/board-appearance.png`,
       );
@@ -179,7 +201,7 @@ describe("board appearance", () => {
       await control(app, "Show coordinates").click();
       await shownTab(app).click();
       await expectChessnutBoard(app);
-      expect(await coordinates(app)).toEqual(["abcdefgh", "12345678"]);
+      await expectCoordinates(app, "abcdefgh", "12345678");
       await app.$("main").$("aria/Set up position").click();
       await expectKnight(
         app,
