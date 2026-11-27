@@ -178,6 +178,8 @@ fn download_validates_player_and_calendar_dates_before_contacting_lichess() -> i
 #[test]
 fn empty_and_failed_player_exports_preserve_existing_and_absent_files() -> io::Result<()> {
     let target = test_path("refused");
+    let open_comment =
+        r#"{"pgn":"[Event \"Open\"]\n[Variant \"Crazyhouse\"]\n\n1. N@e4 1-0 {open 1-0"}"#;
     for exists in [false, true] {
         if exists {
             fs::write(&target, ORIGINAL)?;
@@ -194,6 +196,12 @@ fn empty_and_failed_player_exports_preserve_existing_and_absent_files() -> io::R
             ),
             (
                 format!("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{JANUARY_31}\n{{}}\n"),
+                2,
+            ),
+            (
+                format!(
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{JANUARY_31}\n{open_comment}\n"
+                ),
                 2,
             ),
         ] {

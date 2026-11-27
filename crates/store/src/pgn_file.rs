@@ -35,7 +35,7 @@ impl PgnBatch {
         let mut entries = 0;
         let mut start = None;
         let marker = pgn.split_ascii_whitespace().next_back();
-        pgn::read_games(pgn.as_bytes(), |entry| {
+        pgn::read_export_record(pgn.as_bytes(), |entry| {
             entries += 1;
             if let Entry::Game {
                 game,
