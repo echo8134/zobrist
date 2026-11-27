@@ -11,7 +11,6 @@
   border: 0;
 }
 
-.button,
 .options button,
 .entryButton {
   display: inline-flex;
@@ -22,7 +21,6 @@
   cursor: pointer;
 }
 
-.button svg,
 .options svg,
 .entryButton svg {
   flex: none;
@@ -32,13 +30,7 @@
 }
 
 .button {
-  height: var(--button-height);
-  padding: var(--button-padding);
-  border: 1px solid var(--button-line-color);
-  border-radius: var(--button-corner-radius);
-  background-color: var(--button-background-color);
-  color: var(--button-color);
-  font: inherit;
+  composes: actionButton from global;
 }
 
 .options {
@@ -63,7 +55,6 @@
   text-align: left;
 }
 
-.button:hover,
 .options button:hover,
 .entryButton:hover,
 .list tbody tr:hover {

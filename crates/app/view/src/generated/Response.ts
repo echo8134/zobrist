@@ -4,6 +4,7 @@ import type { CollectionEntry } from "./CollectionEntry";
 import type { EngineEntry } from "./EngineEntry";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
+import type { OpenGameLinkAnswer } from "./OpenGameLinkAnswer";
 import type { OpenedGame } from "./OpenedGame";
 import type { PgnExport } from "./PgnExport";
 import type { PgnFileAnswer } from "./PgnFileAnswer";
@@ -14,7 +15,15 @@ import type { SaveGameAnswer } from "./SaveGameAnswer";
 /**
  * What Rust answers. Each case has the name of its request.
  */
-export type Response = { "type": "Version", 
+export type Response = { "type": "GetLichessName", 
+/**
+ * Absent when the player has not saved a name.
+ */
+name: string | null, } | { "type": "SaveLichessName", 
+/**
+ * The exact name now on disk.
+ */
+name: string, } | { "type": "RemoveLichessName" } | { "type": "Version", 
 /**
  * The version of this crate.
  */
@@ -38,7 +47,11 @@ change: PositionChange | null, } | { "type": "OpenPgnText",
 /**
  * Absent when the text contains no game.
  */
-opened: OpenedGame | null, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
+opened: OpenedGame | null, } | { "type": "OpenGameLink", 
+/**
+ * The outcome of the fetch.
+ */
+answer: OpenGameLinkAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
 /**
  * Absent when the game is no longer open.
  */

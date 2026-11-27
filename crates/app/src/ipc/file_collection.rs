@@ -9,9 +9,12 @@ use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
 
-use super::{EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Request, Response, pgn_file};
+use super::{
+    AccountRequest, EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Request, Response,
+    pgn_file,
+};
 
-/// The command routes game requests and desktop file requests to their owners.
+/// The command routes game, file and account requests to their owners.
 #[derive(Deserialize, TS)]
 #[serde(untagged)]
 #[ts(export)]
@@ -20,6 +23,8 @@ pub enum DesktopRequest {
     Editor(Request),
     /// Requests about the player's collection or the system picker.
     Collection(CollectionRequest),
+    /// Requests about the name saved on this device.
+    Account(AccountRequest),
 }
 
 /// A request about a desktop collection or its file picker.
