@@ -1,6 +1,5 @@
 import { ChevronDown } from "lucide-react";
 import { useId, useLayoutEffect, useState } from "react";
-import fileStyles from "./FilesPage.module.css";
 import styles from "./GameDataForm.module.css";
 import type { EditableTag } from "./generated/EditableTag";
 import type { GamePicture } from "./generated/GamePicture";
@@ -9,7 +8,6 @@ import { isSaveKey, type Tab, tagValue } from "./tabs";
 
 const { form, field, fieldName, control, refused, hint, choice, actions } =
   styles;
-const { button } = fileStyles;
 
 /** The fields in the order of the form, two in a row. */
 const fields = ["White", "Black", "Event", "Site", "Date", "Round"] as const;
@@ -123,10 +121,10 @@ export function GameDataForm({
       </div>
       {mode === "openToSave" && (
         <div className={actions}>
-          <button className={button} type="button" onClick={onSave}>
+          <button className="actionButton" type="button" onClick={onSave}>
             Save
           </button>
-          <button className={button} type="button" onClick={onCancel}>
+          <button className="actionButton" type="button" onClick={onCancel}>
             Cancel
           </button>
         </div>
