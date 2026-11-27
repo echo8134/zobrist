@@ -6,6 +6,7 @@
 mod file_collection;
 mod game_file;
 mod pgn_file;
+mod session;
 
 pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, DesktopRequest, EntryKind, PickerChoice,
@@ -13,9 +14,11 @@ pub use file_collection::{
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
+pub use session::{BoardPicture, SessionRequest};
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use shakmaty::{
@@ -445,6 +448,15 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// The boards in tab order after restoring the session.
+    RestoreBoards {
+        /// The games and their pictures at the saved places.
+        boards: Vec<BoardPicture>,
+        /// The selected runtime game number, when a board was selected.
+        selected: Option<usize>,
+    },
+    /// The session was written and the window can close.
+    QuitWithBoards,
     /// The version of zobrist.
     Version {
         /// The version of this crate.
@@ -619,15 +631,18 @@ pub enum PgnExport {
     },
 }
 
+fn pgn_text(game: &Game) -> io::Result<String> {
+    let mut bytes = Vec::new();
+    pgn::write_game(game, &mut bytes)?;
+    String::from_utf8(bytes).map_err(io::Error::other)
+}
+
 impl PgnExport {
     fn from_editor(editor: Option<&GameEditor>) -> Self {
         let Some(editor) = editor else {
             return Self::Text { text: None };
         };
-        let mut bytes = Vec::new();
-        match pgn::write_game(editor.game(), &mut bytes)
-            .and_then(|()| String::from_utf8(bytes).map_err(io::Error::other))
-        {
+        match pgn_text(editor.game()) {
             Ok(text) => Self::Text { text: Some(text) },
             Err(error) => Self::Error {
                 error: error.to_string(),
@@ -854,14 +869,14 @@ impl GamePicture {
 
 /// The open games of one run of the app.
 pub struct Games {
-    open_games: HashMap<usize, OpenGame>,
+    open_games: BTreeMap<usize, OpenGame>,
     next_number: usize,
 }
 
 impl Default for Games {
     fn default() -> Self {
         Self {
-            open_games: HashMap::new(),
+            open_games: BTreeMap::new(),
             next_number: 1,
         }
     }
@@ -869,15 +884,19 @@ impl Default for Games {
 
 impl Games {
     fn open(&mut self, game: Game, file: Option<InFile>) -> (usize, GamePicture) {
-        let number = self.next_number;
-        self.next_number = number.strict_add(1);
         let open = OpenGame {
             editor: GameEditor::new(game),
             file,
         };
         let picture = open.picture();
+        (self.insert(open), picture)
+    }
+
+    fn insert(&mut self, open: OpenGame) -> usize {
+        let number = self.next_number;
+        self.next_number = number.strict_add(1);
         self.open_games.insert(number, open);
-        (number, picture)
+        number
     }
 
     fn open_pgn(&mut self, text: &str) -> Option<OpenedGame> {
@@ -1046,6 +1065,7 @@ impl FirstStep {
 pub struct SharedGames {
     games: Mutex<Games>,
     one_save: Mutex<()>,
+    restored_selection: OnceLock<Option<usize>>,
 }
 
 impl SharedGames {
