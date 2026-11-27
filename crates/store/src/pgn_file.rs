@@ -20,7 +20,7 @@ pub fn add_pgn_games<E: From<io::Error>>(
 ) -> Result<u64, E> {
     let mut added = 0;
     let mut first = None;
-    let (mut staged, old_bytes) = stage_with_added(target, |append| {
+    let (mut staged, prefix_length) = stage_with_added(target, |append| {
         supply(&mut |game| {
             append(game)?;
             // Only the first game has to start a new game after bytes we did not write.
@@ -30,11 +30,11 @@ pub fn add_pgn_games<E: From<io::Error>>(
         })
     })?;
     if let Some(first) = first
-        && old_bytes > 0
+        && prefix_length > 0
     {
         staged.file.rewind()?;
         let mut old_games = 0;
-        pgn::read_games((&staged.file).take(old_bytes), |entry| {
+        pgn::read_games((&staged.file).take(prefix_length), |entry| {
             if matches!(entry, Entry::Game { .. }) {
                 old_games += 1;
             }
@@ -94,7 +94,7 @@ pub fn add_pgn_game(target: &Path, game: &Game) -> io::Result<NonZeroU64> {
     Ok(number)
 }
 
-/// Stages the target with the supplied games and returns the length of its original contents.
+/// Stages the target with the supplied games and returns the length of the prefix, including the separator.
 fn stage_with_added<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
@@ -107,7 +107,7 @@ fn stage_with_added<E: From<io::Error>>(
     };
     let mut staged = Staged::beside(destination, old.as_ref())?;
     let mut separator: &[u8] = b"";
-    let old_bytes = if let Some(mut old) = old {
+    let prefix_length = if let Some(mut old) = old {
         let length = io::copy(&mut old, &mut staged.file)?;
         if length > 0 {
             let mut tail = [0; 3];
@@ -123,7 +123,7 @@ fn stage_with_added<E: From<io::Error>>(
                 b"\n\n"
             };
         }
-        length
+        length + separator.len() as u64
     } else {
         0
     };
@@ -140,7 +140,7 @@ fn stage_with_added<E: From<io::Error>>(
     separator.ok_or_else(failed_write)?;
     output.flush()?;
     drop(output);
-    Ok((staged, old_bytes))
+    Ok((staged, prefix_length))
 }
 
 /// Replaces game `number` of a PGN file, counting from 1, and keeps every other byte of the

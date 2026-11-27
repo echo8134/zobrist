@@ -135,6 +135,29 @@ fn adding_games_refuses_an_open_comment_and_preserves_the_target() -> io::Result
 }
 
 #[test]
+fn adds_complete_games_after_a_bare_tag_name() -> io::Result<()> {
+    let target = temporary_path("bare-tag");
+    let source = Path::new(CLEAN);
+    let added = pgn("write", &[source])?.stdout;
+    for old in [
+        b"1. e4 *\n\n[Event".as_slice(),
+        b"1. e4 *\n\n[",
+        b"[Event",
+        b"[",
+    ] {
+        fs::write(&target, old)?;
+        assert_output(
+            &pgn("add", &[&target, source])?,
+            0,
+            b"games added: 2\n",
+            b"",
+        );
+        assert_eq!(fs::read(&target)?, [old, b"\n\n", &added].concat());
+    }
+    fs::remove_file(target)
+}
+
+#[test]
 fn file_failures_name_the_path_and_preserve_the_target() -> io::Result<()> {
     let target = temporary_path("failure");
     let absent = Path::new("missing-source.pgn");
