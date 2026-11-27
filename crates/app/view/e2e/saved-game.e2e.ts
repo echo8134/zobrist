@@ -33,6 +33,7 @@ const closeButton = (positionFromLeft: number) =>
 const tool = (name: string) => browser.$("main aside").$(`aria/${name}`);
 const refusedSave = () => browser.$('main aside [role="alert"]');
 const form = () => browser.$("main aside form");
+const commentField = () => browser.$("main aside").$("aria/Comment");
 
 /** The notation as text, with the current move in brackets. */
 async function notation() {
@@ -67,22 +68,6 @@ async function playMove(from: string, to: string) {
     async () => (await browser.$$("main aside li").length) === movesBefore + 1,
     { timeoutMsg: `the notation did not get the move ${from}${to}` },
   );
-}
-
-// The board works out the square under the mouse once per frame, so the mouse rests before
-// the button goes up.
-const oneFrame = 100;
-
-/** Marks a square the way a player does: a click of the right button on it. */
-async function markSquare(square: string) {
-  const onSquare = { origin: board(), ...(await fromMiddleOfBoard(square)) };
-  await browser
-    .action("pointer")
-    .move(onSquare)
-    .down({ button: 2 })
-    .pause(oneFrame)
-    .up({ button: 2 })
-    .perform();
 }
 
 async function showFilesPage() {
@@ -129,7 +114,7 @@ const secondGame = (white: string) => `[Event "Example"]
 [Black "Delta"]
 [Result "0-1"]
 
-1. f3 e5 2. g4 Qh4# {[%csl Gh4]} 0-1
+1. f3 e5 2. g4 Qh4# {Fool's mate} 0-1
 `;
 const newGame = `1. e4 e5 *
 `;
@@ -256,7 +241,8 @@ describe("the games of a file in tabs", () => {
     await browser.waitUntil(
       async () => (await notation()) === "1. f3 e5 2. g4 [Qh4#]",
     );
-    await markSquare("h4");
+    await commentField().setValue("Fool's mate");
+    await board().click(await fromMiddleOfBoard("a5"));
 
     await expect(dot(2)).toExist();
     await expect(tab(2)).toHaveAttribute(
@@ -502,5 +488,21 @@ describe("the games of a file in tabs", () => {
       ["1", "Alpha", "Beta", "1-0", "2024.01.01", "Example"],
     ]);
     await expect(tabs()).toBeElementsArrayOfSize(2);
+  });
+
+  it("saves with Ctrl+S a comment that is typed and not sent", async () => {
+    await browser.$("header").$("aria/New board").click();
+    await expect(tab(3)).toHaveAttribute("aria-selected", "true");
+    await playMove("e2", "e4");
+    await commentField().setValue("King's pawn");
+
+    await browser.keys(["Control", "s"]);
+
+    await browser.waitUntil(
+      async () => fileText() === `${firstGame}\n1. e4 {King's pawn} *\n`,
+      { timeoutMsg: "the file did not get the comment that the field held" },
+    );
+    await expect(dot(3)).not.toExist();
+    await expect(commentField()).toHaveValue("King's pawn");
   });
 });
