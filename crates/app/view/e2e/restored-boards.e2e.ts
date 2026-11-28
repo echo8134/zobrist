@@ -36,8 +36,12 @@ const selected = (app: WebdriverIO.Browser) =>
   app.$('header [role="tab"][aria-selected="true"]');
 const comment = (app: WebdriverIO.Browser) =>
   app.$("main aside").$("aria/Comment");
-const newBoard = (app: WebdriverIO.Browser) =>
-  app.$("header").$("aria/New board").click();
+async function newBoard(app: WebdriverIO.Browser) {
+  const before = await tabs(app).length;
+  await app.$("header").$("aria/New board").click();
+  await expect(tabs(app)).toBeElementsArrayOfSize(before + 1);
+  await expect(tabs(app)[before]).toHaveAttribute("aria-selected", "true");
+}
 
 async function expectHome(app: WebdriverIO.Browser) {
   await expect(app.$("main h1")).toHaveText("Home");

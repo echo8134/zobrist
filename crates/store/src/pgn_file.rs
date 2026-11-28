@@ -5,7 +5,8 @@ use std::num::NonZeroU64;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use zobrist_core::game::Game;
+use shakmaty::Outcome;
+use zobrist_core::game::{Game, Tag};
 use zobrist_core::pgn::{self, Entry};
 
 use crate::StagingDirectory;
@@ -639,7 +640,7 @@ fn copy_separator(
     Ok(())
 }
 
-/// What a list shows of one game of a PGN file.
+/// The numbered fields shown in a game list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PgnGameRow {
     /// The number of the game in its file, counting from 1.
@@ -661,9 +662,14 @@ impl PgnGameRow {
     /// space, so that every value stays in one field.
     #[must_use]
     pub fn new(number: u64, game: &Game) -> Self {
+        Self::from_tags(number, game.tags(), game.result())
+    }
+
+    pub(super) fn from_tags(number: u64, tags: &[Tag], result: Outcome) -> Self {
         let tag = |name| {
-            game.tag(name)
-                .unwrap_or("?")
+            tags.iter()
+                .find(|tag| tag.name == name)
+                .map_or("?", |tag| tag.value.as_str())
                 .replace("\r\n", " ")
                 .replace(['\r', '\n', '\t'], " ")
         };
@@ -671,7 +677,7 @@ impl PgnGameRow {
             number,
             white: tag("White"),
             black: tag("Black"),
-            result: game.result().to_string(),
+            result: result.to_string(),
             date: tag("Date"),
             event: tag("Event"),
         }

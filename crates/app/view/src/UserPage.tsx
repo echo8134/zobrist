@@ -1,6 +1,7 @@
 import { ChessKnight, ChessPawn, ChevronDown, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ask } from "./ipc";
+import { LichessDownload } from "./LichessDownload";
 import styles from "./UserPage.module.css";
 
 const {
@@ -28,7 +29,7 @@ const providers = [
     name: "Lichess",
     icon: ChessKnight,
     description:
-      "Once linking is available, you can sign in to Lichess from your browser to open your bookmarked games.",
+      "Download public games for your saved username. Dates are in UTC. Overlapping downloads can add the same game twice.",
   },
   {
     name: "Chess.com",
@@ -125,44 +126,47 @@ export function UserPage() {
               </summary>
               <p className={providerDescription}>{description}</p>
               {name === "Lichess" && (
-                <form
-                  className={nameForm}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    changeName(draft);
-                  }}
-                >
-                  <label htmlFor="lichess-username">Lichess username</label>
-                  <input
-                    id="lichess-username"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={draft}
-                    disabled={savedName === undefined || writing}
-                    onChange={(event) => {
-                      setDraft(event.target.value);
-                      setError("");
+                <>
+                  <form
+                    className={nameForm}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      changeName(draft);
                     }}
-                  />
-                  <div className={actions}>
-                    <button
-                      type="submit"
+                  >
+                    <label htmlFor="lichess-username">Lichess username</label>
+                    <input
+                      id="lichess-username"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={draft}
                       disabled={savedName === undefined || writing}
-                    >
-                      Save
-                    </button>
-                    {savedName != null && (
+                      onChange={(event) => {
+                        setDraft(event.target.value);
+                        setError("");
+                      }}
+                    />
+                    <div className={actions}>
                       <button
-                        type="button"
-                        disabled={writing}
-                        onClick={() => changeName(null)}
+                        type="submit"
+                        disabled={savedName === undefined || writing}
                       >
-                        Remove name
+                        Save
                       </button>
-                    )}
-                  </div>
-                  {savedName !== undefined && errorMessage}
-                </form>
+                      {savedName != null && (
+                        <button
+                          type="button"
+                          disabled={writing}
+                          onClick={() => changeName(null)}
+                        >
+                          Remove name
+                        </button>
+                      )}
+                    </div>
+                    {savedName !== undefined && errorMessage}
+                  </form>
+                  <LichessDownload savedName={savedName} writing={writing} />
+                </>
               )}
             </details>
           ))}

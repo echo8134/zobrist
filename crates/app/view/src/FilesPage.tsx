@@ -16,8 +16,10 @@ import {
 } from "react";
 import { EarlierStates, FileConfirmation } from "./EarlierStates";
 import styles from "./FilesPage.module.css";
+import { GameRows } from "./GameRows";
 import type { ChangedGameFile } from "./generated/ChangedGameFile";
 import type { CollectionEntry } from "./generated/CollectionEntry";
+import type { CollectionRequest } from "./generated/CollectionRequest";
 import type { FileCollection } from "./generated/FileCollection";
 import type { GameRow } from "./generated/GameRow";
 import type { PgnFile } from "./generated/PgnFile";
@@ -101,6 +103,9 @@ const refusals: Record<RefusalReason, string> = {
   cannotRead: "This file cannot be opened.",
   existsAlready: "This file exists already.",
   cannotCreate: "This file cannot be created.",
+  oneFileAtATime: "Drop one PGN file at a time.",
+  droppedFolder: "To open a folder, use the Folder… option under Open.",
+  notPgn: "Drop a file with the .pgn extension.",
 };
 
 function refusalText(answer: Extract<PgnFileAnswer, { type: "Refusal" }>) {
@@ -173,21 +178,34 @@ export async function readFileAgain() {
   }
 }
 
+type SelectionRequest = number | Extract<Selection, { kind: "Opening" }>;
+
+function isCurrentSelection(request: SelectionRequest) {
+  // A refused drop leaves an in-flight open in control of its selection.
+  return typeof request === "number"
+    ? request === selectionRequest
+    : request === kept.selected;
+}
+
 function beginSelection(path: string) {
-  const request = ++selectionRequest;
-  keep({ selected: { kind: "Opening", path }, selectionError: null });
-  return request;
+  ++selectionRequest;
+  const opening = { kind: "Opening", path } as const;
+  keep({ selected: opening, selectionError: null });
+  return opening;
 }
 
 function failedSelection(
-  request: number,
-  previous: Selection | null,
+  request: SelectionRequest,
   error: unknown,
+  previous?: Selection | null,
 ) {
-  if (request === selectionRequest) {
+  if (isCurrentSelection(request)) {
+    const fallback = previous?.kind === "Opening" ? null : previous;
     keep({
-      selected: previous?.kind === "Opening" ? null : previous,
-      selectionError: errorText(error),
+      selected: fallback === undefined ? kept.selected : fallback,
+      selectionError:
+        (typeof request !== "number" && kept.selectionError) ||
+        errorText(error),
     });
   }
 }
@@ -231,7 +249,7 @@ export async function openListed(
         type: "ReadPgnFolder",
         path: entry.path,
       });
-      if (request === selectionRequest) {
+      if (isCurrentSelection(request)) {
         keep({
           expanded: new Map(kept.expanded).set(entry.path, entries),
           selected: { kind: "Folder", entry, root },
@@ -243,59 +261,73 @@ export async function openListed(
         path: entry.path,
       });
       if (answer.type === "Refusal") {
-        failedSelection(
-          request,
-          {
-            kind: "Unreadable",
-            path: entry.path,
-            listed: { entry, root },
-          },
-          refusalText(answer),
-        );
+        failedSelection(request, refusalText(answer), {
+          kind: "Unreadable",
+          path: entry.path,
+          listed: { entry, root },
+        });
         return;
       }
       fileWasOpened();
-      if (request === selectionRequest) {
+      if (isCurrentSelection(request)) {
         keep({ selected: { kind: "File", entry, root, file: answer } });
       }
     }
   } catch (error) {
-    failedSelection(request, entry.kind === "File" ? null : previous, error);
+    failedSelection(request, error, entry.kind === "File" ? null : previous);
   }
 }
 
-async function pick(choice: PickerChoice, chosenPath?: string) {
-  const previous = kept.selected;
-  const folder = previous?.kind === "Folder" ? previous.entry.path : null;
-  let request = selectionRequest;
-  try {
-    const path =
-      chosenPath ?? (await ask({ type: "PickPgnPath", choice, folder })).path;
-    if (path === null) return;
-    if (request === selectionRequest) request = beginSelection(path);
+export type DroppedPaths = Pick<
+  Extract<CollectionRequest, { type: "DropPgnPaths" }>,
+  "paths"
+>;
 
-    const { answer } = await ask({ type: "AddPgnPath", choice, path, folder });
-    if (choice === "File" && answer.type === "File") fileWasOpened();
+export async function openPgnPath(
+  input: PickerChoice | DroppedPaths,
+  chosenPath?: string,
+) {
+  const previous = kept.selected;
+  let fallback: Selection | null | undefined;
+  let request: SelectionRequest = selectionRequest;
+  try {
+    let operation: Extract<
+      CollectionRequest,
+      { type: "AddPgnPath" | "DropPgnPaths" }
+    >;
+    if (typeof input === "string") {
+      fallback = input === "File" ? null : previous;
+      const folder = previous?.kind === "Folder" ? previous.entry.path : null;
+      const choice = input;
+      const path =
+        chosenPath ?? (await ask({ type: "PickPgnPath", choice, folder })).path;
+      if (path === null) return;
+      if (request === selectionRequest) request = beginSelection(path);
+      operation = { type: "AddPgnPath", choice, path, folder };
+    } else {
+      request = ++selectionRequest;
+      ++refreshRequest;
+      keep({ selectionError: null });
+      operation = { type: "DropPgnPaths", paths: input.paths };
+    }
+    const { answer } = await ask(operation);
+    if (input !== "New" && answer.type === "File") fileWasOpened();
     if (answer.type === "Refusal") {
-      const keepOnRefusal: Selection | null =
-        choice === "File"
-          ? { kind: "Unreadable", path, listed: null }
-          : previous;
-      failedSelection(request, keepOnRefusal, refusalText(answer));
-    } else if (request === selectionRequest) {
+      if (operation.type === "AddPgnPath" && operation.choice === "File") {
+        fallback = { kind: "Unreadable", path: operation.path, listed: null };
+      }
+      failedSelection(request, refusalText(answer), fallback);
+    } else if (isCurrentSelection(request)) {
       const { entry } = answer;
       const fileCollection: FileCollection = {
         type: "Ready",
         entries: answer.entries,
       };
       const expanded = new Map(kept.expanded);
+      let selected: Selection;
       if (answer.type === "Folder") {
         expanded.set(entry.path, answer.children);
-        keep({
-          fileCollection,
-          expanded,
-          selected: { kind: "Folder", entry, root: entry.path },
-        });
+        selected = { kind: "Folder", entry, root: entry.path };
       } else {
         if (answer.parent !== null)
           expanded.set(answer.parent.path, answer.parent.entries);
@@ -303,15 +335,18 @@ async function pick(choice: PickerChoice, chosenPath?: string) {
           answer.parent !== null && previous?.kind === "Folder"
             ? previous.root
             : entry.path;
-        keep({
-          fileCollection,
-          expanded,
-          selected: { kind: "File", entry, root, file: answer.file },
-        });
+        selected = { kind: "File", entry, root, file: answer.file };
       }
+      keep({
+        fileCollection,
+        expanded,
+        selected,
+        selectionError:
+          typeof request === "number" ? null : kept.selectionError,
+      });
     }
   } catch (error) {
-    failedSelection(request, choice === "File" ? null : previous, error);
+    failedSelection(request, error, fallback);
   }
   // A failed open can be the first sign that the collection on disk needs recovery.
   await loadCollection();
@@ -325,7 +360,7 @@ async function rereadAfterRestore(path: string) {
     if (selected.listed) {
       await openListed(selected.listed.entry, selected.listed.root);
     } else {
-      await pick("File", path);
+      await openPgnPath("File", path);
     }
   }
 }
@@ -467,7 +502,7 @@ export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
                 type="button"
                 onClick={() => {
                   setChoosing(false);
-                  void pick("File");
+                  void openPgnPath("File");
                 }}
               >
                 <FileText aria-hidden="true" />
@@ -477,7 +512,7 @@ export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
                 type="button"
                 onClick={() => {
                   setChoosing(false);
-                  void pick("Folder");
+                  void openPgnPath("Folder");
                 }}
               >
                 <Folder aria-hidden="true" />
@@ -489,7 +524,7 @@ export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
         <button
           className={button}
           type="button"
-          onClick={() => void pick("New")}
+          onClick={() => void openPgnPath("New")}
         >
           New PGN…
         </button>
@@ -604,52 +639,35 @@ export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
                     <th scope="col">Event</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {file.rows.map((row) => (
-                    <tr
-                      key={row.number}
-                      onClick={() => void open(file.path, row.number)}
-                    >
-                      <td>
+                <GameRows
+                  rows={file.rows}
+                  open={(number) => void open(file.path, number)}
+                  renderEvent={(row) => (
+                    <div className={gameActions}>
+                      <span>{row.event}</span>
+                      {version !== undefined && (
                         <button
                           type="button"
-                          aria-label={`Open game ${row.number}`}
+                          className={deleteGame}
+                          aria-label={`Delete game ${row.number}`}
+                          title={`Delete game ${row.number}`}
+                          disabled={deletion === "pending"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeletion({
+                              path: file.path,
+                              version,
+                              row,
+                              selectionRequest,
+                            });
+                          }}
                         >
-                          {row.number}
+                          <Trash2 aria-hidden="true" />
                         </button>
-                      </td>
-                      <td>{row.white}</td>
-                      <td>{row.black}</td>
-                      <td>{row.result}</td>
-                      <td>{row.date}</td>
-                      <td>
-                        <div className={gameActions}>
-                          <span>{row.event}</span>
-                          {version !== undefined && (
-                            <button
-                              type="button"
-                              className={deleteGame}
-                              aria-label={`Delete game ${row.number}`}
-                              title={`Delete game ${row.number}`}
-                              disabled={deletion === "pending"}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setDeletion({
-                                  path: file.path,
-                                  version,
-                                  row,
-                                  selectionRequest,
-                                });
-                              }}
-                            >
-                              <Trash2 aria-hidden="true" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+                      )}
+                    </div>
+                  )}
+                />
               </table>
               {deletion &&
                 deletion !== "pending" &&

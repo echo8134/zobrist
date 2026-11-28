@@ -9,8 +9,8 @@ use tauri::{Manager as _, Window};
 use ts_rs::TS;
 use zobrist_store::{Database, ImportError, OpenError, import_pgn};
 
-use super::Response;
 use super::file_collection::{list_recovery, lock_collection, publish_collection, read_list};
+use super::{DatabaseGameQuery, Response};
 
 /// One local collection in the Databases list.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -25,6 +25,13 @@ pub struct DatabaseEntry {
 pub enum DatabaseRequest {
     /// List saved references, including files that have moved.
     ListDatabases,
+    /// Browse the rows of one native collection.
+    ListDatabaseGames {
+        /// The collection on this device.
+        path: PathBuf,
+        /// The filters, ordering and page chosen by the player.
+        query: DatabaseGameQuery,
+    },
     /// Verify the chosen database and keep its location.
     AddDatabase {
         /// The absolute path chosen by the player.
@@ -65,6 +72,7 @@ impl DatabaseRequest {
             Self::ListDatabases => Ok(Response::ListDatabases {
                 entries: entries(&paths(&catalog)?)?,
             }),
+            Self::ListDatabaseGames { path, query } => query.list(&path),
             Self::AddDatabase { path } => {
                 let games = game_count(&path)?;
                 let entries = update(directory, &catalog, |paths| paths.insert(path))?;
@@ -145,15 +153,22 @@ fn file_name(path: &Path) -> io::Result<&str> {
 }
 
 fn game_count(path: &Path) -> io::Result<u64> {
+    Ok(open_database(path)?.game_count())
+}
+
+pub(super) fn open_database(path: &Path) -> io::Result<Database> {
     file_name(path)?;
-    let database = Database::open(path).map_err(|error| match error {
+    Database::open(path).map_err(database_error)
+}
+
+pub(super) fn database_error(error: OpenError) -> io::Error {
+    match error {
         OpenError::NotDatabase => io::Error::new(ErrorKind::InvalidData, "Not a zobrist database"),
         OpenError::Read(error) => io::Error::new(error.kind(), "File unavailable"),
         error @ (OpenError::Damaged | OpenError::Version { .. }) => {
             io::Error::new(ErrorKind::InvalidData, error)
         }
-    })?;
-    Ok(database.game_count())
+    }
 }
 
 fn paths(catalog: &Path) -> io::Result<BTreeSet<PathBuf>> {

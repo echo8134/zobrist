@@ -15,6 +15,8 @@ export function ask<Asked extends Request>(
   const answer = invoke<Extract<Response, { type: Asked["type"] }>>("answer", {
     request,
   });
+  // A read-only lookup can outlive a save or the board that requested it.
+  if (request.type === "LookupTablebase") return answer;
   const game = "game" in request ? request.game : undefined;
   // A fetched link joins the session when its answer opens the tab.
   const changesBoards =
@@ -22,6 +24,7 @@ export function ask<Asked extends Request>(
       ? request.type === "NewGame" ||
         request.type === "OpenPgnText" ||
         request.type === "OpenGame" ||
+        request.type === "OpenDatabaseGame" ||
         request.type === "DeletePgnGame" ||
         request.type === "CheckpointBoards"
       : request.type !== "GamePgn" && request.type !== "Analysis";
