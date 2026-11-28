@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { withApp } from "./app-session";
+import { visitPage } from "./desktop-session";
 import { answerNextPicker } from "./file-picker";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -89,8 +89,7 @@ describe("import a PGN into a local collection", () => {
   afterEach(() => rmSync(directory, { recursive: true, force: true }));
 
   function onDatabases(check: (app: WebdriverIO.Browser) => Promise<void>) {
-    return withApp(join(directory, "data"), async (app) => {
-      await app.$("nav").$("aria/Databases").click();
+    return visitPage(directory, "Databases", async (app) => {
       await expect(app.$("button=Import PGN…")).toBeEnabled();
       await check(app);
     });

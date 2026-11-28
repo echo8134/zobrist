@@ -11,6 +11,7 @@ mod engines;
 mod file_collection;
 mod game_file;
 mod pgn_file;
+mod session;
 
 pub use accounts::AccountRequest;
 pub use analysis::{AnalysisRequest, AnalysisSnapshot, VariationAnswer};
@@ -18,14 +19,18 @@ pub use board_appearance::{AppearanceRequest, BoardAppearance};
 pub use database_collection::{DatabaseEntry, DatabaseRequest};
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
-    AddedPgnPath, CollectionEntry, CollectionRequest, EntryKind, PickerChoice,
+    AddedPgnPath, CollectionEntry, CollectionRequest, EarlierState, EntryKind, FileCollection,
+    PickerChoice,
 };
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
-use game_file::{InFile, OpenGame, SavedState};
+use game_file::{InFile, OpenGame, SaveHistory, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
+pub use session::{BoardPicture, SessionRequest};
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use shakmaty::{
@@ -33,6 +38,7 @@ use shakmaty::{
 };
 use tauri::async_runtime::{Mutex, spawn_blocking};
 use ts_rs::TS;
+use zobrist_core::comment::MoveReadings;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
 use zobrist_core::game::{Game, GameBuilder, MainLine, Move};
 use zobrist_core::pgn::{self, Entry};
@@ -49,6 +55,8 @@ pub use drawing::ShapeEdit;
 pub enum DesktopRequest {
     /// Requests answered by the games and PGN editor.
     Editor(Request),
+    /// Requests to restore or save the open boards.
+    Session(SessionRequest),
     /// Requests about the engine analysing an open game.
     Analysis(AnalysisRequest),
     /// Requests about the player's collection or the system picker.
@@ -479,6 +487,19 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// The boards in tab order after restoring the session.
+    RestoreBoards {
+        /// The games and their pictures at the saved places.
+        boards: Vec<BoardPicture>,
+        /// The selected runtime game number, when a board was selected.
+        selected: Option<usize>,
+        /// Where to find the original session if any part could not be restored.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        warning: Option<String>,
+    },
+    /// The session was written and the window can close.
+    QuitWithBoards,
     /// The result of adding the engine row selected on the board.
     AddEngineVariation {
         /// Whether anything changed in the game.
@@ -678,9 +699,36 @@ pub enum Response {
     },
     /// The saved references.
     GetFileCollection {
-        /// The root entries of the collection.
+        /// The list or the available recovery action.
+        collection: FileCollection,
+    },
+    /// The result of the player's request to recover the collection list.
+    RecoverFileCollection {
+        /// The recovered entries or the reason recovery could not complete.
+        collection: FileCollection,
+    },
+    /// The files the player recently opened.
+    GetRecentFiles {
+        /// Up to ten PGN files, newest first.
         entries: Vec<CollectionEntry>,
     },
+    /// The PGN selected on Home or Files, or the refusal.
+    OpenListedPgnFile {
+        /// The file with its games or why it could not be opened.
+        answer: PgnFileAnswer,
+    },
+    /// Earlier states of this PGN, most recent first.
+    ListPgnStates {
+        /// A damaged state still has its number.
+        states: Vec<EarlierState>,
+    },
+    /// The current file as seen when the player chose a state.
+    PreparePgnRestore {
+        /// Identifies the bytes the player is about to replace.
+        stamp: String,
+    },
+    /// The chosen state is now on disk.
+    RestorePgnState,
     /// The collection and the selected file or folder after applying the picker result.
     AddPgnPath {
         /// The new selection or the reason the file operation was refused.
@@ -767,15 +815,18 @@ pub enum PgnExport {
     },
 }
 
+fn pgn_text(game: &Game) -> io::Result<String> {
+    let mut bytes = Vec::new();
+    pgn::write_game(game, &mut bytes)?;
+    String::from_utf8(bytes).map_err(io::Error::other)
+}
+
 impl PgnExport {
     fn from_editor(editor: Option<&GameEditor>) -> Self {
         let Some(editor) = editor else {
             return Self::Text { text: None };
         };
-        let mut bytes = Vec::new();
-        match pgn::write_game(editor.game(), &mut bytes)
-            .and_then(|()| String::from_utf8(bytes).map_err(io::Error::other))
-        {
+        match pgn_text(editor.game()) {
             Ok(text) => Self::Text { text: Some(text) },
             Err(error) => Self::Error {
                 error: error.to_string(),
@@ -799,6 +850,7 @@ pub struct GamePicture {
     current: CurrentPlace,
     #[serde(flatten)]
     shapes: BoardShapes,
+    comment: String,
     can_undo: bool,
     can_redo: bool,
     start_comments: Vec<String>,
@@ -822,6 +874,18 @@ struct CurrentPlace {
     last_move: Option<MoveSquares>,
     move_symbol: Option<MoveSymbol>,
     position_symbol: Option<PositionSymbol>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    evaluation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    clock: Option<RecordedClock>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+struct RecordedClock {
+    side: Side,
+    time: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -924,13 +988,27 @@ impl NotationMove {
         } else {
             node.comments_before().to_vec()
         };
+        let mut readings = MoveReadings::default();
+        let comments_after = node
+            .comments_after()
+            .iter()
+            .map(|comment| readings.read_comment(comment))
+            .filter(|text| !text.is_empty())
+            .collect();
+        if is_current {
+            current.evaluation = readings.evaluation;
+            current.clock = readings.clock.map(|time| RecordedClock {
+                side: before.turn().into(),
+                time,
+            });
+        }
         Self {
             place: place.0,
             number: before.fullmoves().get(),
             side: before.turn().into(),
             text: placed.step().notation().to_string(),
             comments_before,
-            comments_after: comment_texts(node.comments_after()),
+            comments_after,
             symbols,
             variations: placed
                 .variations()
@@ -946,6 +1024,7 @@ impl NotationMove {
 impl GamePicture {
     fn from_editor(editor: &GameEditor, file: Option<&InFile>, revision: usize) -> Self {
         let position = editor.position();
+        let (comment, shapes) = editor.comment();
         let mut current = CurrentPlace {
             in_variation: editor.in_variation(),
             has_next_move: editor.has_next_move(),
@@ -988,7 +1067,8 @@ impl GamePicture {
             in_check: position.is_check(),
             legal_moves,
             current,
-            shapes: BoardShapes::from(&editor.comment().1),
+            shapes: BoardShapes::from(&shapes),
+            comment,
             can_undo: editor.can_undo(),
             can_redo: editor.can_redo(),
             start_comments: match editor.game().main_line() {
@@ -1004,14 +1084,14 @@ impl GamePicture {
 
 /// The open games of one run of the app.
 pub struct Games {
-    open_games: HashMap<usize, OpenGame>,
+    open_games: BTreeMap<usize, OpenGame>,
     next_number: usize,
 }
 
 impl Default for Games {
     fn default() -> Self {
         Self {
-            open_games: HashMap::new(),
+            open_games: BTreeMap::new(),
             next_number: 1,
         }
     }
@@ -1019,18 +1099,16 @@ impl Default for Games {
 
 impl Games {
     fn open(&mut self, game: Game, file: Option<InFile>) -> (usize, GamePicture) {
+        let open = OpenGame::new(GameEditor::new(game), file);
+        let picture = open.picture();
+        (self.insert(open), picture)
+    }
+
+    fn insert(&mut self, open: OpenGame) -> usize {
         let number = self.next_number;
         self.next_number = number.strict_add(1);
-        let editor = GameEditor::new(game);
-        let open = OpenGame {
-            position: analysis::BoardPosition::new(&editor),
-            analysis: std::sync::Arc::default(),
-            editor,
-            file,
-        };
-        let picture = open.picture();
         self.open_games.insert(number, open);
-        (number, picture)
+        number
     }
 
     fn open_pgn(&mut self, text: &str) -> Option<OpenedGame> {
@@ -1073,7 +1151,7 @@ impl Games {
     /// [`SharedGames::answer`].
     #[must_use]
     pub fn answer(&mut self, request: Request) -> Response {
-        match self.begin(request) {
+        match self.begin(request, &SaveHistory::default()) {
             FirstStep::Answer(response) => *response,
             FirstStep::BlockingWork(work) => work()(self),
         }
@@ -1081,7 +1159,7 @@ impl Games {
 
     /// Applies the view's request and builds its answer before another request can edit the
     /// game. A request that waits for I/O only starts here.
-    fn begin(&mut self, request: Request) -> FirstStep {
+    fn begin(&mut self, request: Request, history: &SaveHistory) -> FirstStep {
         let response = match request {
             Request::Version => Response::Version {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -1176,8 +1254,10 @@ impl Games {
             Request::OpenPgnFile { path } => return pgn_file::open(path),
             Request::CreatePgnFile { path } => return pgn_file::create(path),
             Request::OpenGame { path, number } => return game_file::open(path, number),
-            Request::SaveGame { game } => return game_file::save(self, game),
-            Request::SaveGameAs { game, path } => return game_file::save_as(self, game, path),
+            Request::SaveGame { game } => return game_file::save(self, game, history),
+            Request::SaveGameAs { game, path } => {
+                return game_file::save_as(self, game, path, history);
+            }
         };
         FirstStep::Answer(Box::new(response))
     }
@@ -1225,10 +1305,25 @@ impl FirstStep {
 #[derive(Default)]
 pub struct SharedGames {
     games: std::sync::Arc<Mutex<Games>>,
-    one_save: Mutex<()>,
+    // A failed recovery must preserve this original before the next save of the boards.
+    one_save: Mutex<Option<PathBuf>>,
+    restored_selection: OnceLock<Option<usize>>,
+    history: SaveHistory,
 }
 
 impl SharedGames {
+    /// Enables PGN history for desktop saves, reporting a directory lookup failure at Save.
+    #[must_use]
+    pub fn with_history(directory: Result<PathBuf, String>) -> Self {
+        Self {
+            history: match directory {
+                Ok(path) => SaveHistory::Directory(path),
+                Err(reason) => SaveHistory::Unavailable(reason),
+            },
+            ..Self::default()
+        }
+    }
+
     /// Answers a request. It holds the lock on the games only for the steps that touch them.
     /// File and network I/O run between those steps, on a thread that may wait.
     pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
@@ -1243,7 +1338,7 @@ impl SharedGames {
         } else {
             None
         };
-        let first = self.games.lock().await.begin(request);
+        let first = self.games.lock().await.begin(request, &self.history);
         match first {
             FirstStep::Answer(response) => Ok(*response),
             FirstStep::BlockingWork(work) => {
@@ -1272,6 +1367,57 @@ mod tests {
             }
         })?;
         Ok(imported.unwrap())
+    }
+
+    #[test]
+    fn recorded_values_follow_the_selected_move_and_leave_its_comment_editable() -> io::Result<()> {
+        let mut editor = import(b"1. e4 {Centre. [%eval 0.34,18] [%clk 0:04:59]} e5 {[%clk 0:04:56]} (1... c5 {[%eval -0.25]}) 2. Nf3 *")?;
+        for (place, evaluation, clock, comment) in [
+            (
+                vec![0],
+                Some("+0.34"),
+                json!({"side":"white","time":"0:04:59"}),
+                "Centre. [%eval 0.34,18] [%clk 0:04:59]",
+            ),
+            (
+                vec![0, 0],
+                None,
+                json!({"side":"black","time":"0:04:56"}),
+                "[%clk 0:04:56]",
+            ),
+            (vec![0, 1], Some("-0.25"), json!(null), "[%eval -0.25]"),
+            (vec![0, 0, 0], None, json!(null), ""),
+            (vec![], None, json!(null), ""),
+        ] {
+            editor.go_to(Place(place)).unwrap();
+            let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
+            assert_eq!(picture["evaluation"], json!(evaluation));
+            assert_eq!(picture["clock"], clock);
+            assert_eq!(picture["comment"], comment);
+            assert_eq!(picture["notation"][0]["commentsAfter"], json!(["Centre."]));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_editable_comment_follows_the_move_or_the_starting_position() -> io::Result<()> {
+        let mut editor =
+            import(b"{A short game} 1. e4 {Best} {by test} e5 (1... c5 {Sicilian}) *")?;
+        for (place, comment) in [
+            (vec![], "A short game"),
+            (vec![0], "Best by test"),
+            (vec![0, 1], "Sicilian"),
+            (vec![0, 0], ""),
+        ] {
+            editor.go_to(Place(place)).unwrap();
+            assert_eq!(GamePicture::from_editor(&editor, None, 0).comment, comment);
+        }
+        let empty = import(b"{Not} {played} *")?;
+        assert_eq!(
+            GamePicture::from_editor(&empty, None, 0).comment,
+            "Not played"
+        );
+        Ok(())
     }
 
     #[test]

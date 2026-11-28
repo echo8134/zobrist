@@ -9,7 +9,6 @@ import {
   type Change,
   closeOrAsk,
   closeTab,
-  commentOfCurrentPlace,
   goTo,
   isSaveKey,
   openGame,
@@ -76,6 +75,36 @@ test("a tab opens with the game that Rust answered and closes that game with its
     [{ type: "CloseGame", game: 7 }],
   ]);
   expect(shown()).toEqual({ tabs: [], page: "Home", shownTab: undefined });
+});
+
+test("boards reopen in order and Home stays visible when no board was selected", () => {
+  const { change, shown } = tabState({
+    tabs: [],
+    page: "Home",
+    shownTab: undefined,
+  });
+  const boards = [
+    { game: 11, picture: pictureAfterE4 },
+    { game: 12, picture },
+  ];
+
+  change({ type: "RestoreBoards", boards, selected: null });
+
+  expect(shown()).toEqual({
+    tabs: [
+      {
+        game: 11,
+        picture: pictureAfterE4,
+        bottomSide: "white",
+        gameData: "closed",
+      },
+      { game: 12, picture, bottomSide: "white", gameData: "closed" },
+    ],
+    page: "Home",
+    shownTab: undefined,
+  });
+  change({ type: "RestoreBoards", boards, selected: 11 });
+  expect(shown().shownTab).toBe(11);
 });
 
 test("a turn changes the side at the bottom of one tab only", () => {
@@ -406,73 +435,6 @@ test.each([
   },
 );
 
-const commented = (
-  text: string,
-  place: number[],
-  comments: { before?: string[]; after?: string[] },
-  variations: NotationMove[][] = [],
-) =>
-  ({
-    text,
-    place,
-    commentsBefore: comments.before ?? [],
-    commentsAfter: comments.after ?? [],
-    variations,
-  }) as NotationMove;
-const commentedNotation = [
-  commented("e4", [0], {
-    before: ["A short game"],
-    after: ["Best", "by test"],
-  }),
-  commented("e5", [0, 0], {}, [
-    [commented("c5", [0, 1], { after: ["Sicilian"] })],
-  ]),
-];
-
-test("the comment of a move is the text behind it, with a space between its parts", () => {
-  expect(
-    commentOfCurrentPlace({
-      place: [0],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("Best by test");
-  expect(
-    commentOfCurrentPlace({
-      place: [0, 1],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("Sicilian");
-  expect(
-    commentOfCurrentPlace({
-      place: [0, 0],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("");
-});
-
-test("the comment of the start is the text before the first move", () => {
-  expect(
-    commentOfCurrentPlace({
-      place: [],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("A short game");
-});
-
-test("the comment of a game without moves is its start comment", () => {
-  expect(
-    commentOfCurrentPlace({
-      place: [],
-      notation: [],
-      startComments: ["Not", "played"],
-    }),
-  ).toBe("Not played");
-});
-
 test("a game of a file opens in a tab, and a game that is open already gets no second tab", async () => {
   const { change, shown } = tabState({
     tabs: [{ game: 3, picture, bottomSide: "black", gameData: "closed" }],
@@ -641,6 +603,33 @@ test("a refused first save keeps the form open to save and gives its reason", as
       refusedSave: { type: "Refusal", reason: "cannotWrite", system: null },
     },
   ]);
+});
+
+test("a first save with a history warning closes the form and cannot append twice", async () => {
+  const { change, shown, tabNow } = oneTab(changedWithoutFile);
+  await save(7, "Save", "/games/club.pgn", tabNow, change);
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGameAs",
+    answer: {
+      type: "SavedWithWarning",
+      picture: savedInFile,
+      warning:
+        "Game saved. Could not keep the earlier state in /history/club. The history folder is read-only.",
+    },
+  });
+
+  expect(await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change)).toBe(
+    true,
+  );
+  expect(shown().tabs[0]?.picture.unsaved).toBe(false);
+  expect(shown().tabs[0]?.gameData).toBe("closed");
+  expect(shown().tabs[0]?.saveWarning).toBe(
+    "Game saved. Could not keep the earlier state in /history/club. The history folder is read-only.",
+  );
+  expect(await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change)).toBe(
+    false,
+  );
+  expect(vi.mocked(ask)).toHaveBeenCalledTimes(1);
 });
 
 test("two confirmations waiting on the same field save only one copy", async () => {

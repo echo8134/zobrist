@@ -1,10 +1,10 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
-import { createServer as createPortReservation, type Server } from "node:net";
+import type { Server } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { cleanupWdioSession, startWdioSession } from "@wdio/tauri-service";
+import { withDesktopApp } from "./desktop-session";
 
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
 
@@ -31,40 +31,28 @@ describe("the Lichess name on this device", () => {
       socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
     });
     const proxyUrl = `http://127.0.0.1:${await listenLocal(proxy)}`;
-    const reservation = createPortReservation();
-    const embeddedPort = await listenLocal(reservation);
-    await new Promise<void>((closed) => reservation.close(() => closed()));
-
     async function openUser(app: WebdriverIO.Browser) {
       await app.$("nav").$("aria/User").click();
       await app.$("main summary").click();
     }
 
-    async function onUser(check: (app: WebdriverIO.Browser) => Promise<void>) {
-      const app = await startWdioSession({
-        browserName: "tauri",
-        "tauri:options": { application: join(target, "debug", "zobrist-app") },
-        "wdio:tauriServiceOptions": {
-          embeddedPort,
-          env: {
-            XDG_DATA_HOME: data,
-            XDG_CACHE_HOME: data,
-            http_proxy: proxyUrl,
-            https_proxy: proxyUrl,
-            HTTP_PROXY: proxyUrl,
-            HTTPS_PROXY: proxyUrl,
-            no_proxy: "localhost,127.0.0.1",
-            NO_PROXY: "localhost,127.0.0.1",
-          },
+    function onUser(check: (app: WebdriverIO.Browser) => Promise<void>) {
+      return withDesktopApp(
+        data,
+        async (app) => {
+          await openUser(app);
+          await check(app);
         },
-      });
-      try {
-        await app.switchToWindow("main");
-        await openUser(app);
-        await check(app);
-      } finally {
-        await cleanupWdioSession(app);
-      }
+        {
+          XDG_CACHE_HOME: data,
+          http_proxy: proxyUrl,
+          https_proxy: proxyUrl,
+          HTTP_PROXY: proxyUrl,
+          HTTPS_PROXY: proxyUrl,
+          no_proxy: "localhost,127.0.0.1",
+          NO_PROXY: "localhost,127.0.0.1",
+        },
+      );
     }
 
     const field = (app: WebdriverIO.Browser) => app.$("aria/Lichess username");

@@ -70,7 +70,7 @@ fn second_game_at_its_start(path: &Path, number: u64) -> Value {
             {"name": "Result", "value": "0-1"},
         ],
         "result": "blackWin", "squares": [], "arrows": [],
-        "startComments": [], "moveSymbol": null, "positionSymbol": null,
+        "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": null, "place": [],
         "notation": [
             notation_move(0, "f3", &[]), notation_move(1, "e5", &[]),
@@ -200,6 +200,7 @@ fn second_game_with_comment(path: &Path, unsaved: bool) -> Value {
     picture["hasNextMove"] = json!(false);
     picture["lastMove"] = json!({"from": "d8", "to": "h4"});
     picture["place"] = json!([0, 0, 0, 0]);
+    picture["comment"] = json!("Fool's mate");
     picture["notation"][3] = notation_move(3, "Qh4#", &["Fool's mate"]);
     picture["unsaved"] = json!(unsaved);
     picture
@@ -388,6 +389,24 @@ fn saves_a_new_game_as_the_last_game_of_a_file() -> io::Result<()> {
         fs::read(&clean)?,
         [&clean_fixture()?[..], b"\n1. e4 *\n"].concat()
     );
+    Ok(())
+}
+
+#[test]
+fn reports_a_saved_game_when_the_desktop_cannot_locate_its_data_folder() -> io::Result<()> {
+    let path = folder("save-no-data-folder")?.join("game.pgn");
+    fs::write(&path, b"1. d4 *\n")?;
+    let games = SharedGames::with_history(Err("Local data folder unavailable.".into()));
+    new_game_with_e4(&games)?;
+
+    let saved = save_as(&games, 1, &path)?;
+    assert_eq!(saved["answer"]["type"], "SavedWithWarning");
+    assert_eq!(
+        saved["answer"]["warning"],
+        "Game saved. Could not keep the earlier state. Local data folder unavailable."
+    );
+    assert_eq!(saved["answer"]["picture"]["unsaved"], false);
+    assert_eq!(fs::read(path)?, b"1. d4 *\n\n1. e4 *\n");
     Ok(())
 }
 

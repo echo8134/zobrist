@@ -9,7 +9,15 @@ export type SaveGameAnswer = { "type": "Saved",
 /**
  * The picture of the game, which names its file and its number there.
  */
-picture: GamePicture, } | { "type": "Refusal", 
+picture: GamePicture, } | { "type": "SavedWithWarning", 
+/**
+ * The picture of the saved game.
+ */
+picture: GamePicture, 
+/**
+ * The reason history was unavailable.
+ */
+warning: string, } | { "type": "Refusal", 
 /**
  * Why.
  */

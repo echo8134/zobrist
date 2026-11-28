@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { withApp } from "./app-session";
 import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
+
+import { withDesktopApp } from "./desktop-session";
 
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
 
@@ -169,7 +170,7 @@ describe("board appearance", () => {
   it("uses the choices on open and new boards and after quitting the app", async function () {
     this.timeout(60000);
     const data = `${runDirectory}/board-appearance`;
-    await withApp(data, async (app) => {
+    await withDesktopApp(data, async (app) => {
       await settings(app).click();
       await expect(control(app, "Piece set")).toHaveValue("cburnett");
       for (const label of ["Piece set", "Board colours", "Show coordinates"]) {
@@ -214,8 +215,9 @@ describe("board appearance", () => {
       await expectCoordinates(app, "", "");
     });
 
-    await withApp(data, async (app) => {
-      await openBoard(app, 1);
+    await withDesktopApp(data, async (app) => {
+      await expect(app.$$("header [role=tab]")).toBeElementsArrayOfSize(2);
+      await openBoard(app, 3);
       await expectChessnutBoard(app);
       await expectCoordinates(app, "", "");
       const image = await app.saveScreenshot(
@@ -269,12 +271,12 @@ describe("board appearance", () => {
       '{"pieceSet":"chessnut","boardPalette":"blue","showCoordinates":false}',
   })) {
     it(`shows the default board and explains how to recover settings with ${problem}`, async () => {
-      const data = `${runDirectory}/damaged-board-settings`;
+      const data = `${runDirectory}/damaged-board-settings-${problem}`;
       const directory = `${data}/io.github.echo8134.zobrist`;
       const path = `${directory}/settings.json`;
       mkdirSync(directory, { recursive: true });
       writeFileSync(path, contents);
-      await withApp(data, async (app) => {
+      await withDesktopApp(data, async (app) => {
         await openBoard(app, 1);
         await expectDefaultBoard(app);
         await settings(app).click();

@@ -1,8 +1,9 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { browser, expect } from "@wdio/globals";
 import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
+import { pick } from "./file-picker";
 import { nativeKey } from "./native-key";
 
 const screenshots = fileURLToPath(
@@ -137,6 +138,84 @@ async function pasteText(name: string, text: string) {
   await pasteInto(name);
   await expect(named(name)).toHaveValue(text);
 }
+
+describe("recorded evaluation and clock in a PGN file", () => {
+  let directory: string;
+  const readings = () =>
+    browser.$$('main aside [aria-label="Recorded move values"] li');
+  const selectedTab = () => browser.$("header [role=tab][aria-selected=true]");
+
+  before(async () => {
+    mkdirSync(screenshots, { recursive: true });
+    directory = mkdtempSync(`${screenshots}/readings-`);
+    const file = `${directory}/recorded.pgn`;
+    writeFileSync(
+      file,
+      [
+        '[White "Alex"]\n[Black "Robin"]\n\n1. e4 {Centre. [%eval 0.34,18] [%clk 0:04:59]} e5 {[%clk 0:04:56]} (1... c5 {[%eval -0.25]}) 2. Nf3 *',
+        '[White "Mate"]\n\n1. f3 e5 2. g4 {[%eval #-1]} Qh4# *',
+        '[White "Plan"]\n\n1. d4 {Plan. [%clk later]} *\n',
+      ].join("\n\n"),
+    );
+    await browser.$("nav").$("aria/Files").click();
+    await pick("File", file);
+    await expect(browser.$$("main table tbody tr")).toBeElementsArrayOfSize(3);
+  });
+  after(() => rmSync(directory, { recursive: true, force: true }));
+
+  async function selectMove(move: string, expected: string[]) {
+    const button = notation().$(`button=${move}`);
+    await button.click();
+    await expect(button).toHaveAttribute("aria-current", "true");
+    await expect(readings()).toBeElementsArrayOfSize(expected.length);
+    expect(await readings().map((entry) => entry.getText())).toEqual(expected);
+    await expect(selectedTab().$("span:empty")).not.toExist();
+  }
+
+  it("follows the selected move through a variation and copies its original comment", async () => {
+    await browser.$("main table").$("td=Alex").click();
+    await selectMove("e4", ["Evaluation +0.34", "White clock 0:04:59"]);
+    await expect(notation().$$("span=Centre.")).toBeElementsArrayOfSize(1);
+    await expect(notation()).not.toHaveText(expect.stringContaining("[%"));
+    await expect(named("Comment")).toHaveValue(
+      "Centre. [%eval 0.34,18] [%clk 0:04:59]",
+    );
+    const picture = await browser.saveScreenshot(
+      `${screenshots}/recorded-evaluation-clock.png`,
+    );
+    expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
+      1280, 800,
+    ]);
+
+    await selectMove("e5", ["Black clock 0:04:56"]);
+    await selectMove("c5", ["Evaluation -0.25"]);
+    await selectMove("Nf3", []);
+    await browser.keys("Home");
+    await expect(notation().$("button[aria-current]")).not.toExist();
+    await expect(readings()).toBeElementsArrayOfSize(0);
+
+    const copy = await copyFrom("Copy PGN");
+    await expect(copy).toHaveText("Copied");
+    await named("Paste PGN").click();
+    await pasteInto("PGN text");
+    await expect(named("PGN text")).toHaveValue(
+      expect.stringContaining("1. e4 {Centre. [%eval 0.34,18] [%clk 0:04:59]}"),
+    );
+    await named("Cancel").click();
+  });
+
+  it("shows a recorded mate and leaves an unreadable clock in the notation", async () => {
+    await browser.$("nav").$("aria/Files").click();
+    await browser.$("main table").$("td=Mate").click();
+    await selectMove("g4", ["Evaluation #-1"]);
+    await browser.$("nav").$("aria/Files").click();
+    await browser.$("main table").$("td=Plan").click();
+    await selectMove("d4", []);
+    await expect(notation()).toHaveText(
+      expect.stringContaining("Plan. [%clk later]"),
+    );
+  });
+});
 
 describe("setting up a position and exchanging game text", () => {
   beforeEach(async () => {

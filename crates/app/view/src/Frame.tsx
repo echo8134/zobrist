@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { fileOfThePage, readFileAgain } from "./FilesPage";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
+import { ask, finishBoardActions } from "./ipc";
 import { PageArea } from "./PageArea";
 import { editSetup } from "./positionSetup";
 import { TabArea } from "./TabArea";
@@ -25,23 +26,89 @@ import {
   tabName,
 } from "./tabs";
 
-const { frame } = styles;
+const { frame, startup, problem: problemLine } = styles;
 
 export function Frame() {
-  const [shown, setShown] = useState<Shown>({
-    tabs: [],
-    page: "Home",
-    shownTab: undefined,
-  });
-  // The state with every change so far, also before React has drawn it. A save and a close
-  // read their tab here after the answers to the requests before them.
-  const newest = useRef(shown);
-  const change = (next: Change) => {
+  const [shown, setShown] = useState<Shown>();
+  const [problem, setProblem] = useState<string>();
+  const [iconBarOpen, setIconBarOpen] = useState(true);
+  // A save or a close reads changes that React may not have drawn yet.
+  const newest = useRef<Shown>({ tabs: [], page: "Home", shownTab: undefined });
+  const change = useCallback((next: Change) => {
     newest.current = apply(newest.current, next);
     setShown(newest.current);
-  };
+  }, []);
+  const restoring = useRef<Promise<boolean> | undefined>(undefined);
+  const restore = useCallback(() => {
+    if (restoring.current !== undefined) return;
+    setProblem(undefined);
+    restoring.current = ask({ type: "RestoreBoards" }).then(
+      (answer) => {
+        change(answer);
+        setProblem(answer.warning);
+        return true;
+      },
+      (error: unknown) => {
+        setProblem(`Cannot reopen your boards. ${String(error)}`);
+        restoring.current = undefined;
+        return false;
+      },
+    );
+  }, [change]);
+
+  useLayoutEffect(() => {
+    const close = async () => {
+      if (document.body.inert) return;
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement) focused.blur();
+      document.body.inert = true;
+      // Document shortcuts and an unfinished drag can still receive events outside the inert body.
+      const input = new AbortController();
+      for (const type of ["keydown", "mouseup", "touchend"]) {
+        window.addEventListener(type, (event) => event.stopPropagation(), {
+          capture: true,
+          signal: input.signal,
+        });
+      }
+      try {
+        if (await restoring.current) {
+          await finishBoardActions();
+          const { tabs, shownTab } = newest.current;
+          await ask({
+            type: "QuitWithBoards",
+            boards: tabs.map(({ game }) => game),
+            selected: shownTab ?? null,
+          });
+          return;
+        }
+      } catch (error) {
+        setProblem(`Cannot save your boards before quitting. ${String(error)}`);
+      }
+      document.body.inert = false;
+      input.abort();
+    };
+    window.addEventListener("zobrist-close-requested", close);
+    restore();
+    return () => window.removeEventListener("zobrist-close-requested", close);
+  }, [restore]);
+
+  if (shown === undefined) {
+    return (
+      <main className={startup}>
+        {problem === undefined ? (
+          <p role="status">Opening boards…</p>
+        ) : (
+          <>
+            <p role="alert">{problem}</p>
+            <button type="button" onClick={restore}>
+              Retry
+            </button>
+          </>
+        )}
+      </main>
+    );
+  }
   const { tabs, page, shownTab, asksToClose } = shown;
-  const [iconBarOpen, setIconBarOpen] = useState(true);
   const tab = tabs.find(({ game }) => game === shownTab);
 
   const tabNow = (game: number) =>
@@ -54,6 +121,11 @@ export function Frame() {
 
   return (
     <div className={frame}>
+      {problem && (
+        <p role="alert" className={problemLine}>
+          {problem}
+        </p>
+      )}
       <TopBar
         iconBarOpen={iconBarOpen}
         onToggleIconBar={() => setIconBarOpen(!iconBarOpen)}
