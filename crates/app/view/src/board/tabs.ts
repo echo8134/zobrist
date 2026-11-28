@@ -1,4 +1,4 @@
-import type { Page } from "../frame/PageArea";
+import type { PageName } from "../components/list";
 import type { ChangedGameFile } from "../generated/ChangedGameFile";
 import type { EditableTag } from "../generated/EditableTag";
 import type { GameFileRefusal } from "../generated/GameFileRefusal";
@@ -57,7 +57,7 @@ export type Tab = {
 
 export type Shown = {
   tabs: readonly Tab[];
-  page: Page;
+  page: PageName;
   shownTab: Tab["game"] | undefined;
   /** The tab that asks whether to close it with the changes of its game. */
   asksToClose?: Tab["game"];
@@ -93,7 +93,7 @@ export type Change =
   | { type: "askToClose"; game: number }
   | { type: "keepTab" }
   | { type: "closeTab"; game: number }
-  | { type: "showPage"; page: Page };
+  | { type: "showPage"; page: PageName };
 
 function newTab({ game, picture }: Pick<Tab, "game" | "picture">): Tab {
   return { game, picture, bottomSide: "white", gameData: "closed" };

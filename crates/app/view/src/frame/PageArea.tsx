@@ -1,30 +1,16 @@
-import { type ReactNode, Suspense, use, useActionState, useState } from "react";
+import { Suspense, use, useActionState, useState } from "react";
 import { BoardSettingsForm } from "../board/BoardSettings";
 import { type Change, openGame } from "../board/tabs";
-import { DatabasesPage } from "../components/databases/DatabasesPage";
-import { EnginesPage } from "../components/engines/EnginesPage";
+import type { App } from "../component";
+import { components, type PageName } from "../components/list";
 import formStyles from "../controls/CollectionPage.module.css";
 import { FilesPage, openListed } from "../FilesPage";
 import { ask } from "../ipc";
 import { RecentFiles } from "../RecentFiles";
-import { UserPage } from "../UserPage";
 import styles from "./PageArea.module.css";
 
 const { area, heading, versionLine, gameLink } = styles;
 const { toolbar, button, line, refusal } = formStyles;
-
-/** The pages in the order of their entries in the icon bar. */
-export const upperPages = [
-  "Home",
-  "Files",
-  "Databases",
-  "Events",
-  "Engines",
-] as const;
-/** The pages whose entries stand at the bottom of the icon bar. */
-export const lowerPages = ["User", "Settings"] as const;
-
-export type Page = (typeof upperPages)[number] | (typeof lowerPages)[number];
 
 const version = ask({ type: "Version" });
 
@@ -33,8 +19,9 @@ function VersionLine() {
 }
 
 type Props = {
-  page: Page;
+  page: PageName;
   change: (change: Change) => void;
+  app: App;
 };
 
 function GameLinkForm({ change }: Pick<Props, "change">) {
@@ -76,22 +63,8 @@ function GameLinkForm({ change }: Pick<Props, "change">) {
   );
 }
 
-const contents: Record<
-  Exclude<Page, "Databases" | "Files" | "Home">,
-  ReactNode
-> = {
-  Events: null,
-  Engines: <EnginesPage />,
-  User: <UserPage />,
-  Settings: (
-    <Suspense>
-      <VersionLine />
-      <BoardSettingsForm />
-    </Suspense>
-  ),
-};
-
-export function PageArea({ page, change }: Props) {
+export function PageArea({ page, change, app }: Props) {
+  const View = components.find((listed) => listed.name === page)?.page.view;
   return (
     <main className={area}>
       <h1 className={heading}>{page}</h1>
@@ -112,10 +85,13 @@ export function PageArea({ page, change }: Props) {
             change({ type: "updateGameFile", ...tab })
           }
         />
-      ) : page === "Databases" ? (
-        <DatabasesPage change={change} />
+      ) : page === "Settings" ? (
+        <Suspense>
+          <VersionLine />
+          <BoardSettingsForm />
+        </Suspense>
       ) : (
-        contents[page]
+        View && <View app={app} />
       )}
     </main>
   );

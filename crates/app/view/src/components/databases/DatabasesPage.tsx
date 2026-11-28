@@ -1,6 +1,6 @@
 import { Database } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
-import type { Change } from "../../board/tabs";
+import type { App } from "../../component";
 import styles from "../../controls/CollectionPage.module.css";
 import type { DatabaseEntry } from "../../generated/DatabaseEntry";
 import { ask } from "../../ipc";
@@ -90,11 +90,7 @@ function counted(
     : { kind: "Count", path, games };
 }
 
-export function DatabasesPage({
-  change,
-}: {
-  change: (change: Change) => void;
-}) {
+export function DatabasesPage({ onOpened }: { onOpened: App["openOnBoard"] }) {
   const { entries, selected, error, activity } = useSyncExternalStore(
     subscribe,
     () => kept,
@@ -178,7 +174,7 @@ export function DatabasesPage({
             : `Game ${number} could not be opened from ${path}.`;
         throw new Error(answer.system ? `${reason} ${answer.system}` : reason);
       }
-      change({ type: "openTab", game: answer.game, picture: answer.picture });
+      onOpened({ game: answer.game, picture: answer.picture });
     });
   }
 
