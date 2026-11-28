@@ -78,7 +78,9 @@ describe("downloading public games from User", () => {
           await date("From").setValue("2026-01-01");
           await username.setValue("RookExample");
           await choose(study);
-          await expect(status).toHaveText("Added 2 games to study.pgn.");
+          await expect(status).toHaveText(
+            "RookExample: Added 2 games to study.pgn.",
+          );
           expect(await exportPaths()).toEqual([january]);
           expect(bytes().subarray(0, Buffer.byteLength(original))).toEqual(
             Buffer.from(original),
@@ -94,13 +96,15 @@ describe("downloading public games from User", () => {
 
           await replyWithPlayerGames("refused");
           await choose(study);
-          await expect(status).toHaveText("Player not found.");
+          await expect(status).toHaveText("RookExample: Player not found.");
           expect(await exportPaths()).toEqual([january]);
           expect(bytes()).toEqual(first);
           await expect(summaryName).toHaveText("RookExample");
           await replyWithPlayerGames("empty");
           await choose(study);
-          await expect(status).toHaveText("Added 0 games to study.pgn.");
+          await expect(status).toHaveText(
+            "RookExample: Added 0 games to study.pgn.",
+          );
           expect(await exportPaths()).toEqual([january]);
           expect(bytes()).toEqual(first);
           await replyWithPlayerGames("hold");
@@ -115,10 +119,18 @@ describe("downloading public games from User", () => {
             await app.waitUntil(async () => (await exportPaths()).length > 0);
             await app.$("button=Save").click();
             await expect(summaryName).toHaveText("UnsavedExample");
+            await expect(status).toHaveText("RookExample: Downloading games…");
           } finally {
             await replyWithPlayerGames("games");
           }
-          await expect(status).toHaveText("RookExample: Added 2 games to study.pgn.");
+          await expect(status).toHaveText(
+            "RookExample: Added 2 games to study.pgn.",
+          );
+          await app.$("button=Remove name").click();
+          await expect(summaryName).toHaveText("Not connected");
+          await expect(status).toHaveText(
+            "RookExample: Added 2 games to study.pgn.",
+          );
           expect(await exportPaths()).toEqual([january]);
           expect(bytes().subarray(0, first.length)).toEqual(first);
           expect(events()).toEqual([

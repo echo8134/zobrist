@@ -106,8 +106,10 @@ export function LichessDownload({
           From must be on or before To.
         </span>
       )}
-      {!reversed && job && job.name === savedName && (
-        <span role="status">{job.message}</span>
+      {job && (
+        <span role="status">
+          {job.name}: {job.message}
+        </span>
       )}
     </form>
   );
