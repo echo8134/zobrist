@@ -253,13 +253,19 @@ describe("deleting one PGN game on Files", function () {
           .click();
       const tabs = () => session.$$('header [role="tab"]');
       const notation = () => session.$$("main aside ol button");
+      const expectCurrentMove = (move: string) =>
+        expect(session.$("main aside ol").$(`button=${move}`)).toHaveAttribute(
+          "aria-current",
+          "true",
+        );
       await openGame(1);
       await session.$("main aside ol").$("button=d4").click();
+      await expectCurrentMove("d4");
       const board = session.$("main cg-board");
       const side = (await board.getSize("width")) / 8;
       for (const rank of [7, 5])
         await board.click({ x: -0.5 * side, y: (4.5 - rank) * side });
-      await expect(session.$("main aside ol [aria-current]")).toHaveText("d5");
+      await expectCurrentMove("d5");
       await files(session);
       await openGame(2);
       await expect(tabs()).toBeElementsArrayOfSize(2);
@@ -274,7 +280,7 @@ describe("deleting one PGN game on Files", function () {
       expect(await notation().map((move) => move.getText())).toEqual(["d4"]);
 
       await tabs()[0]?.click();
-      await expect(session.$("main aside ol [aria-current]")).toHaveText("d5");
+      await expectCurrentMove("d5");
       expect(await notation().map((move) => move.getText())).toEqual([
         "d4",
         "d5",
