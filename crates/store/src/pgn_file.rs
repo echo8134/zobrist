@@ -7,6 +7,43 @@ use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
 
 use crate::StagingDirectory;
+use crate::pgn_history::{PgnHistory, SaveTarget};
+
+/// A PGN change refused before publication.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PgnWriteConflict {
+    /// The game in this row differs from the one the board opened.
+    GameChanged,
+    /// Another change still holds the file's history lock.
+    HistoryLocked,
+}
+
+impl PgnWriteConflict {
+    /// Identifies store refusals among the errors returned by a PGN write.
+    #[must_use]
+    pub fn from_io_error(error: &io::Error) -> Option<Self> {
+        error.get_ref()?.downcast_ref::<Self>().copied()
+    }
+}
+
+impl std::fmt::Display for PgnWriteConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::GameChanged => {
+                "The file changed since this game was opened. Save it as a new game."
+            }
+            Self::HistoryLocked => "Another change to this file is still running. Try again.",
+        })
+    }
+}
+
+impl std::error::Error for PgnWriteConflict {}
+
+impl From<PgnWriteConflict> for io::Error {
+    fn from(conflict: PgnWriteConflict) -> Self {
+        Self::other(conflict)
+    }
+}
 
 /// Complete raw PGN games staged on disk until their destination can be published.
 pub struct PgnBatch {
@@ -84,13 +121,19 @@ impl PgnBatch {
     }
 
     /// Appends the batch after the current destination bytes in one publication.
-    /// An empty batch leaves even a missing path untouched.
-    pub fn append_to(mut self, target: &Path) -> io::Result<u64> {
+    /// Returns the added count and any warning from recording history. An empty batch
+    /// leaves both the destination and its history untouched.
+    pub fn append_to(
+        mut self,
+        target: &Path,
+        history: Option<PgnHistory<'_>>,
+    ) -> io::Result<(u64, Option<String>)> {
         let games = self.games.ok_or_else(failed_write)?;
         if games == 0 {
-            return Ok(0);
+            return Ok((0, None));
         }
-        let (mut staged, separator) = Staged::for_append(target)?;
+        let target = SaveTarget::new(destination(target)?, history)?;
+        let (mut staged, separator) = Staged::for_append(&target.path)?;
         staged.file.write_all(separator)?;
         let first = staged.file.stream_position()? + self.first_start;
         self.file.rewind()?;
@@ -114,8 +157,8 @@ impl PgnBatch {
                 "The destination would not keep every downloaded game separate.".to_owned(),
             ));
         }
-        staged.publish()?;
-        Ok(games)
+        let warning = target.publish(staged)?;
+        Ok((games, warning))
     }
 }
 
@@ -124,14 +167,16 @@ impl PgnBatch {
 /// Calls `supply` with a function that writes one game at a time. An error from
 /// either function discards the staged file and leaves the target as it was.
 /// Refuses an append when the end of the target takes in the added games.
-/// Returns the number of games added after syncing and publishing the file.
+/// Returns the number of games added and any warning about capturing the previous state.
 pub fn add_pgn_games<E: From<io::Error>>(
     target: &Path,
+    history: Option<PgnHistory<'_>>,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
-) -> Result<u64, E> {
+) -> Result<(u64, Option<String>), E> {
+    let target = SaveTarget::new(destination(target)?, history)?;
     let mut added = 0;
     let mut first = None;
-    let (mut staged, prefix_length) = stage_with_added(target, |append| {
+    let (mut staged, prefix_length) = stage_with_added(&target.path, |append| {
         supply(&mut |game| {
             append(game)?;
             // Only the first game has to start a new game after bytes we did not write.
@@ -169,19 +214,24 @@ pub fn add_pgn_games<E: From<io::Error>>(
             .into());
         }
     }
-    staged.publish()?;
-    Ok(added)
+    let warning = target.publish(staged)?;
+    Ok((added, warning))
 }
 
 /// Adds one game as the last game of a PGN file, creating the target if necessary, and returns
-/// the number of that game in the file. Follows symbolic links and stages the new file beside
-/// the destination.
+/// its number and any warning about capturing the previous state. Follows symbolic links
+/// and stages the new file beside the destination.
 ///
 /// Refuses, and leaves the target as it was, when the staged file does not read back with the
 /// game as its last game. A comment or a tag line that is still open at the end of the target
 /// would take the new game in.
-pub fn add_pgn_game(target: &Path, game: &Game) -> io::Result<NonZeroU64> {
-    let (staged, _) = stage_with_added(target, |add| add(game))?;
+pub fn add_pgn_game(
+    target: &Path,
+    game: &Game,
+    history: Option<PgnHistory<'_>>,
+) -> io::Result<(NonZeroU64, Option<String>)> {
+    let target = SaveTarget::new(destination(target)?, history)?;
+    let (staged, _) = stage_with_added(&target.path, |add| add(game))?;
     (&staged.file).rewind()?;
     let mut games = 0;
     let mut last_is_the_game = false;
@@ -201,8 +251,8 @@ pub fn add_pgn_game(target: &Path, game: &Game) -> io::Result<NonZeroU64> {
         .ok_or_else(|| {
             refusal("the file would not read back with the new game as its last game".to_owned())
         })?;
-    staged.publish()?;
-    Ok(number)
+    let warning = target.publish(staged)?;
+    Ok((number, warning))
 }
 
 /// Stages the target with the supplied games and returns the length of the prefix, including the separator.
@@ -229,29 +279,46 @@ fn stage_with_added<E: From<io::Error>>(
 }
 
 /// Replaces game `number` of a PGN file, counting from 1, and keeps every other byte of the
-/// file. The new game stands where the old one stood, written as [`pgn::write_game`] writes it.
+/// file. Returns any warning about capturing the previous state. If supplied, the expected
+/// game must still occupy that row. A mismatch returns [`PgnWriteConflict::GameChanged`].
+/// The new game stands where the old one stood, written as [`pgn::write_game`] writes it.
 /// Follows symbolic links and stages the new file beside the destination.
 ///
 /// Refuses, and leaves the target as it was, when the file has no game with that number, when
 /// the reader gives that game no range, and when the staged file does not read back with the
 /// same number of games and the new game in that place.
-pub fn replace_pgn_game(target: &Path, number: NonZeroU64, game: &Game) -> io::Result<()> {
+pub fn replace_pgn_game(
+    target: &Path,
+    number: NonZeroU64,
+    game: &Game,
+    expected_game: Option<&Game>,
+    history: Option<PgnHistory<'_>>,
+) -> io::Result<Option<String>> {
     let mut text = Vec::new();
     pgn::write_game(game, &mut text)?;
     // The line break behind the old game stays in the file.
     text.pop();
-    let destination = destination(target)?;
-    let mut old = open(&destination)?;
+    let target = SaveTarget::new(destination(target)?, history)?;
+    // A pipe used as an external PGN must see EOF when its writer closes.
+    let mut old = File::open(&target.path)?;
     let mut games = 0;
     let mut found = None;
+    let mut expected_matches = expected_game.is_none();
     pgn::read_games(&old, |entry| {
-        if let Entry::Game { range, .. } = entry {
+        if let Entry::Game {
+            range, game: held, ..
+        } = entry
+        {
             games += 1;
             if games == number.get() {
                 found = Some(range);
+                expected_matches = expected_game.is_none_or(|game| *held == *game);
             }
         }
     })?;
+    if !expected_matches {
+        return Err(PgnWriteConflict::GameChanged.into());
+    }
     let range = match found {
         Some(Some(range)) => range,
         Some(None) => {
@@ -266,7 +333,9 @@ pub fn replace_pgn_game(target: &Path, number: NonZeroU64, game: &Game) -> io::R
             )));
         }
     };
-    let staged = Staged::beside(destination, Some(&old))?;
+    // Staging beside a file would otherwise bypass its write permissions.
+    drop(File::options().write(true).open(&target.path)?);
+    let staged = Staged::beside(target.path.clone(), Some(&old))?;
     let mut output = BufWriter::new(&staged.file);
     old.rewind()?;
     io::copy(&mut (&old).take(range.start), &mut output)?;
@@ -299,7 +368,7 @@ pub fn replace_pgn_game(target: &Path, number: NonZeroU64, game: &Game) -> io::R
              and the new game as game {number}"
         )));
     }
-    staged.publish()
+    target.publish(staged)
 }
 
 /// Reads game `number` of a PGN file, counting from 1. `None` when the file holds fewer games.
@@ -376,13 +445,13 @@ fn destination(target: &Path) -> io::Result<PathBuf> {
 }
 
 // Write access makes a target that must not be written fail here. A rename over it would pass.
-fn open(destination: &Path) -> io::Result<File> {
+pub(super) fn open(destination: &Path) -> io::Result<File> {
     File::options().read(true).write(true).open(destination)
 }
 
 /// The next version of a PGN file, written beside its destination and published whole.
-struct Staged {
-    file: File,
+pub(super) struct Staged {
+    pub(super) file: File,
     path: PathBuf,
     destination: PathBuf,
     _directory: StagingDirectory,
@@ -390,13 +459,12 @@ struct Staged {
 
 impl Staged {
     fn for_append(target: &Path) -> io::Result<(Self, &'static [u8])> {
-        let destination = destination(target)?;
-        let old = match open(&destination) {
+        let old = match open(target) {
             Ok(old) => Some(old),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-        let mut staged = Staged::beside(destination, old.as_ref())?;
+        let mut staged = Staged::beside(target.to_owned(), old.as_ref())?;
         let mut separator: &[u8] = b"";
         if let Some(mut old) = old {
             let length = io::copy(&mut old, &mut staged.file)?;
@@ -418,7 +486,7 @@ impl Staged {
         Ok((staged, separator))
     }
 
-    fn beside(destination: PathBuf, old: Option<&File>) -> io::Result<Staged> {
+    pub(super) fn beside(destination: PathBuf, old: Option<&File>) -> io::Result<Staged> {
         let directory = StagingDirectory::beside(&destination)?;
         let path = directory.0.join("games.pgn");
         let file = File::create_new(&path)?;
@@ -433,7 +501,7 @@ impl Staged {
         })
     }
 
-    fn publish(self) -> io::Result<()> {
+    pub(super) fn publish(self) -> io::Result<()> {
         self.file.sync_all()?;
         drop(self.file);
         fs::rename(self.path, self.destination)

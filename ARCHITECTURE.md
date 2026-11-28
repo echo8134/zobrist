@@ -101,7 +101,7 @@ While the engine runs, the view polls through the typed request. Each answer ide
 
 The CLI and desktop both open public Lichess links through `zobrist-online`. The crate owns the provider's HTTPS address, request limits, and cooldown. It uses `reqwest` (MIT OR Apache-2.0) with native TLS and returns game types from `zobrist-core`. Keeping this code in each interface would duplicate the request rules. Putting it in `core` would give the chess model an I/O dependency.
 
-For a player download, `online` uses `time` to convert the selected UTC dates and `serde_json` to extract the PGN from each export record. Its dependency on `store` lets both interfaces call one operation that publishes the entire batch or reports a refusal. The PGN keeps its variant tags and annotations, and the local destination path stays on the device.
+For a player download, `online` uses `time` to convert the selected UTC dates and `serde_json` to extract the PGN from each export record. Its dependency on `store` lets both interfaces call one operation that publishes the entire batch or reports a refusal. The PGN keeps its variant tags and annotations, and the local destination path stays on the device. After the export is complete, the batch uses the same staged write as other PGN saves. A desktop caller can supply its history folder and receive a capture warning. The CLI supplies no history folder.
 
 Future connections to chess sites, including account features, belong in this crate. Revisit the client choice if a provider requires a transport it cannot support.
 
@@ -122,6 +122,10 @@ The Files page keeps references to PGN files and folders. A player can keep a re
 The app keeps a verified copy of that list in files.last-good.json. If the live list becomes unreadable, the player can recover it from Files. Recovery preserves the damaged bytes under a fresh name before replacing the list. It only changes collection metadata.
 
 When creating a PGN, the native save dialog starts in the selected folder. Without a selected folder, it suggests a folder named `zobrist` inside the personal Documents directory reported by the operating system. When the system has no Documents directory, the player chooses the destination in the dialog. The player can change the suggested location before saving.
+
+Desktop saves keep the 20 most recent pre-change states of each PGN under pgn-history in the app's local data directory. Each resolved absolute PGN path owns its own folder. Moving or removing the PGN leaves its states at the original path. Keeping each state's raw bytes, capture time, size and checksum in a separate file lets a player restore annotated or damaged PGNs exactly and keeps the other states usable if one is damaged.
+
+A board save can succeed when recording history fails and tells the player why. If another change holds the PGN's history lock, saves and restores wait up to five seconds. If the lock is still held, the app refuses the change so the player can retry. Restoring requires a verified state and a durable copy of the current bytes so the player can undo the restore. Both operations publish through the store's staged PGN write. The desktop supplies the history root and the command line currently supplies none. Revisit path ownership if players need history to follow a file to a new location.
 
 A single managed folder would require players to move or copy existing collections. Resolving a new name against the app's launch directory made its location depend on how the player started the app. The desktop shell uses `tauri-plugin-dialog` to offer the system's file, folder and save dialogs. Revisit the storage choice if players need a collection that travels between computers.
 

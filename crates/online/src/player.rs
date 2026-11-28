@@ -4,7 +4,7 @@ use std::path::Path;
 
 use time::Date;
 use time::format_description::well_known::Iso8601;
-use zobrist_store::PgnBatch;
+use zobrist_store::{PgnBatch, PgnHistory};
 
 use crate::{FetchError, request_export};
 
@@ -88,15 +88,28 @@ pub fn download_player_games(
     to: &str,
     destination: &Path,
 ) -> Result<u64, PlayerExportError> {
+    download_player_games_with_history(username, from, to, destination, None)
+        .map(|(added, _)| added)
+}
+
+/// Download games and optionally capture the previous PGN at publication.
+/// Returns the number appended and any warning from recording history.
+pub fn download_player_games_with_history(
+    username: &str,
+    from: &str,
+    to: &str,
+    destination: &Path,
+    history: Option<PgnHistory<'_>>,
+) -> Result<(u64, Option<String>), PlayerExportError> {
     let path = export_path(username, from, to)?;
     let batch = request_export(&path, "application/x-ndjson", None, |response| {
         read_batch(BufReader::new(response), MAX_RECORD_BYTES, MAX_BATCH_BYTES)
     })?;
     match batch {
         Some(batch) => batch
-            .append_to(destination)
+            .append_to(destination, history)
             .map_err(PlayerExportError::Storage),
-        None => Ok(0),
+        None => Ok((0, None)),
     }
 }
 

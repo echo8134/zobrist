@@ -1,41 +1,12 @@
 import { createHash } from "node:crypto";
-import { once } from "node:events";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { cleanupWdioSession, startWdioSession } from "@wdio/tauri-service";
 import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
 
+import { withDesktopApp } from "./desktop-session";
+
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
-
-async function availablePort() {
-  // The normal test window already owns its driver's port.
-  await using listener = createServer().listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const address = listener.address();
-  if (!address || typeof address === "string") throw new Error("No TCP port");
-  return address.port;
-}
-
-async function withApp(
-  data: string,
-  check: (app: WebdriverIO.Browser) => Promise<void>,
-) {
-  const app = await startWdioSession({
-    "tauri:options": { application: `${target}/debug/zobrist-app` },
-    "wdio:tauriServiceOptions": {
-      embeddedPort: await availablePort(),
-      env: { XDG_DATA_HOME: data, XDG_CACHE_HOME: `${data}/cache` },
-    },
-  });
-  try {
-    await app.switchToWindow("main");
-    await check(app);
-  } finally {
-    await cleanupWdioSession(app);
-  }
-}
 
 const settings = (app: WebdriverIO.Browser) => app.$("nav").$("aria/Settings");
 async function openBoard(app: WebdriverIO.Browser, tabCount: number) {
@@ -199,7 +170,7 @@ describe("board appearance", () => {
   it("uses the choices on open and new boards and after quitting the app", async function () {
     this.timeout(60000);
     const data = `${runDirectory}/board-appearance`;
-    await withApp(data, async (app) => {
+    await withDesktopApp(data, async (app) => {
       await settings(app).click();
       await expect(control(app, "Piece set")).toHaveValue("cburnett");
       for (const label of ["Piece set", "Board colours", "Show coordinates"]) {
@@ -244,8 +215,9 @@ describe("board appearance", () => {
       await expectCoordinates(app, "", "");
     });
 
-    await withApp(data, async (app) => {
-      await openBoard(app, 1);
+    await withDesktopApp(data, async (app) => {
+      await expect(app.$$("header [role=tab]")).toBeElementsArrayOfSize(2);
+      await openBoard(app, 3);
       await expectChessnutBoard(app);
       await expectCoordinates(app, "", "");
       const image = await app.saveScreenshot(
@@ -299,12 +271,12 @@ describe("board appearance", () => {
       '{"pieceSet":"chessnut","boardPalette":"blue","showCoordinates":false}',
   })) {
     it(`shows the default board and explains how to recover settings with ${problem}`, async () => {
-      const data = `${runDirectory}/damaged-board-settings`;
+      const data = `${runDirectory}/damaged-board-settings-${problem}`;
       const directory = `${data}/io.github.echo8134.zobrist`;
       const path = `${directory}/settings.json`;
       mkdirSync(directory, { recursive: true });
       writeFileSync(path, contents);
-      await withApp(data, async (app) => {
+      await withDesktopApp(data, async (app) => {
         await openBoard(app, 1);
         await expectDefaultBoard(app);
         await settings(app).click();

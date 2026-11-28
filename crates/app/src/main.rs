@@ -58,7 +58,11 @@ async fn answer(
 fn main() -> tauri::Result<()> {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(SharedGames::default())
+        .setup(|app| {
+            let directory = app.path().app_local_data_dir().map_err(|e| e.to_string());
+            app.manage(SharedGames::with_history(directory));
+            Ok(())
+        })
         .on_window_event(|window, event| {
             // Closing before startup finishes must leave the previous boards on disk,
             // including when Rust refused to read them.
