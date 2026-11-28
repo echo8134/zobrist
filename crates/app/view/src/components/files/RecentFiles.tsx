@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { CollectionEntry } from "./generated/CollectionEntry";
-import { ask, errorText } from "./ipc";
+import type { CollectionEntry } from "../../generated/CollectionEntry";
+import { ask, errorText } from "../../ipc";
 import styles from "./RecentFiles.module.css";
 
 const { recent, path } = styles;

@@ -1,13 +1,6 @@
-import {
-  ChessKnight,
-  ChessPawn,
-  ChevronDown,
-  Monitor,
-  User,
-} from "lucide-react";
+import { ChessKnight, ChessPawn, ChevronDown, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Component } from "./component";
-import { ask } from "./ipc";
+import { ask } from "../../ipc";
 import { LichessDownload } from "./LichessDownload";
 import styles from "./UserPage.module.css";
 
@@ -49,7 +42,11 @@ const providers = [
 // Returning to User while a save finishes must read the name after that write.
 let lastWrite: Promise<void> = Promise.resolve();
 
-export function UserPage() {
+export function UserPage({
+  onGamesWritten,
+}: {
+  onGamesWritten: (path: string) => void;
+}) {
   const [savedName, setSavedName] = useState<string | null>();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
@@ -172,7 +169,11 @@ export function UserPage() {
                     </div>
                     {savedName !== undefined && errorMessage}
                   </form>
-                  <LichessDownload savedName={savedName} writing={writing} />
+                  <LichessDownload
+                    savedName={savedName}
+                    writing={writing}
+                    onGamesWritten={onGamesWritten}
+                  />
                 </>
               )}
             </details>
@@ -182,8 +183,3 @@ export function UserPage() {
     </div>
   );
 }
-
-export const user = {
-  name: "User",
-  page: { icon: User, view: () => <UserPage /> },
-} as const satisfies Component;

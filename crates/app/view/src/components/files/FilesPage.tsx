@@ -14,19 +14,20 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import styles from "./controls/CollectionPage.module.css";
-import { GameRows } from "./controls/GameRows";
+import type { App } from "../../component";
+import styles from "../../controls/CollectionPage.module.css";
+import { GameRows } from "../../controls/GameRows";
+import type { ChangedGameFile } from "../../generated/ChangedGameFile";
+import type { CollectionEntry } from "../../generated/CollectionEntry";
+import type { CollectionRequest } from "../../generated/CollectionRequest";
+import type { FileCollection } from "../../generated/FileCollection";
+import type { GameRow } from "../../generated/GameRow";
+import type { PgnFile } from "../../generated/PgnFile";
+import type { PgnFileAnswer } from "../../generated/PgnFileAnswer";
+import type { PickerChoice } from "../../generated/PickerChoice";
+import type { RefusalReason } from "../../generated/RefusalReason";
+import { ask, errorText } from "../../ipc";
 import { EarlierStates, FileConfirmation } from "./EarlierStates";
-import type { ChangedGameFile } from "./generated/ChangedGameFile";
-import type { CollectionEntry } from "./generated/CollectionEntry";
-import type { CollectionRequest } from "./generated/CollectionRequest";
-import type { FileCollection } from "./generated/FileCollection";
-import type { GameRow } from "./generated/GameRow";
-import type { PgnFile } from "./generated/PgnFile";
-import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
-import type { PickerChoice } from "./generated/PickerChoice";
-import type { RefusalReason } from "./generated/RefusalReason";
-import { ask, errorText } from "./ipc";
 import { fileWasOpened } from "./RecentFiles";
 
 const {
@@ -278,7 +279,7 @@ export async function openListed(
   }
 }
 
-export type DroppedPaths = Pick<
+type DroppedPaths = Pick<
   Extract<CollectionRequest, { type: "DropPgnPaths" }>,
   "paths"
 >;
@@ -363,6 +364,23 @@ async function rereadAfterRestore(path: string) {
       await openPgnPath("File", path);
     }
   }
+}
+
+/**
+ * Opens a game of a PGN file on a board, or shows the board that holds it already. Tells whether
+ * Rust opened the game.
+ */
+export async function openGame(
+  path: string,
+  number: number,
+  openOnBoard: App["openOnBoard"],
+) {
+  const { answer } = await ask({ type: "OpenGame", path, number });
+  if (answer.type === "Refusal") {
+    return false;
+  }
+  openOnBoard({ game: answer.game, picture: answer.picture });
+  return true;
 }
 
 type Props = {

@@ -230,23 +230,6 @@ export async function openTab(change: (change: Change) => void) {
   change({ type: "openTab", game, picture });
 }
 
-/**
- * Opens a game of a PGN file in a tab, or shows the tab that holds it already. Tells whether
- * Rust opened the game.
- */
-export async function openGame(
-  path: string,
-  number: number,
-  change: (change: Change) => void,
-) {
-  const { answer } = await ask({ type: "OpenGame", path, number });
-  if (answer.type === "Refusal") {
-    return false;
-  }
-  change({ type: "openTab", game: answer.game, picture: answer.picture });
-  return true;
-}
-
 async function drawAnswer(
   game: number,
   answer: Promise<{ picture: GamePicture | null }>,
