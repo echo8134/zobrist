@@ -5355,7 +5355,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zobrist-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "serde",
@@ -5374,7 +5374,7 @@ dependencies = [
 
 [[package]]
 name = "zobrist-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "zobrist-core",
@@ -5384,7 +5384,7 @@ dependencies = [
 
 [[package]]
 name = "zobrist-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pgn-reader",
  "shakmaty",
@@ -5392,11 +5392,11 @@ dependencies = [
 
 [[package]]
 name = "zobrist-engine"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "zobrist-online"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "reqwest",
  "serde_json",
@@ -5407,7 +5407,7 @@ dependencies = [
 
 [[package]]
 name = "zobrist-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crc32fast",
  "shakmaty",
