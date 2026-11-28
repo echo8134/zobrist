@@ -68,15 +68,19 @@ export function Frame() {
   }, [change]);
 
   useLayoutEffect(() => {
+    const leaveFocusedField = () => {
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement) focused.blur();
+    };
     const onDrop = async (event: CustomEvent<DroppedPaths>) => {
       if (!(await restoring.current) || document.body.inert) return;
+      leaveFocusedField();
       change({ type: "showPage", page: "Files" });
       await openPgnPath(event.detail);
     };
     const close = async () => {
       if (document.body.inert) return;
-      const focused = document.activeElement;
-      if (focused instanceof HTMLElement) focused.blur();
+      leaveFocusedField();
       document.body.inert = true;
       // Document shortcuts and an unfinished drag can still receive events outside the inert body.
       const input = new AbortController();

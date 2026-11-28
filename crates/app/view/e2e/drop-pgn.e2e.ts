@@ -101,6 +101,9 @@ describe("dropping files on the window", () => {
       }
       await expect(move()).toHaveText("e4");
       await expect(tab()).toHaveAttribute("aria-label", "New game, not saved");
+      const comment = () => app.$("main aside").$("aria/Comment");
+      await comment().setValue("Take the centre");
+      await expect(comment()).toBeFocused();
       await drop(app, [club]);
       await expectSelection(club, "Ada", "Bo", "1-0");
       mkdirSync(screenshots, { recursive: true });
@@ -112,6 +115,10 @@ describe("dropping files on the window", () => {
       ]);
       await tab().click();
       await expect(move()).toHaveText("e4");
+      await expect(
+        app.$("main aside ol").$("span=Take the centre"),
+      ).toBeDisplayed();
+      await expect(comment()).toHaveValue("Take the centre");
       await expect(tab()).toHaveAttribute("aria-label", "New game, not saved");
 
       await choose("Files");
@@ -153,6 +160,60 @@ describe("dropping files on the window", () => {
       await expect(status()).not.toExist();
       await choose("Home");
       await expectRecent(app, [league, club]);
+    });
+  });
+
+  it("keeps the player name being edited when a PGN is dropped", async () => {
+    using work = mkdtempDisposableSync(join(tmpdir(), "zobrist-"));
+    const club = join(work.path, "Club.pgn");
+    writeFileSync(club, game);
+    await withDesktopApp(join(work.path, "data"), async (app) => {
+      await app.$("header").$("aria/New board").click();
+      await app.$("main aside").$("aria/Show the game data").click();
+      const form = () => app.$("main aside form");
+      await form().$("aria/Black").setValue("Bo");
+      await form().$("aria/White").setValue("Ada");
+      await expect(form().$("aria/White")).toBeFocused();
+      await drop(app, [club]);
+      await app.$('header [role="tab"]').click();
+      await expect(app.$('header [role="tab"]')).toHaveText("Ada - Bo");
+      await expect(form().$("aria/White")).toHaveValue("Ada");
+    });
+  });
+
+  it("keeps opening the selected file when a drop is refused", async () => {
+    using work = mkdtempDisposableSync(join(tmpdir(), "zobrist-"));
+    const club = join(work.path, "Club.pgn");
+    const league = join(work.path, "League.pgn");
+    writeFileSync(club, game);
+    writeFileSync(league, "");
+    await withDesktopApp(join(work.path, "data"), async (app) => {
+      for (const path of [club, league]) {
+        await drop(app, [path]);
+        await expect(app.$('section[aria-label="Selection"] h2')).toHaveText(
+          basename(path),
+        );
+      }
+      const clubEntry = await app
+        .$('section[aria-label="Collection"]')
+        .$("button=Club.pgn");
+      // Deliver both actions in one turn, before the window can receive the read's answer.
+      await app.execute(
+        `
+        arguments[0].click();
+        window.dispatchEvent(new CustomEvent("zobrist-file-drop", {detail: {paths: arguments[1]}}));
+      `,
+        clubEntry,
+        [club, league],
+      );
+      const selection = app.$('section[aria-label="Selection"]');
+      await expect(selection.$('[role="status"]')).toHaveText(
+        "Drop one PGN file at a time.",
+      );
+      await expect(selection.$("h2")).toHaveText("Club.pgn");
+      await expect(selection.$("td=Ada")).toBeDisplayed();
+      await app.$("nav").$("aria/Home").click();
+      await expectRecent(app, [club, league]);
     });
   });
 });

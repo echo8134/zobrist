@@ -172,21 +172,34 @@ export async function readFileAgain() {
   }
 }
 
+type SelectionRequest = number | Extract<Selection, { kind: "Opening" }>;
+
+function isCurrentSelection(request: SelectionRequest) {
+  // A refused drop leaves an in-flight open in control of its selection.
+  return typeof request === "number"
+    ? request === selectionRequest
+    : request === kept.selected;
+}
+
 function beginSelection(path: string) {
-  const request = ++selectionRequest;
-  keep({ selected: { kind: "Opening", path }, selectionError: null });
-  return request;
+  ++selectionRequest;
+  const opening = { kind: "Opening", path } as const;
+  keep({ selected: opening, selectionError: null });
+  return opening;
 }
 
 function failedSelection(
-  request: number,
-  previous: Selection | null,
+  request: SelectionRequest,
   error: unknown,
+  previous?: Selection | null,
 ) {
-  if (request === selectionRequest) {
+  if (isCurrentSelection(request)) {
+    const fallback = previous?.kind === "Opening" ? null : previous;
     keep({
-      selected: previous?.kind === "Opening" ? null : previous,
-      selectionError: errorText(error),
+      selected: fallback === undefined ? kept.selected : fallback,
+      selectionError:
+        (typeof request !== "number" && kept.selectionError) ||
+        errorText(error),
     });
   }
 }
@@ -230,7 +243,7 @@ export async function openListed(
         type: "ReadPgnFolder",
         path: entry.path,
       });
-      if (request === selectionRequest) {
+      if (isCurrentSelection(request)) {
         keep({
           expanded: new Map(kept.expanded).set(entry.path, entries),
           selected: { kind: "Folder", entry, root },
@@ -242,24 +255,20 @@ export async function openListed(
         path: entry.path,
       });
       if (answer.type === "Refusal") {
-        failedSelection(
-          request,
-          {
-            kind: "Unreadable",
-            path: entry.path,
-            listed: { entry, root },
-          },
-          refusalText(answer),
-        );
+        failedSelection(request, refusalText(answer), {
+          kind: "Unreadable",
+          path: entry.path,
+          listed: { entry, root },
+        });
         return;
       }
       fileWasOpened();
-      if (request === selectionRequest) {
+      if (isCurrentSelection(request)) {
         keep({ selected: { kind: "File", entry, root, file: answer } });
       }
     }
   } catch (error) {
-    failedSelection(request, entry.kind === "File" ? null : previous, error);
+    failedSelection(request, error, entry.kind === "File" ? null : previous);
   }
 }
 
@@ -273,13 +282,15 @@ export async function openPgnPath(
   chosenPath?: string,
 ) {
   const previous = kept.selected;
-  let request = selectionRequest;
+  let fallback: Selection | null | undefined;
+  let request: SelectionRequest = selectionRequest;
   try {
     let operation: Extract<
       CollectionRequest,
       { type: "AddPgnPath" | "DropPgnPaths" }
     >;
     if (typeof input === "string") {
+      fallback = input === "File" ? null : previous;
       const folder = previous?.kind === "Folder" ? previous.entry.path : null;
       const choice = input;
       const path =
@@ -296,25 +307,21 @@ export async function openPgnPath(
     const { answer } = await ask(operation);
     if (input !== "New" && answer.type === "File") fileWasOpened();
     if (answer.type === "Refusal") {
-      const keepOnRefusal: Selection | null =
-        operation.type === "AddPgnPath" && operation.choice === "File"
-          ? { kind: "Unreadable", path: operation.path, listed: null }
-          : previous;
-      failedSelection(request, keepOnRefusal, refusalText(answer));
-    } else if (request === selectionRequest) {
+      if (operation.type === "AddPgnPath" && operation.choice === "File") {
+        fallback = { kind: "Unreadable", path: operation.path, listed: null };
+      }
+      failedSelection(request, refusalText(answer), fallback);
+    } else if (isCurrentSelection(request)) {
       const { entry } = answer;
       const fileCollection: FileCollection = {
         type: "Ready",
         entries: answer.entries,
       };
       const expanded = new Map(kept.expanded);
+      let selected: Selection;
       if (answer.type === "Folder") {
         expanded.set(entry.path, answer.children);
-        keep({
-          fileCollection,
-          expanded,
-          selected: { kind: "Folder", entry, root: entry.path },
-        });
+        selected = { kind: "Folder", entry, root: entry.path };
       } else {
         if (answer.parent !== null)
           expanded.set(answer.parent.path, answer.parent.entries);
@@ -322,15 +329,18 @@ export async function openPgnPath(
           answer.parent !== null && previous?.kind === "Folder"
             ? previous.root
             : entry.path;
-        keep({
-          fileCollection,
-          expanded,
-          selected: { kind: "File", entry, root, file: answer.file },
-        });
+        selected = { kind: "File", entry, root, file: answer.file };
       }
+      keep({
+        fileCollection,
+        expanded,
+        selected,
+        selectionError:
+          typeof request === "number" ? null : kept.selectionError,
+      });
     }
   } catch (error) {
-    failedSelection(request, input === "File" ? null : previous, error);
+    failedSelection(request, error, fallback);
   }
   // A failed open can be the first sign that the collection on disk needs recovery.
   await loadCollection();
