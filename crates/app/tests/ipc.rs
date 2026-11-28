@@ -79,7 +79,8 @@ fn main_line(notation: &str) -> Vec<Value> {
 fn start_picture() -> Value {
     json!({
         "revision": 0, "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        "pieceCount": 32, "turn": "white", "inCheck": false,
+        "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (32 on the board).",
+        "turn": "white", "inCheck": false,
         "legalMoves": legal_moves("a2a3 a2a4 b1a3 b1c3 b2b3 b2b4 c2c3 c2c4 d2d3 d2d4
                                   e2e3 e2e4 f2f3 f2f4 g1f3 g1h3 g2g3 g2g4 h2h3 h2h4"),
         "canUndo": false, "canRedo": false, "inVariation": false, "hasNextMove": false,
@@ -93,7 +94,8 @@ fn start_picture() -> Value {
 fn after_e4() -> Value {
     json!({
         "revision": 1, "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
-        "pieceCount": 32, "turn": "black", "inCheck": false,
+        "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (32 on the board).",
+        "turn": "black", "inCheck": false,
         "legalMoves": legal_moves("a7a5 a7a6 b7b5 b7b6 b8a6 b8c6 c7c5 c7c6 d7d5 d7d6
                                   e7e5 e7e6 f7f5 f7f6 g7g5 g7g6 g8f6 g8h6 h7h5 h7h6"),
         "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
@@ -118,7 +120,8 @@ fn after_c5_in_variation() -> Value {
     ]);
     json!({
         "revision": 4, "fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
-        "pieceCount": 32, "turn": "white", "inCheck": false,
+        "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (32 on the board).",
+        "turn": "white", "inCheck": false,
         "legalMoves": legal_moves("a2a3 a2a4 b1a3 b1c3 b2b3 b2b4 c2c3 c2c4 d1e2 d1f3 d1g4 d1h5 d2d3 d2d4
                                   e1e2 e4e5 f1a6 f1b5 f1c4 f1d3 f1e2 f2f3 f2f4 g1e2 g1f3 g1h3 g2g3 g2g4 h2h3 h2h4"),
         "canUndo": true, "canRedo": false, "inVariation": true, "hasNextMove": false,
@@ -485,7 +488,8 @@ fn the_board_offers_one_promotion_and_the_player_chooses_the_piece() -> serde_js
     let mut games = Games::default();
     let ready = json!({"type": "PlayMove", "picture": {
         "revision": 8, "fen": "rnbqkbnr/1ppppp1P/8/p7/8/8/PPPPPPP1/RNBQKBNR w KQkq - 0 5",
-        "pieceCount": 30, "turn": "white", "inCheck": false,
+        "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (30 on the board).",
+        "turn": "white", "inCheck": false,
         "legalMoves": legal_moves("a2a3 a2a4 b1a3 b1c3 b2b3 b2b4 c2c3 c2c4 d2d3 d2d4 e2e3 e2e4
                                   f2f3 f2f4 g1f3 g1h3 g2g3 g2g4 h1h2 h1h3 h1h4 h1h5 h1h6 h7g8="),
         "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
@@ -504,7 +508,8 @@ fn the_board_offers_one_promotion_and_the_player_chooses_the_piece() -> serde_js
         play(&mut games, "h7g8", Some("knight"))?,
         json!({"type": "PlayMove", "picture": {
             "revision": 9, "fen": "rnbqkbNr/1ppppp2/8/p7/8/8/PPPPPPP1/RNBQKBNR b KQkq - 0 5",
-            "pieceCount": 29, "turn": "black", "inCheck": false,
+            "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (29 on the board).",
+            "turn": "black", "inCheck": false,
             "legalMoves": legal_moves("a5a4 a8a6 a8a7 b7b5 b7b6 b8a6 b8c6 c7c5 c7c6 d7d5 d7d6 e7e5 e7e6
                                       f7f5 f7f6 f8g7 f8h6 h8g8 h8h1 h8h2 h8h3 h8h4 h8h5 h8h6 h8h7"),
             "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
@@ -527,7 +532,8 @@ fn both_castling_gestures_give_the_same_picture_and_the_board_offers_one() -> se
             play_line(&mut games, "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5")?,
             json!({"type": "PlayMove", "picture": {
                 "revision": 6, "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
-                "pieceCount": 32, "turn": "white", "inCheck": false,
+                "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (32 on the board).",
+                "turn": "white", "inCheck": false,
                 "legalMoves": legal_moves("a2a3 a2a4 b1a3 b1c3 b2b3 b2b4 c2c3 c4a6 c4b3 c4b5 c4d3 c4d5 c4e2
                                           c4e6 c4f1 c4f7 d1e2 d2d3 d2d4 e1e2 e1f1 e1g1 f3d4 f3e5 f3g1 f3g5
                                           f3h4 g2g3 g2g4 h1f1 h1g1 h2h3 h2h4"),
@@ -543,7 +549,8 @@ fn both_castling_gestures_give_the_same_picture_and_the_board_offers_one() -> se
             play(&mut games, gesture, None)?,
             json!({"type": "PlayMove", "picture": {
                 "revision": 7, "fen": "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 5 4",
-                "pieceCount": 32, "turn": "black", "inCheck": false,
+                "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (32 on the board).",
+                "turn": "black", "inCheck": false,
                 "legalMoves": legal_moves("a7a5 a7a6 a8b8 b7b5 b7b6 c5a3 c5b4 c5b6 c5d4 c5d6 c5e3 c5e7 c5f2
                                           c5f8 c6a5 c6b4 c6b8 c6d4 c6e7 d7d5 d7d6 d8e7 d8f6 d8g5 d8h4
                                           e8e7 e8f8 f7f5 f7f6 g7g5 g7g6 g8e7 g8f6 g8h6 h7h5 h7h6"),
@@ -566,7 +573,8 @@ fn a_mated_side_is_in_check_and_has_no_legal_move() -> serde_json::Result<()> {
         play_line(&mut games, "e2e4 e7e5 d1h5 b8c6 f1c4 g8f6 h5f7")?,
         json!({"type": "PlayMove", "picture": {
             "revision": 7, "fen": "r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4",
-            "pieceCount": 31, "turn": "black", "inCheck": true, "legalMoves": [],
+            "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (31 on the board).",
+            "turn": "black", "inCheck": true, "legalMoves": [],
             "canUndo": true, "canRedo": false, "inVariation": false, "hasNextMove": false,
             "tags": [], "result": "unknown", "squares": [], "arrows": [],
             "file": null, "unsaved": true,
@@ -702,7 +710,7 @@ fn setting_a_start_position_reports_the_board_or_the_refusal() -> serde_json::Re
     let mut setup = start_picture();
     setup["revision"] = json!(2);
     setup["fen"] = json!(fen);
-    setup["pieceCount"] = json!(3);
+    setup["tablebaseUnavailableReason"] = Value::Null;
     setup["legalMoves"] = json!(legal_moves("e1d1 e1d2 e1f1 e1f2 e2e3 e2e4"));
     setup["canUndo"] = json!(true);
     setup["tags"] = json!([{"name": "SetUp", "value": "1"}, {"name": "FEN", "value": fen}]);
