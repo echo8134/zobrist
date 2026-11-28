@@ -5,16 +5,20 @@ use std::sync::{Arc, PoisonError, Weak};
 
 use zobrist_store::PendingWrite;
 
-use super::{DatabaseRequest, DesktopRequest, Response, SharedGames};
+use super::{AccountRequest, DatabaseRequest, DesktopRequest, Response, SharedGames};
 
 #[derive(Clone, Copy)]
 enum Task {
     Import,
+    Download,
 }
 
 impl Task {
     fn close_message(self) -> &'static str {
         match self {
+            Self::Download => {
+                "A download is still running. zobrist closes when it finishes. Close again to stop it and quit."
+            }
             Self::Import => {
                 "An import is still running. zobrist closes when it finishes. Close again to stop it and quit."
             }
@@ -35,7 +39,7 @@ pub struct RunningWrite(Arc<PendingWrite>);
 impl RunningWrite {
     /// The worker must obtain permission before it publishes its staged file.
     #[must_use]
-    pub fn permission(&self) -> &PendingWrite {
+    pub fn permission(&self) -> &Arc<PendingWrite> {
         &self.0
     }
 }
@@ -49,13 +53,19 @@ impl Drop for RunningWrite {
 impl SharedGames {
     /// Registers a long request before it enters the blocking worker queue.
     pub fn start_write(&self, request: &DesktopRequest) -> io::Result<Option<RunningWrite>> {
-        if !matches!(
+        let kind = if matches!(
             request,
             DesktopRequest::Databases(DatabaseRequest::ImportDatabase { .. })
         ) {
+            Task::Import
+        } else if matches!(
+            request,
+            DesktopRequest::Account(AccountRequest::DownloadLichessGames { .. })
+        ) {
+            Task::Download
+        } else {
             return Ok(None);
-        }
-        let kind = Task::Import;
+        };
         let mut tasks = self
             .long_tasks
             .lock()

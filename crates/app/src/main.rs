@@ -68,7 +68,7 @@ async fn answer(
             spawn_blocking(move || request.answer(&window, write.as_ref()))
         }
         DesktopRequest::Account(request) => {
-            spawn_blocking(move || request.answer(&data_directory(&window)?))
+            spawn_blocking(move || request.answer(&data_directory(&window)?, write.as_ref()))
         }
         DesktopRequest::Appearance(request) => {
             spawn_blocking(move || request.answer(&data_directory(&window)?))

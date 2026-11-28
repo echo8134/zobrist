@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::Response;
 use super::file_collection::{history_at, list_recovery, publish_collection, read_list};
+use super::{Response, RunningWrite};
 
 /// Operations on the saved public Lichess username and its games.
 #[derive(Deserialize, TS)]
@@ -44,7 +44,7 @@ struct Accounts {
 
 impl AccountRequest {
     /// Uses the app data directory for the saved name and PGN history.
-    pub fn answer(self, directory: &Path) -> io::Result<Response> {
+    pub fn answer(self, directory: &Path, write: Option<&RunningWrite>) -> io::Result<Response> {
         match self {
             Self::GetLichessName => Ok(Response::GetLichessName {
                 name: read(&directory.join("accounts.json"))?.lichess_username,
@@ -80,12 +80,14 @@ impl AccountRequest {
                 let file_name = path
                     .file_name()
                     .ok_or_else(|| io::Error::other("Choose a PGN file."))?;
-                let (added, warning) = zobrist_online::download_player_games_with_history(
+                let standalone = RunningWrite::default();
+                let (added, warning) = zobrist_online::download_player_games_for_task(
                     &name,
                     &from,
                     &to,
                     &path,
                     Some(history_at(directory)),
+                    write.unwrap_or(&standalone).permission(),
                 )
                 .map_err(io::Error::other)?;
                 Ok(Response::DownloadLichessGames {
@@ -138,7 +140,7 @@ mod tests {
         AccountRequest::SaveLichessName {
             name: "  Knight / ♘  ".to_owned(),
         }
-        .answer(&directory)?;
+        .answer(&directory, None)?;
         let path = directory.join("accounts.json");
         let original = fs::read(&path)?;
         assert_eq!(
@@ -148,12 +150,12 @@ mod tests {
         let empty = AccountRequest::SaveLichessName {
             name: "  ".to_owned(),
         }
-        .answer(&directory);
+        .answer(&directory, None);
         assert!(matches!(empty, Err(error) if error.to_string() == "Enter a Lichess username."));
         fs::create_dir(directory.join("accounts.tmp"))?;
         assert!(
             AccountRequest::RemoveLichessName
-                .answer(&directory)
+                .answer(&directory, None)
                 .is_err()
         );
         assert_eq!(fs::read(path)?, original);

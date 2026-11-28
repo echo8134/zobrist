@@ -64,7 +64,7 @@ impl DatabaseRequest {
             .path()
             .app_local_data_dir()
             .map_err(io::Error::other)?;
-        self.apply(&directory, write.map(RunningWrite::permission))
+        self.apply(&directory, write.map(|write| write.permission().as_ref()))
     }
 
     fn apply(self, directory: &Path, write: Option<&PendingWrite>) -> io::Result<Response> {

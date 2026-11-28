@@ -509,3 +509,37 @@ fn closing_names_the_import_until_it_finishes_or_is_abandoned() -> io::Result<()
     assert_eq!(close(false)?, waiting);
     Ok(())
 }
+
+#[test]
+fn closing_again_abandons_both_the_download_and_the_import() -> io::Result<()> {
+    let games = SharedGames::default();
+    let download = serde_json::from_value(
+        json!({"type":"DownloadLichessGames","name":"RookExample","from":"2024-01-01","to":"2024-01-02","path":"games.pgn"}),
+    )?;
+    let import = serde_json::from_value(
+        json!({"type":"ImportDatabase","source":"games.pgn","destination":"study.zobrist"}),
+    )?;
+    let download = games.start_write(&download)?.unwrap();
+    let import = games.start_write(&import)?.unwrap();
+    let close = |abandon| {
+        ask(
+            &games,
+            Path::new("."),
+            json!({"type":"PrepareToClose", "abandon":abandon}),
+        )
+    };
+    assert_eq!(
+        close(false)?,
+        json!({"type":"PrepareToClose","message":"A download is still running. zobrist closes when it finishes. Close again to stop it and quit."})
+    );
+    assert_eq!(
+        close(true)?,
+        json!({"type":"PrepareToClose","message":null})
+    );
+    for task in [download, import] {
+        assert!(
+            matches!(zobrist_store::PgnBatch::for_task(task.permission()), Err(error) if error.kind() == io::ErrorKind::Interrupted)
+        );
+    }
+    Ok(())
+}

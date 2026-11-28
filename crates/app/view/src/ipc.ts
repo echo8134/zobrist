@@ -19,7 +19,10 @@ export function ask<Asked extends Request>(
   });
   // A read-only lookup can outlive a save or the board that requested it.
   if (request.type === "LookupTablebase") return answer;
-  if (request.type === "ImportDatabase") {
+  if (
+    request.type === "ImportDatabase" ||
+    request.type === "DownloadLichessGames"
+  ) {
     const pending = answer.finally(() => longRequests.delete(pending));
     longRequests.add(pending);
     return pending;
