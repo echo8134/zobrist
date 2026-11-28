@@ -325,6 +325,22 @@ fn an_incomplete_write_keeps_the_previous_session_and_later_changes_win() -> io:
         let mut writer = block_on(games.one_save.lock());
         let older = block_on(games.games.lock()).snapshot(&[1], Some(1))?;
         let staged = older.stage(&directory)?;
+        // Both close requests can answer before the staged session is published.
+        for abandon in [false, true] {
+            let request =
+                serde_json::from_value(json!({"type":"PrepareToClose","abandon":abandon}))?;
+            let mut close = pin!(games.answer_session(request, directory.clone()));
+            let answer = close.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+            let std::task::Poll::Ready(answer) = answer else {
+                return Err(io::Error::other(
+                    "the close request waited for the staged board write",
+                ));
+            };
+            assert_eq!(
+                serde_json::to_value(answer?)?,
+                json!({"type":"PrepareToClose","message":null})
+            );
+        }
         let after_crash = restore(&SharedGames::default(), &directory)?;
         let picture = &after_crash["boards"][0]["picture"];
         assert_eq!(picture["notation"].as_array().unwrap().len(), 1);
@@ -584,4 +600,69 @@ fn an_unwritable_game_keeps_the_previous_record() -> io::Result<()> {
     assert!(quit(&games, &directory, &[1, 2], Some(2)).is_err());
     assert_eq!(fs::read(record)?, previous);
     fs::remove_dir_all(directory)
+}
+
+#[test]
+fn closing_names_the_import_until_it_finishes_or_is_abandoned() -> io::Result<()> {
+    let games = SharedGames::default();
+    let directory = Path::new(".");
+    let close = |abandon| {
+        ask(
+            &games,
+            directory,
+            json!({"type":"PrepareToClose","abandon":abandon}),
+        )
+    };
+    let import = serde_json::from_value(
+        json!({"type":"ImportDatabase","source":"source.pgn","destination":"study.zobrist"}),
+    )?;
+    let ready = json!({"type":"PrepareToClose","message":null});
+    let waiting = json!({"type":"PrepareToClose","message":"An import is still running. zobrist closes when it finishes. Close again to stop it and quit."});
+    assert_eq!(close(false)?, ready);
+    let running = games.start_write(&import)?;
+    assert_eq!(close(false)?, waiting);
+    drop(running);
+    assert_eq!(close(false)?, ready);
+    let _running = games.start_write(&import)?;
+    assert_eq!(close(true)?, ready);
+    assert_eq!(close(false)?, ready);
+    assert!(games.start_write(&import).is_err());
+    games.resume_writes();
+    let _new = games.start_write(&import)?;
+    assert_eq!(close(false)?, waiting);
+    Ok(())
+}
+
+#[test]
+fn closing_again_abandons_both_the_download_and_the_import() -> io::Result<()> {
+    let games = SharedGames::default();
+    let download = serde_json::from_value(
+        json!({"type":"DownloadLichessGames","name":"RookExample","from":"2024-01-01","to":"2024-01-02","path":"games.pgn"}),
+    )?;
+    let import = serde_json::from_value(
+        json!({"type":"ImportDatabase","source":"games.pgn","destination":"study.zobrist"}),
+    )?;
+    let download = games.start_write(&download)?.unwrap();
+    let import = games.start_write(&import)?.unwrap();
+    let close = |abandon| {
+        ask(
+            &games,
+            Path::new("."),
+            json!({"type":"PrepareToClose", "abandon":abandon}),
+        )
+    };
+    assert_eq!(
+        close(false)?,
+        json!({"type":"PrepareToClose","message":"A download is still running. zobrist closes when it finishes. Close again to stop it and quit."})
+    );
+    assert_eq!(
+        close(true)?,
+        json!({"type":"PrepareToClose","message":null})
+    );
+    for task in [download, import] {
+        assert!(
+            matches!(zobrist_store::PgnBatch::for_task(task.permission()), Err(error) if error.kind() == io::ErrorKind::Interrupted)
+        );
+    }
+    Ok(())
 }

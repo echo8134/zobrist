@@ -3,7 +3,11 @@
 /**
  * An operation on the board tabs kept across app restarts.
  */
-export type SessionRequest = { "type": "RestoreBoards" } | { "type": "CheckpointBoards", 
+export type SessionRequest = { "type": "PrepareToClose", 
+/**
+ * Whether the player has closed the window again.
+ */
+abandon: boolean, } | { "type": "RestoreBoards" } | { "type": "CheckpointBoards", 
 /**
  * Open game numbers in tab order.
  */

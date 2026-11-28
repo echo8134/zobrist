@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test, vi } from "vitest";
-import { answersOnTheirWay, ask, finishRequests } from "./ipc";
+import { answersOnTheirWay, ask, finishRequests, prepareToClose } from "./ipc";
 
 // The stand-in for Rust. Only the module under test imports the real function.
 const invoke = vi.hoisted(() => vi.fn());
@@ -91,18 +91,105 @@ test("quitting waits for a new board and a save that was waiting for a field", a
     steps.push("saved");
   });
 
-  const quit = finishRequests("all").then(() => steps.push("quit"));
   finishTag();
   await answersOnTheirWay(7);
-  expect(steps).toEqual([]);
+  await invoke.withImplementation(
+    async (_command, { request }) => {
+      expect(request).toEqual({ type: "PrepareToClose", abandon: false });
+      return { type: "PrepareToClose", message: null };
+    },
+    async () => {
+      const showWaiting = vi.fn();
+      const quit = prepareToClose(
+        new AbortController().signal,
+        showWaiting,
+      ).then(() => steps.push("quit"));
+      await vi.waitFor(() => expect(showWaiting).toHaveBeenCalledWith(null));
+      expect(steps).toEqual([]);
 
-  finishSave();
-  await answersOnTheirWay(7);
-  expect(steps).toEqual(["saved"]);
+      finishSave();
+      await answersOnTheirWay(7);
+      expect(steps).toEqual(["saved"]);
 
-  finishOpen();
-  await quit;
-  expect(steps).toEqual(["saved", "opened", "quit"]);
+      finishOpen();
+      await quit;
+      expect(steps).toEqual(["saved", "opened", "quit"]);
+    },
+  );
+});
+
+test("a close waits for an import even if Rust receives the close request first", async () => {
+  let finishImport = () => {};
+  invoke
+    .mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishImport = resolve;
+      }),
+    )
+    .mockResolvedValueOnce({ type: "PrepareToClose", message: null })
+    .mockResolvedValueOnce({
+      type: "PrepareToClose",
+      message: "Still importing.",
+    })
+    .mockResolvedValueOnce({ type: "PrepareToClose", message: null });
+  void ask({
+    type: "ImportDatabase",
+    source: "a.pgn",
+    destination: "a.zobrist",
+  });
+  const showWaiting = vi.fn();
+  const closing = prepareToClose(new AbortController().signal, showWaiting);
+  try {
+    await vi.waitFor(() =>
+      expect(showWaiting).toHaveBeenCalledWith("Still importing."),
+    );
+  } finally {
+    finishImport();
+    await closing;
+  }
+});
+
+test("closing twice abandons the task immediately and still waits for the pending board edit", async () => {
+  let finishEdit = () => {};
+  let finishImport = () => {};
+  invoke
+    .mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishEdit = resolve;
+      }),
+    )
+    .mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishImport = resolve;
+      }),
+    )
+    .mockResolvedValueOnce({ type: "PrepareToClose", message: null });
+  void ask({ type: "SetTag", game: 7, tag: "White", text: "Epsilon" });
+  void ask({
+    type: "ImportDatabase",
+    source: "a.pgn",
+    destination: "a.zobrist",
+  });
+  const second = new AbortController();
+  const readyToSaveBoards = vi.fn();
+  const closing = prepareToClose(second.signal, vi.fn()).then(
+    readyToSaveBoards,
+  );
+  second.abort();
+  try {
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("answer", {
+        request: { type: "PrepareToClose", abandon: true },
+      }),
+    );
+    expect(readyToSaveBoards).not.toHaveBeenCalled();
+    finishEdit();
+    await closing;
+    expect(readyToSaveBoards).toHaveBeenCalledOnce();
+  } finally {
+    finishEdit();
+    finishImport();
+  }
 });
 
 test("a game can be saved while the tablebase is still answering", async () => {
@@ -114,8 +201,9 @@ test("a game can be saved while the tablebase is still answering", async () => {
   );
   const lookup = ask({ type: "LookupTablebase", game: 4, revision: 2 });
   expect(answersOnTheirWay(4)).toBeUndefined();
-  await finishRequests("boards");
-  await finishRequests("all");
+  await finishRequests();
+  invoke.mockResolvedValueOnce({ type: "PrepareToClose", message: null });
+  await prepareToClose(new AbortController().signal, vi.fn());
   refuse(new Error("offline"));
   await expect(lookup).rejects.toThrow("offline");
 });
@@ -135,9 +223,7 @@ test("a checkpoint waits for a game opening from a collection", async () => {
       path: "Study.zobrist",
       number: 2,
     }).then(() => steps.push("opened"));
-    const checkpoint = finishRequests("boards").then(() =>
-      steps.push("checkpoint"),
-    );
+    const checkpoint = finishRequests().then(() => steps.push("checkpoint"));
     await vi.runAllTimersAsync();
     finishOpen();
     await opening;

@@ -37,6 +37,7 @@ Tauri shell with a React view. The view lives in `crates/app/view` and reaches R
 Before starting the window toolkit, the shell takes an exclusive OS lock on app.lock in its local data directory. It resolves this folder with `dirs` and the identifier from Tauri's app configuration. It holds the lock until exit so only one process can use the boards and file collection in that directory.
 
 The shell keeps the open boards in boards.json beside files.json in the app's local data directory. It writes the session after board changes settle and flushes pending changes on a normal quit. For a board from a PGN file it also keeps the game as last read or saved there, so Save can detect a change to the file even after a restart. When the player deletes that game, the board retains its moves and its session origin becomes `"deleted"`, so it can be saved as a new game after a restart.
+Closing the window waits for a running PGN import or player download. Closing it again discards unfinished work and still saves the open boards. Once a task starts publishing its result, it finishes that write before the app exits.
 If a saved session is damaged, the app keeps the original, saves the boards it can read for the next start, and tells the player where it kept the original file.
 
 ### `scripts/`

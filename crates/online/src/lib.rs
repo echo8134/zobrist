@@ -3,7 +3,10 @@
 mod player;
 mod tablebase;
 
-pub use player::{PlayerExportError, download_player_games, download_player_games_with_history};
+pub use player::{
+    PlayerExportError, download_player_games, download_player_games_for_task,
+    download_player_games_with_history,
+};
 pub use tablebase::{
     TablebaseError, TablebaseMove, TablebaseOutcome, TablebaseResult, lookup_tablebase,
 };

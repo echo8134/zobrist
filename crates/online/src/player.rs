@@ -1,10 +1,11 @@
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read as _};
 use std::path::Path;
+use std::sync::Arc;
 
 use time::Date;
 use time::format_description::well_known::Iso8601;
-use zobrist_store::{PgnBatch, PgnHistory};
+use zobrist_store::{PendingWrite, PgnBatch, PgnHistory};
 
 use crate::{Endpoint, FetchError, request};
 
@@ -101,12 +102,31 @@ pub fn download_player_games_with_history(
     destination: &Path,
     history: Option<PgnHistory<'_>>,
 ) -> Result<(u64, Option<String>), PlayerExportError> {
+    download_player_games_for_task(username, from, to, destination, history, &Arc::default())
+}
+
+/// Downloads a batch that the desktop may abandon before its PGN and history are published.
+pub fn download_player_games_for_task(
+    username: &str,
+    from: &str,
+    to: &str,
+    destination: &Path,
+    history: Option<PgnHistory<'_>>,
+    write: &Arc<PendingWrite>,
+) -> Result<(u64, Option<String>), PlayerExportError> {
     let path = export_path(username, from, to)?;
     let batch = request(
         Endpoint::Export(&path),
         "application/x-ndjson",
         None,
-        |response| read_batch(BufReader::new(response), MAX_RECORD_BYTES, MAX_BATCH_BYTES),
+        |response| {
+            read_batch(
+                BufReader::new(response),
+                MAX_RECORD_BYTES,
+                MAX_BATCH_BYTES,
+                write,
+            )
+        },
     )?;
     match batch {
         Some(batch) => batch
@@ -154,6 +174,7 @@ fn read_batch(
     mut source: impl BufRead,
     record_limit: u64,
     batch_limit: u64,
+    write: &Arc<PendingWrite>,
 ) -> Result<Option<PgnBatch>, PlayerExportError> {
     let mut batch = None;
     let mut line = Vec::new();
@@ -188,7 +209,7 @@ fn read_batch(
             .ok_or(PlayerExportError::InvalidRecord)?;
         let batch = match &mut batch {
             Some(existing) => existing,
-            None => batch.insert(PgnBatch::new().map_err(PlayerExportError::Storage)?),
+            None => batch.insert(PgnBatch::for_task(write).map_err(PlayerExportError::Storage)?),
         };
         batch.push(pgn).map_err(PlayerExportError::Storage)?;
     }
@@ -240,18 +261,21 @@ mod tests {
 
     #[test]
     fn framing_and_limits_apply_even_without_a_final_newline() {
-        assert!(matches!(read_batch(&b"\r\n\n"[..], 2, 3), Ok(None)));
         assert!(matches!(
-            read_batch(&b"123456"[..], 5, 20),
+            read_batch(&b"\r\n\n"[..], 2, 3, &Arc::default()),
+            Ok(None)
+        ));
+        assert!(matches!(
+            read_batch(&b"123456"[..], 5, 20, &Arc::default()),
             Err(PlayerExportError::RecordTooLarge)
         ));
         assert!(matches!(
-            read_batch(&b"\n\n\n"[..], 5, 2),
+            read_batch(&b"\n\n\n"[..], 5, 2, &Arc::default()),
             Err(PlayerExportError::BatchTooLarge)
         ));
         for bytes in [&b"{}\n"[..], b"{\"pgn\":13}\n", b"{\"pgn\":\"1. e4 1-0\"}"] {
             assert!(matches!(
-                read_batch(bytes, 30, 90),
+                read_batch(bytes, 30, 90, &Arc::default()),
                 Err(PlayerExportError::InvalidRecord)
             ));
         }

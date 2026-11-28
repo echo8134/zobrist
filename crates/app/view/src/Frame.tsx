@@ -38,11 +38,12 @@ declare global {
   }
 }
 
-const { frame, startup, problem: problemLine } = styles;
+const { frame, startup, waiting: waitingLine, problem: problemLine } = styles;
 
 export function Frame() {
   const [shown, setShown] = useState<Shown>();
   const [problem, setProblem] = useState<string>();
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [checkpointProblem, setCheckpointProblem] = useState<string>();
   const [iconBarOpen, setIconBarOpen] = useState(true);
   // A save or a close reads changes that React may not have drawn yet.
@@ -79,6 +80,7 @@ export function Frame() {
   }, [change]);
 
   useLayoutEffect(() => {
+    let closing: AbortController | undefined;
     const leaveFocusedField = () => {
       const focused = document.activeElement;
       if (focused instanceof HTMLElement) focused.blur();
@@ -90,7 +92,11 @@ export function Frame() {
       await openPgnPath(event.detail);
     };
     const close = async () => {
-      if (document.body.inert) return;
+      if (closing) {
+        closing.abort();
+        return;
+      }
+      closing = new AbortController();
       leaveFocusedField();
       document.body.inert = true;
       // Document shortcuts and an unfinished drag can still receive events outside the inert body.
@@ -103,12 +109,14 @@ export function Frame() {
       }
       try {
         if (await restoring.current) {
-          await session.quit();
+          await session.quit(closing.signal, setWaiting);
           return;
         }
       } catch (error) {
         setProblem(`Cannot save your boards before quitting. ${String(error)}`);
       }
+      setWaiting(null);
+      closing = undefined;
       document.body.inert = false;
       input.abort();
     };
@@ -151,6 +159,20 @@ export function Frame() {
 
   return (
     <div className={frame}>
+      {waiting && (
+        <dialog
+          className={waitingLine}
+          aria-labelledby="closing-message"
+          ref={(dialog) => {
+            if (dialog && !dialog.open) dialog.showModal();
+          }}
+          onCancel={(event) => event.preventDefault()}
+        >
+          <p role="status" id="closing-message">
+            {waiting}
+          </p>
+        </dialog>
+      )}
       {(problem || checkpointProblem) && (
         <p role="alert" className={problemLine}>
           {[problem, checkpointProblem].filter(Boolean).join(" ")}

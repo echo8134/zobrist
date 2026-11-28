@@ -8,8 +8,8 @@ use shakmaty::{Chess, Outcome};
 use zobrist_core::game::{Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
 use zobrist_store::{
-    PgnBatch, PgnGameRow, PgnHistory, PgnState, PgnStateDetails, add_pgn_game, add_pgn_games,
-    delete_pgn_game, list_pgn_games, pgn_states, prepare_pgn_restore, read_pgn_game,
+    PendingWrite, PgnBatch, PgnGameRow, PgnHistory, PgnState, PgnStateDetails, add_pgn_game,
+    add_pgn_games, delete_pgn_game, list_pgn_games, pgn_states, prepare_pgn_restore, read_pgn_game,
     replace_pgn_game, restore_pgn_state,
 };
 
@@ -58,6 +58,29 @@ fn batch_preserves_a_variant_and_appends_after_a_save_during_staging() -> io::Re
         fs::read_to_string(&path)?,
         format!("{original}\n\n{saved}\n")
     );
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn an_abandoned_batch_cannot_append_or_record_history_after_its_input_resumes() -> io::Result<()> {
+    let root = target("abandoned-batch");
+    fs::create_dir(&root)?;
+    let path = root.join("games.pgn");
+    fs::write(&path, OLD_GAME)?;
+    let write = std::sync::Arc::new(PendingWrite::default());
+    let mut batch = PgnBatch::for_task(&write)?;
+    batch.push("1. d4 1-0")?;
+    write.abandon();
+    write.finish_abandoning();
+    assert_eq!(
+        batch
+            .append_to(&path, Some(history(&root)))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::Interrupted
+    );
+    assert_eq!(fs::read(&path)?, OLD_GAME);
+    assert_eq!(root.read_dir()?.count(), 1);
     fs::remove_dir_all(root)
 }
 

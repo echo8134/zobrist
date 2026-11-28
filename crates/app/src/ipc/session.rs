@@ -19,6 +19,11 @@ use super::{GamePicture, GameSource, Games, OpenGame, Response, SharedGames};
 #[derive(Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum SessionRequest {
+    /// Check for tasks on first close, or stop pending writes on second close.
+    PrepareToClose {
+        /// Whether the player has closed the window again.
+        abandon: bool,
+    },
     /// Load the board session at startup.
     RestoreBoards,
     /// Keep the settled boards for the next start.
@@ -88,11 +93,11 @@ impl SharedGames {
         request: SessionRequest,
         directory: PathBuf,
     ) -> io::Result<Response> {
-        // A board snapshot needs the origin installed by any preceding Save.
-        let mut file = self.one_save.lock().await;
         let quitting = matches!(request, SessionRequest::QuitWithBoards { .. });
         match request {
+            SessionRequest::PrepareToClose { abandon } => Ok(self.prepare_to_close(abandon)),
             SessionRequest::RestoreBoards => {
+                let mut file = self.one_save.lock().await;
                 if let Some(&selected) = self.restored_selection.get() {
                     return Ok(self.games.lock().await.board_pictures(selected, None));
                 }
@@ -116,6 +121,8 @@ impl SharedGames {
             }
             SessionRequest::CheckpointBoards { boards, selected }
             | SessionRequest::QuitWithBoards { boards, selected } => {
+                // A board snapshot needs the origin installed by any preceding Save.
+                let mut file = self.one_save.lock().await;
                 let snapshot = self.games.lock().await.snapshot(&boards, selected)?;
                 let response = if quitting {
                     Response::QuitWithBoards

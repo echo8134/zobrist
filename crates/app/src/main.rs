@@ -12,7 +12,7 @@ use tauri::{
     async_runtime::spawn_blocking,
 };
 use tauri_plugin_dialog::DialogExt as _;
-use zobrist_app::ipc::{DesktopRequest, Response, SharedGames};
+use zobrist_app::ipc::{DesktopRequest, Response, SessionRequest, SharedGames};
 
 #[tauri::command]
 async fn answer(
@@ -26,6 +26,9 @@ async fn answer(
             .app_local_data_dir()
             .map_err(std::io::Error::other)
     };
+    let write = games
+        .start_write(&request)
+        .map_err(|error| error.to_string())?;
     let task = match request {
         DesktopRequest::Editor(request) => {
             return games
@@ -34,13 +37,23 @@ async fn answer(
                 .map_err(|error| error.to_string());
         }
         DesktopRequest::Session(request) => {
-            let directory = data_directory(&window).map_err(|error| error.to_string())?;
+            let quitting = matches!(request, SessionRequest::QuitWithBoards { .. });
+            let on_error = |error: io::Error| {
+                if quitting {
+                    games.resume_writes();
+                }
+                error.to_string()
+            };
+            let directory = data_directory(&window).map_err(on_error)?;
             let response = games
                 .answer_session(request, directory)
                 .await
-                .map_err(|error| error.to_string())?;
-            if matches!(response, Response::QuitWithBoards) {
-                window.destroy().map_err(|error| error.to_string())?;
+                .map_err(on_error)?;
+            if quitting {
+                window
+                    .destroy()
+                    .map_err(io::Error::other)
+                    .map_err(on_error)?;
             }
             return Ok(response);
         }
@@ -52,9 +65,11 @@ async fn answer(
                 .map_err(|error| error.to_string());
         }
         DesktopRequest::Collection(request) => spawn_blocking(move || request.answer(&window)),
-        DesktopRequest::Databases(request) => spawn_blocking(move || request.answer(&window)),
+        DesktopRequest::Databases(request) => {
+            spawn_blocking(move || request.answer(&window, write.as_ref()))
+        }
         DesktopRequest::Account(request) => {
-            spawn_blocking(move || request.answer(&data_directory(&window)?))
+            spawn_blocking(move || request.answer(&data_directory(&window)?, write.as_ref()))
         }
         DesktopRequest::Appearance(request) => {
             spawn_blocking(move || request.answer(&data_directory(&window)?))

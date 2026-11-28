@@ -5,7 +5,7 @@ use std::path::Path;
 
 use zobrist_core::pgn::{self, Entry};
 
-use crate::DatabaseWriter;
+use crate::{DatabaseWriter, PendingWrite};
 
 /// Totals for PGN entries read in source order.
 #[derive(Default)]
@@ -37,12 +37,33 @@ pub enum ImportError {
 pub fn import_pgn(
     source: &Path,
     destination: &Path,
-    mut diagnostics: impl FnMut(Option<String>) -> io::Result<()>,
+    diagnostics: impl FnMut(Option<String>) -> io::Result<()>,
 ) -> Result<PgnReport, ImportError> {
+    import_pgn_for_task(
+        source,
+        destination,
+        &PendingWrite::default(),
+        diagnostics,
+        || (),
+    )
+    .map(|(report, ())| report)
+}
+
+/// Imports a PGN with an owner's permission to publish the new database. After the file
+/// is staged, `before_publication` can acquire what its caller needs to register it.
+pub fn import_pgn_for_task<T>(
+    source: &Path,
+    destination: &Path,
+    task: &PendingWrite,
+    mut diagnostics: impl FnMut(Option<String>) -> io::Result<()>,
+    before_publication: impl FnOnce() -> T,
+) -> Result<(PgnReport, T), ImportError> {
     let file = File::open(source).map_err(ImportError::Read)?;
-    let mut writer = DatabaseWriter::create(destination).map_err(ImportError::Create)?;
+    let mut writer =
+        DatabaseWriter::create_for_task(destination, task).map_err(ImportError::Create)?;
     let mut report = PgnReport::default();
     read_pgn_entries(file, ImportError::Read, |entry| {
+        task.check().map_err(ImportError::Create)?;
         if let Some(line) = report.count(&entry) {
             diagnostics(Some(line)).map_err(ImportError::Create)?;
         }
@@ -52,8 +73,10 @@ pub fn import_pgn(
         Ok(())
     })?;
     diagnostics(None).map_err(ImportError::Create)?;
-    writer.finish().map_err(ImportError::Create)?;
-    Ok(report)
+    let prepared = writer
+        .finish_for_task(task, before_publication)
+        .map_err(ImportError::Create)?;
+    Ok((report, prepared))
 }
 
 /// Stops reading the PGN when its consumer fails, including when the input is a pipe.

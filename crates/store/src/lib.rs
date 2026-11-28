@@ -49,11 +49,15 @@
 
 mod codec;
 mod import;
+mod pending_write;
 mod pgn_file;
 mod pgn_history;
 mod query;
 
-pub use import::{ImportError, PgnReport, import_pgn, problem_line, read_pgn_entries};
+pub use import::{
+    ImportError, PgnReport, import_pgn, import_pgn_for_task, problem_line, read_pgn_entries,
+};
+pub use pending_write::PendingWrite;
 pub use pgn_file::{
     PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, list_pgn_games,
     read_pgn_game, replace_pgn_game,
@@ -74,6 +78,7 @@ use std::iter;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Once};
 
 use crc32fast::Hasher;
 use zobrist_core::game::Game;
@@ -291,7 +296,7 @@ fn copy_with_checksum(mut source: impl Read, mut target: impl Write) -> io::Resu
     }
 }
 
-struct StagingDirectory(PathBuf);
+struct StagingDirectory(PathBuf, Once);
 
 impl StagingDirectory {
     fn beside(target: &Path) -> io::Result<Self> {
@@ -313,17 +318,23 @@ impl StagingDirectory {
             }
             let path = parent.join(temporary);
             match directory.create(&path) {
-                Ok(()) => return Ok(Self(path)),
+                Ok(()) => return Ok(Self(path, Once::new())),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
             }
         }
     }
+
+    fn remove(&self) {
+        self.1.call_once(|| {
+            fs::remove_dir_all(&self.0).ok();
+        });
+    }
 }
 
 impl Drop for StagingDirectory {
     fn drop(&mut self) {
-        fs::remove_dir_all(&self.0).ok();
+        self.remove();
     }
 }
 
@@ -331,35 +342,40 @@ impl Drop for StagingDirectory {
 pub struct DatabaseWriter {
     target: PathBuf,
     parts: [BufWriter<File>; PARTS],
-    staging: StagingDirectory,
+    staging: Arc<StagingDirectory>,
     encoder: Option<codec::Encoder>,
 }
 
 impl DatabaseWriter {
     /// Starts a database in the target's directory. An existing target is refused.
     pub fn create(target: &Path) -> io::Result<Self> {
+        Self::create_for_task(target, &PendingWrite::default())
+    }
+
+    fn create_for_task(target: &Path, task: &PendingWrite) -> io::Result<Self> {
         let target = std::path::absolute(target)?;
         match fs::symlink_metadata(&target) {
             Ok(_) => return Err(io::ErrorKind::AlreadyExists.into()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
-        let staging = StagingDirectory::beside(&target)?;
-        let create = |name: &str| File::create_new(staging.0.join(name)).map(BufWriter::new);
-        let parts = [
-            create("games")?,
-            create("moves")?,
-            create("starts")?,
-            create("names")?,
-            create("values")?,
-            create("tags")?,
-            create("annotations")?,
-        ];
-        Ok(Self {
-            target,
-            parts,
-            staging,
-            encoder: Some(codec::Encoder::default()),
+        task.stage(&target, |staging| {
+            let create = |name: &str| File::create_new(staging.0.join(name)).map(BufWriter::new);
+            let parts = [
+                create("games")?,
+                create("moves")?,
+                create("starts")?,
+                create("names")?,
+                create("values")?,
+                create("tags")?,
+                create("annotations")?,
+            ];
+            Ok(Self {
+                target: target.clone(),
+                parts,
+                staging,
+                encoder: Some(codec::Encoder::default()),
+            })
         })
     }
 
@@ -374,10 +390,18 @@ impl DatabaseWriter {
     }
 
     /// Syncs the segment, publishes it without replacing any file, and syncs the directory.
-    pub fn finish(mut self) -> io::Result<()> {
+    pub fn finish(self) -> io::Result<()> {
+        self.finish_for_task(&PendingWrite::default(), || ())
+    }
+
+    fn finish_for_task<T>(
+        mut self,
+        task: &PendingWrite,
+        before_publication: impl FnOnce() -> T,
+    ) -> io::Result<T> {
         self.encoder.take().ok_or_else(failed_push)?;
         let path = self.staging.0.join("database");
-        let mut file = BufWriter::new(File::create_new(&path)?);
+        let mut file = BufWriter::new(task.prepare(|_| File::create_new(&path))?);
         file.write_all(MAGIC)?;
         file.write_all(&VERSION.to_le_bytes())?;
         file.write_all(&0_u64.to_le_bytes())?;
@@ -412,10 +436,14 @@ impl DatabaseWriter {
             options.write(true).custom_flags(0x0200_0000);
         }
         let directory = options.open(parent)?;
+        task.check()?;
+        let prepared = before_publication();
+        task.begin_publication()?;
         fs::hard_link(path, &self.target)?;
         drop(file);
         drop(self);
-        directory.sync_all()
+        directory.sync_all()?;
+        Ok(prepared)
     }
 }
 

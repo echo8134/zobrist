@@ -11,13 +11,32 @@
   padding: var(--area-padding);
 }
 
+.waiting,
 .problem {
   position: fixed;
   z-index: 1;
   inset: auto 0 0;
   margin: 0;
   padding: var(--refused-save-padding);
+  border: 0;
   border-top: 1px solid var(--top-bar-line-color);
   background: var(--background-color);
+}
+
+.problem {
   color: var(--refusal-color);
+}
+
+.waiting {
+  width: 100%;
+  max-width: none;
+  color: var(--text-color);
+}
+
+.waiting p {
+  margin: 0;
+}
+
+.waiting::backdrop {
+  background: transparent;
 }

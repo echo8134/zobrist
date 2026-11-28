@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::pgn_file::{Staged, content_version, list_changed, open, stage_without_game};
-use crate::{PgnWriteConflict, StagingDirectory, copy_with_checksum, read_bytes};
+use crate::{PendingWrite, PgnWriteConflict, StagingDirectory, copy_with_checksum, read_bytes};
 
 const MAGIC: &[u8; 8] = b"ZPGNHST\x01";
 const HEADER_BYTES: u64 = 28;
@@ -219,7 +219,12 @@ impl StateFolder {
         self.path.join(format!("{number}.state"))
     }
 
-    fn capture(&self, old: &mut File, captured_at: u64) -> io::Result<Capture> {
+    fn capture(
+        &self,
+        old: &mut File,
+        captured_at: u64,
+        write: &PendingWrite,
+    ) -> io::Result<Capture> {
         if self.path.metadata()?.permissions().readonly() {
             return Err(ErrorKind::PermissionDenied.into());
         }
@@ -231,9 +236,11 @@ impl StateFolder {
             .checked_add(1)
             .ok_or_else(|| io::Error::other("No state number is available."))?;
         let path = self.state(number);
-        let staging = StagingDirectory::beside(&path)?;
-        let temporary = staging.0.join("state");
-        let mut state = File::create_new(&temporary)?;
+        let (_staging, temporary, mut state) = write.stage(&path, |staging| {
+            let temporary = staging.0.join("state");
+            let state = File::create_new(&temporary)?;
+            Ok((staging, temporary, state))
+        })?;
         state.write_all(MAGIC)?;
         state.write_all(&captured_at.to_le_bytes())?;
         state.write_all(&[0; 12])?;
@@ -244,6 +251,7 @@ impl StateFolder {
         state.write_all(&checksum.to_le_bytes())?;
         state.sync_all()?;
         drop(state);
+        write.begin_publication()?;
         fs::rename(temporary, &path)?;
         let capture = Capture {
             path,
@@ -359,26 +367,30 @@ impl SaveTarget {
     }
 
     pub(super) fn publish(self, staged: Staged) -> io::Result<Option<String>> {
-        let Some((time, folder)) = self.history else {
+        let publish_without_history = |staged: Staged| {
+            staged.file.sync_all()?;
             staged.publish()?;
-            return Ok(None);
+            Ok(None)
+        };
+        let Some((time, folder)) = self.history else {
+            return publish_without_history(staged);
         };
         let old = File::open(&self.path);
         if old
             .as_ref()
             .is_err_and(|error| error.kind() == ErrorKind::NotFound)
         {
-            staged.publish()?;
-            return Ok(None);
+            return publish_without_history(staged);
         }
         if let Ok(file) = &old
             && equal_bytes(file, &staged.file).unwrap_or(false)
         {
             return Ok(None);
         }
+        staged.file.sync_all()?;
         let captured = match &folder {
             Ok(folder) => old
-                .and_then(|mut file| folder.capture(&mut file, time))
+                .and_then(|mut file| folder.capture(&mut file, time, &staged.write))
                 .map_err(|reason| {
                     HistoryFailure {
                         path: folder.path.clone(),
@@ -519,7 +531,7 @@ impl ProtectedChange {
         if self.version(&target, &mut current)? != expected {
             return Err(self.changed());
         }
-        let staged = Staged::beside(target.clone(), Some(&current))?;
+        let staged = Staged::beside(&target, Some(&current))?;
         if let Self::Restore(number) = self {
             read_state(&folder.state(number), &staged.file)?;
             if equal_bytes(&current, &staged.file)? {
@@ -527,7 +539,7 @@ impl ProtectedChange {
             }
         }
         let capture = folder
-            .capture(&mut current, history.captured_at)
+            .capture(&mut current, history.captured_at, &staged.write)
             .map_err(|reason| {
                 HistoryFailure {
                     path: folder.path.clone(),
@@ -542,6 +554,7 @@ impl ProtectedChange {
                 read_header(&mut snapshot)?;
                 stage_without_game(&target, number, expected, snapshot, &staged.file)?;
             }
+            staged.file.sync_all()?;
             staged.publish_if(|| {
                 let version = path
                     .canonicalize()

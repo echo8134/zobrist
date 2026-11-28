@@ -3,6 +3,7 @@ import type { DesktopRequest as Request } from "./generated/DesktopRequest";
 import type { Response } from "./generated/Response";
 
 const onTheirWay = new Map<Promise<void>, number | "boards" | "background">();
+const longRequests = new Set<Promise<unknown>>();
 
 export function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -15,8 +16,18 @@ export function ask<Asked extends Request>(
   const answer = invoke<Extract<Response, { type: Asked["type"] }>>("answer", {
     request,
   });
+  // A close query must not count itself among the requests it is checking.
+  if (request.type === "PrepareToClose") return answer;
   // A read-only lookup can outlive a save or the board that requested it.
   if (request.type === "LookupTablebase") return answer;
+  if (
+    request.type === "ImportDatabase" ||
+    request.type === "DownloadLichessGames"
+  ) {
+    const pending = answer.finally(() => longRequests.delete(pending));
+    longRequests.add(pending);
+    return pending;
+  }
   const game = "game" in request ? request.game : undefined;
   // A fetched link joins the session when its answer opens the tab.
   const changesBoards =
@@ -40,19 +51,14 @@ export function ask<Asked extends Request>(
 
 /**
  * A game save waits for edits to that game. A checkpoint waits for all board actions.
- * A quit also waits for unrelated work such as an import. In each case the senders need
- * a turn to apply their answers before the view can take its snapshot.
+ * The senders need a turn to apply their answers before the view can take its snapshot.
  */
 export function answersOnTheirWay(
-  scope: number | "boards" | "all",
+  scope: number | "boards",
 ): Promise<void> | undefined {
   const pending = [];
   for (const [answer, action] of onTheirWay) {
-    if (
-      scope === "all" ||
-      scope === action ||
-      (scope === "boards" && action !== "background")
-    ) {
+    if (scope === action || (scope === "boards" && action !== "background")) {
       pending.push(answer);
     }
   }
@@ -61,13 +67,51 @@ export function answersOnTheirWay(
     : undefined;
 }
 
-/** Include requests that the senders start when they handle their answers. */
-export async function finishRequests(scope: "boards" | "all") {
+/** Wait for board actions, including any that their answers start. */
+export async function finishRequests() {
   // Chessground delivers a completed move in a timer after the mouse event.
   await new Promise<void>((resolve) => setTimeout(resolve, 1));
   for (;;) {
-    const pending = answersOnTheirWay(scope);
+    const pending = answersOnTheirWay("boards");
     if (!pending) return;
     await pending;
+  }
+}
+
+/** Shows Rust's reason for waiting and gives up the tasks if the window is closed again. */
+export async function prepareToClose(
+  secondClose: AbortSignal,
+  showWaiting: (message: string | null) => void,
+) {
+  const repeated = new Promise<void>((resolve) => {
+    if (secondClose.aborted) resolve();
+    else secondClose.addEventListener("abort", () => resolve(), { once: true });
+  });
+  async function waitForTasks() {
+    // Chessground delivers a completed move in a timer after the mouse event.
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    while (!secondClose.aborted) {
+      const { message } = await ask({ type: "PrepareToClose", abandon: false });
+      if (secondClose.aborted) return;
+      showWaiting(message);
+      if (message === null && longRequests.size === 0) {
+        if (onTheirWay.size === 0) return;
+        // A picker can start a long task while another request is still pending.
+        await Promise.race([repeated, ...onTheirWay.keys()]);
+        continue;
+      }
+      // The close request can reach Rust before the request that started the task.
+      const changed =
+        message === null || longRequests.size === 0
+          ? new Promise<void>((resolve) => setTimeout(resolve, 50))
+          : Promise.race(longRequests).catch(() => {});
+      await Promise.race([changed, repeated]);
+    }
+  }
+  await Promise.race([waitForTasks(), repeated]);
+  if (secondClose.aborted) {
+    await ask({ type: "PrepareToClose", abandon: true });
+    longRequests.clear();
+    await finishRequests();
   }
 }
