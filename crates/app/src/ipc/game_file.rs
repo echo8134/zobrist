@@ -3,6 +3,7 @@
 use std::io;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -31,6 +32,8 @@ impl SaveHistory {
 
 /// A game that is open in the app.
 pub(super) struct OpenGame {
+    pub(super) position: super::analysis::BoardPosition,
+    pub(super) analysis: Arc<Mutex<super::analysis::BoardAnalysis>>,
     pub(super) editor: GameEditor,
     /// Where the game came from. A game that was never in a file has none.
     pub(super) file: Option<InFile>,
@@ -47,7 +50,13 @@ pub(super) struct InFile {
 
 impl OpenGame {
     pub(super) fn picture(&self) -> GamePicture {
-        GamePicture::from_editor(&self.editor, self.file.as_ref())
+        GamePicture::from_editor(&self.editor, self.file.as_ref(), self.position.revision)
+    }
+
+    pub(super) fn edit<T>(&mut self, change: impl FnOnce(&mut GameEditor) -> T) -> T {
+        let result = change(&mut self.editor);
+        self.position.follow(&self.editor);
+        result
     }
 }
 

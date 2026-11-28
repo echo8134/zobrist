@@ -22,11 +22,23 @@ pr_body = """
 name = "zobrist-cli"
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
-changelog_include = ["zobrist-core", "zobrist-store", "zobrist-online", "zobrist-app"]
+changelog_include = ["zobrist-core", "zobrist-store", "zobrist-engine", "zobrist-online", "zobrist-app"]
 git_tag_enable = true
 git_release_enable = true
 git_release_name = "v{{ version }}"
 git_release_draft = true
+
+# v0.1.0 predates zobrist-engine. With no matching tag, release-plz treats the crate as new.
+# Remove this entry once a workspace release tag contains the crate.
+[[package]]
+name = "zobrist-engine"
+git_tag_name = "{{ package }}-v{{ version }}"
+
+# v0.1.0 predates zobrist-online. With no matching tag, release-plz treats the crate as new.
+# Remove this entry once a workspace release tag contains the crate.
+[[package]]
+name = "zobrist-online"
+git_tag_name = "{{ package }}-v{{ version }}"
 
 [changelog]
 commit_parsers = [

@@ -1,14 +1,13 @@
 //! The engine programs registered on this computer.
 
 use std::collections::HashSet;
-use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::file_collection::{lock_collection, publish_collection};
+use super::file_collection::{list_recovery, lock_collection, publish_collection, read_list};
 
 /// A change to the ordered inventory, or a request to read it.
 #[derive(Deserialize, TS)]
@@ -38,6 +37,15 @@ pub enum EngineAction {
 pub struct EngineEntry {
     name: String,
     path: PathBuf,
+}
+
+/// The first registered executable is the default in the Engines page.
+pub(super) fn default_program(directory: &Path) -> io::Result<PathBuf> {
+    read(&directory.join("engines.json"))?
+        .into_iter()
+        .next()
+        .map(|entry| entry.path)
+        .ok_or_else(|| io::Error::other("Choose a default engine on the Engines page."))
 }
 
 impl EngineAction {
@@ -131,25 +139,27 @@ fn entry(path: PathBuf) -> io::Result<EngineEntry> {
 }
 
 fn read(inventory: &Path) -> io::Result<Vec<EngineEntry>> {
-    let bytes = match fs::read(inventory) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let paths: Vec<PathBuf> = serde_json::from_slice(&bytes)?;
-    let mut distinct = HashSet::new();
-    if paths.iter().any(|path| !distinct.insert(path)) {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "Duplicate path in the engine inventory.",
-        ));
-    }
-    paths.into_iter().map(entry).collect()
+    read_list(
+        inventory,
+        "the engine list",
+        &list_recovery("engine programs", "Engines"),
+        |bytes| {
+            let paths: Vec<PathBuf> = serde_json::from_slice(bytes)?;
+            let mut distinct = HashSet::new();
+            if paths.iter().any(|path| !distinct.insert(path)) {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "Duplicate path in the engine inventory.",
+                ));
+            }
+            paths.into_iter().map(entry).collect()
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{env, process, thread};
+    use std::{env, fs, process, thread};
 
     use serde_json::json;
 

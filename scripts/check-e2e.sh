@@ -4,7 +4,7 @@
 set -u -o pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
-cargo build -p zobrist-app --features webdriver --locked || exit 1
+cargo build -p zobrist-app -p zobrist-cli --features webdriver --locked || exit 1
 
 # The tag names the content of the Dockerfile, so the image is built again only when that changes.
 image="zobrist-display:$(sha256sum scripts/display.Dockerfile | cut -c 1-12)"

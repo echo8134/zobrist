@@ -375,7 +375,7 @@ describe("the page Files", () => {
       writeFileSync(collection, "[[");
       await files();
       await expect(line()).toHaveText(
-        `Could not read the file collection at ${collection}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.`,
+        `Could not read the file collection at ${collection}. Your existing PGN files are untouched. Choose Recover file list to restore the last good copy.`,
       );
     } finally {
       writeFileSync(collection, original);
