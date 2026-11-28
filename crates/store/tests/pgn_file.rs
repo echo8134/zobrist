@@ -386,6 +386,74 @@ fn deletes_one_listed_game_and_restores_every_original_byte() -> io::Result<()> 
 }
 
 #[test]
+fn deleting_a_game_preserves_unowned_escape_lines() -> io::Result<()> {
+    let root = target("delete-escape-lines");
+    fs::create_dir(&root)?;
+    let cases = [
+        (
+            2,
+            "[White \"A\"]\n\n1. e4 *\n\n[White \"B\"]\n\n1. d4 *\n\n% note for the next game\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+            "[White \"A\"]\n\n1. e4 *\n\n% note for the next game\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+        ),
+        (
+            1,
+            "[White \"A\"]\n\n1. e4 *\n\n% note for the next game\n[White \"B\"]\n\n1. d4 *\n",
+            "% note for the next game\n[White \"B\"]\n\n1. d4 *\n",
+        ),
+        (
+            2,
+            "[White \"A\"]\n\n1. e4 *\n\n% note before the last game\n[White \"B\"]\n\n1. d4 *\n",
+            "[White \"A\"]\n\n1. e4 *\n\n% note before the last game\n",
+        ),
+        (
+            2,
+            "[White \"A\"]\n\n1. e4 *\n\n[White \"B\"]\n\n1. d4 *\n\n% end of the file \t\n",
+            "[White \"A\"]\n\n1. e4 *\n% end of the file \t\n",
+        ),
+    ];
+    for (index, (row, original, remaining)) in cases.into_iter().enumerate() {
+        for (name, ending) in [("LF", "\n"), ("CRLF", "\r\n")] {
+            let file = root.join(format!("{index}-{name}.pgn"));
+            fs::write(&file, original.replace('\n', ending))?;
+            let (_, _, version) = list_pgn_games(&file)?;
+            delete_pgn_game(&file, number(row)?, &version, history(&root))?;
+            assert_eq!(
+                fs::read_to_string(&file)?,
+                remaining.replace('\n', ending),
+                "case {index}, {name}"
+            );
+        }
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn refuses_deletion_that_would_join_an_escape_line_to_a_surviving_game() -> io::Result<()> {
+    let root = target("delete-escape-after-byte-order-mark");
+    fs::create_dir(&root)?;
+    let file = root.join("Club.pgn");
+    let originals: &[&[u8]] = &[
+        b"1. e4 *\xef\xbb\xbf[White \"B\"]\n\n1. d4 *\n\n% {comment}\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+        b"1. e4 *\xef\xbb\xbf[White \"B\"]\n\n1. d4 *\n\n% note for the next game\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+    ];
+    for &original in originals {
+        fs::write(&file, original)?;
+        let (_, _, version) = list_pgn_games(&file)?;
+        let error = delete_pgn_game(&file, number(2)?, &version, history(&root)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Could not locate game 2 safely in {}. Your PGN file is untouched.",
+                file.display()
+            )
+        );
+        assert_eq!(fs::read(&file)?, original);
+        assert_eq!(pgn_states(&file, &root)?, []);
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
 fn refuses_to_guess_an_unknown_game_boundary_and_discards_the_capture() -> io::Result<()> {
     let root = target("delete-unknown");
     fs::create_dir(&root)?;

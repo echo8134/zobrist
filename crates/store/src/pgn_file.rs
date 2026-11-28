@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::num::NonZeroU64;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -434,54 +434,116 @@ pub(super) fn stage_without_game(
     snapshot.seek(SeekFrom::Start(payload))?;
     let mut staged = BufWriter::new(output);
     io::copy(&mut (&mut snapshot).take(prefix), &mut staged)?;
-    copy_separator(&mut snapshot, &mut staged, prefix..game.start, true)?;
+    copy_separator(
+        &mut snapshot,
+        &mut staged,
+        prefix..game.start,
+        true,
+        unknown,
+    )?;
     snapshot.seek(SeekFrom::Start(payload + game.end))?;
-    copy_separator(&mut snapshot, &mut staged, game.end..next, false)?;
+    copy_separator(&mut snapshot, &mut staged, game.end..next, false, unknown)?;
     io::copy(&mut snapshot, &mut staged)?;
     staged.flush()?;
     drop(staged);
-    let mut remaining = 0;
-    let mut input = output;
-    input.rewind()?;
-    pgn::read_games(input, |entry| {
-        if matches!(entry, Entry::Game { .. }) {
-            remaining += 1;
-        }
-    })?;
-    if remaining != games - 1 {
+    snapshot.seek(SeekFrom::Start(payload))?;
+    if !surviving_games_match(snapshot, number, output)? {
         return Err(unknown());
     }
     Ok(())
 }
 
+fn surviving_games_match(
+    original: File,
+    removed: NonZeroU64,
+    mut staged: &File,
+) -> io::Result<bool> {
+    staged.rewind()?;
+    // Compare the two readers in order without holding a whole PGN's games in memory.
+    std::thread::scope(|scope| {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let comparison = std::thread::Builder::new().spawn_scoped(scope, move || {
+            let mut equal = true;
+            pgn::read_games(staged, |entry| {
+                if let Entry::Game { game, problem, .. } = entry {
+                    equal &=
+                        receive.recv().ok() == Some((game, problem.map(|problem| problem.reason)));
+                }
+            })?;
+            Ok(equal && receive.recv().is_err())
+        })?;
+        let mut row = 0;
+        let read = pgn::read_games(original, |entry| {
+            if let Entry::Game { game, problem, .. } = entry {
+                row += 1;
+                if row != removed.get() {
+                    let _sent = send.send((game, problem.map(|problem| problem.reason)));
+                }
+            }
+        });
+        drop(send);
+        read?;
+        comparison.join().unwrap_or(Ok(false))
+    })
+}
+
 fn copy_separator(
     file: &mut File,
-    output: &mut impl Write,
+    output: &mut BufWriter<&File>,
     gap: Range<u64>,
-    mut keep_line: bool,
+    before_game: bool,
+    unknown: impl Fn() -> io::Error,
 ) -> io::Result<()> {
-    let mut left = gap.end - gap.start;
-    let mut buffer = [0; 8192];
-    let mut after_carriage_return = false;
-    while left != 0 {
-        let size = usize::try_from(left)
-            .unwrap_or(buffer.len())
-            .min(buffer.len());
-        file.read_exact(&mut buffer[..size])?;
-        for &byte in &buffer[..size] {
-            if after_carriage_return && byte != b'\n' {
-                keep_line = false;
-            }
-            if keep_line || !matches!(byte, b' ' | b'\t' | b'\r' | b'\n') {
-                output.write_all(&[byte])?;
-            }
-            if byte == b'\n' {
-                keep_line = false;
-            }
-            after_carriage_return = byte == b'\r';
-        }
-        left -= size as u64;
+    let length = gap.end - gap.start;
+    if length == 0 {
+        return Ok(());
     }
+    let start = file.stream_position()?;
+    let mut bytes = BufReader::new(file.take(length)).bytes().peekable();
+    let mut discard = 0..length;
+    let mut offset = 0;
+    let mut line_start = 0;
+    let mut has_text = false;
+    while let Some(byte) = bytes.next().transpose()? {
+        offset += 1;
+        match byte {
+            b'\n' => {}
+            b'\r' if before_game && line_start == 0 && !has_text => {
+                // The preceding entry keeps its own line ending, including a lone CR.
+                offset += u64::from(bytes.next_if(|next| matches!(next, Ok(b'\n'))).is_some());
+            }
+            b' ' | b'\t' | b'\r' => continue,
+            _ if before_game => {
+                has_text = true;
+                continue;
+            }
+            _ => {
+                if byte == b'%' && output.stream_position()? != 0 {
+                    output.seek(SeekFrom::Current(-1))?;
+                    let mut previous = [0];
+                    output.get_mut().read_exact(&mut previous)?;
+                    if previous != *b"\n" {
+                        return Err(unknown());
+                    }
+                }
+                discard.end = line_start;
+                break;
+            }
+        }
+        if before_game && (line_start == 0 || has_text) {
+            discard.start = offset;
+        }
+        line_start = offset;
+        has_text = false;
+    }
+    if before_game && (line_start == 0 || has_text) {
+        // The gap can end with a byte order mark directly before the selected game's first tag.
+        discard.end = line_start;
+    }
+    file.seek(SeekFrom::Start(start))?;
+    io::copy(&mut file.take(discard.start), output)?;
+    file.seek(SeekFrom::Start(start + discard.end))?;
+    io::copy(&mut file.take(length - discard.end), output)?;
     Ok(())
 }
 
