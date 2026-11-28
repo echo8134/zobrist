@@ -1,4 +1,3 @@
-import { once } from "node:events";
 import {
   copyFileSync,
   mkdirSync,
@@ -8,61 +7,16 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { cleanupWdioSession, startWdioSession } from "@wdio/tauri-service";
 import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
+import { withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
 
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
 const fixture = fileURLToPath(
   new URL("../../../cli/tests/fixtures/clean.pgn", import.meta.url),
 );
-
-async function runApp(
-  profile: string,
-  check: (app: WebdriverIO.Browser) => Promise<void>,
-) {
-  // Each gate run has its own display and a primary driver. The restarted app needs a second port.
-  const listener = createServer().listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const address = listener.address();
-  if (!address || typeof address === "string")
-    throw new Error("Missing TCP port");
-  const port = address.port;
-  await listener[Symbol.asyncDispose]();
-  const app = await startWdioSession({
-    "tauri:options": { application: `${target}/debug/zobrist-app` },
-    "wdio:tauriServiceOptions": {
-      driverProvider: "embedded",
-      embeddedPort: port,
-      env: { XDG_DATA_HOME: profile, XDG_CACHE_HOME: `${profile}/cache` },
-    },
-  });
-  try {
-    // After the last window closes, cleanup cannot retry against the exited process.
-    app.options.connectionRetryCount = 0;
-    await app.switchToWindow("main");
-    await check(app);
-    // Closing the last native window also takes its WebDriver server down, sometimes before the reply.
-    const endpoint = `http://127.0.0.1:${port}`;
-    const closed = await fetch(`${endpoint}/session/${app.sessionId}/window`, {
-      method: "DELETE",
-    }).catch(() => undefined);
-    if (closed) expect(closed.ok).toBe(true);
-    await app.waitUntil(
-      async () =>
-        fetch(`${endpoint}/status`).then(
-          () => false,
-          () => true,
-        ),
-      { timeoutMsg: "The app is still running after closing its window" },
-    );
-  } finally {
-    await cleanupWdioSession(app);
-  }
-}
 
 const tabs = (app: WebdriverIO.Browser) => app.$$('header [role="tab"]');
 const selected = (app: WebdriverIO.Browser) =>
@@ -145,7 +99,7 @@ describe("boards after quitting and starting zobrist", function () {
     const truncated = '{"boards":[';
     writeFileSync(session, truncated);
     const firstBackup = `${directory}/boards-recovery-1.json`;
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expectHome(app);
       await expect(app.$('[role="alert"]')).toHaveText(
         `Could not read the board session. The original file was kept at ${firstBackup}. Your PGN files are untouched. You can open a board and keep playing.`,
@@ -165,7 +119,7 @@ describe("boards after quitting and starting zobrist", function () {
     });
     writeFileSync(session, mixed);
     const secondBackup = `${directory}/boards-recovery-2.json`;
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expect(tabs(app)).toBeElementsArrayOfSize(1);
       await expectMove(app, "d4");
       await expect(app.$('[role="alert"]')).toHaveText(
@@ -177,7 +131,7 @@ describe("boards after quitting and starting zobrist", function () {
   });
 
   it("restores all three boards, saves game two in place and remembers the last closed tab", async () => {
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expectHome(app);
       await openGameTwo(app, file, true);
       await addComment(app);
@@ -190,7 +144,7 @@ describe("boards after quitting and starting zobrist", function () {
     });
 
     const original = readFileSync(fixture);
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expect(tabs(app)).toBeElementsArrayOfSize(3);
       expect(await tabs(app).map((tab) => tab.getText())).toEqual([
         "Alpha - Beta",
@@ -241,13 +195,13 @@ describe("boards after quitting and starting zobrist", function () {
       await expect(tabs(app)).toBeElementsArrayOfSize(0);
     });
 
-    await runApp(work, expectHome);
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, expectHome);
+    await withDesktopApp(work, async (app) => {
       await expectHome(app);
       await newBoard(app);
       await expect(selected(app)).toHaveText("New game");
     });
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expect(tabs(app)).toBeElementsArrayOfSize(1);
       await expect(selected(app)).toHaveText("New game");
       await expect(selected(app).$("span:empty")).not.toExist();
@@ -256,7 +210,7 @@ describe("boards after quitting and starting zobrist", function () {
   });
 
   it("keeps the unsaved comment and an outside edit to game two", async () => {
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expectHome(app);
       await openGameTwo(app, file, false);
       const blocked = `${work}/io.github.echo8134.zobrist/boards.json`;
@@ -273,7 +227,7 @@ describe("boards after quitting and starting zobrist", function () {
       '[White "Outside"]',
     );
     writeFileSync(file, outside);
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expect(selected(app)).toHaveText("Gamma - Delta");
       await app.$("main aside").$("aria/Save").click();
       await expect(app.$('main aside [role="alert"]')).toHaveText(
