@@ -182,7 +182,15 @@ collection: FileCollection, } | { "type": "RecoverFileCollection",
 /**
  * The recovered entries or the reason recovery could not complete.
  */
-collection: FileCollection, } | { "type": "ListPgnStates", 
+collection: FileCollection, } | { "type": "GetRecentFiles", 
+/**
+ * Up to ten PGN files, newest first.
+ */
+entries: Array<CollectionEntry>, } | { "type": "OpenListedPgnFile", 
+/**
+ * The file with its games or why it could not be opened.
+ */
+answer: PgnFileAnswer, } | { "type": "ListPgnStates", 
 /**
  * A damaged state still has its number.
  */

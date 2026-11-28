@@ -687,6 +687,16 @@ pub enum Response {
         /// The recovered entries or the reason recovery could not complete.
         collection: FileCollection,
     },
+    /// The files the player recently opened.
+    GetRecentFiles {
+        /// Up to ten PGN files, newest first.
+        entries: Vec<CollectionEntry>,
+    },
+    /// The PGN selected on Home or Files, or the refusal.
+    OpenListedPgnFile {
+        /// The file with its games or why it could not be opened.
+        answer: PgnFileAnswer,
+    },
     /// Earlier states of this PGN, most recent first.
     ListPgnStates {
         /// A damaged state still has its number.

@@ -1,5 +1,7 @@
 //! The player's collection of PGN files and folders at their original locations.
 
+mod recent_files;
+
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -36,6 +38,13 @@ pub enum CollectionRequest {
     GetFileCollection,
     /// Recover the collection after the player chooses its last good copy.
     RecoverFileCollection,
+    /// Load the most recently opened PGN files, newest first.
+    GetRecentFiles,
+    /// Open a PGN selected in a list on Files or Home.
+    OpenListedPgnFile {
+        /// The absolute path of the selected file.
+        path: PathBuf,
+    },
     /// List the states retained for one PGN.
     ListPgnStates {
         /// The selected PGN.
@@ -155,6 +164,19 @@ pub enum FileCollection {
     },
 }
 
+impl FileCollection {
+    fn load(directory: &Path, recover: bool) -> Self {
+        let lock = lock_collection(directory, "files.lock").ok();
+        match read_collection(directory, lock.as_ref(), recover) {
+            Ok(entries) => Self::Ready { entries },
+            Err((error, recoverable)) => Self::Unavailable {
+                message: error.to_string(),
+                recoverable,
+            },
+        }
+    }
+}
+
 impl CollectionEntry {
     fn new(kind: EntryKind, path: PathBuf) -> io::Result<Self> {
         if !path.is_absolute() {
@@ -234,23 +256,18 @@ impl CollectionRequest {
                     path: picker_path(selected)?,
                 })
             }
-            Self::GetFileCollection | Self::RecoverFileCollection => {
-                let directory = data_directory()?;
-                let recover = matches!(self, Self::RecoverFileCollection);
-                let lock = lock_collection(&directory, "files.lock").ok();
-                let collection = match read_collection(&directory, lock.as_ref(), recover) {
-                    Ok(entries) => FileCollection::Ready { entries },
-                    Err((error, recoverable)) => FileCollection::Unavailable {
-                        message: error.to_string(),
-                        recoverable,
-                    },
-                };
-                Ok(if recover {
-                    Response::RecoverFileCollection { collection }
-                } else {
-                    Response::GetFileCollection { collection }
-                })
-            }
+            Self::GetFileCollection => Ok(Response::GetFileCollection {
+                collection: FileCollection::load(&data_directory()?, false),
+            }),
+            Self::RecoverFileCollection => Ok(Response::RecoverFileCollection {
+                collection: FileCollection::load(&data_directory()?, true),
+            }),
+            Self::GetRecentFiles => Ok(Response::GetRecentFiles {
+                entries: recent_files::list(&data_directory()?)?,
+            }),
+            Self::OpenListedPgnFile { path } => Ok(Response::OpenListedPgnFile {
+                answer: open_listed(data_directory(), path)?,
+            }),
             Self::ListPgnStates { path } => {
                 let states = pgn_states(&path, &data_directory()?)?
                     .into_iter()
@@ -398,12 +415,26 @@ fn add(
             error
         }
     })?;
+    if choice == PickerChoice::File {
+        recent_files::record(directory, &entry.path);
+    }
     Ok(AddedPgnPath::File {
         entry,
         entries,
         parent,
         file,
     })
+}
+
+fn open_listed(directory: io::Result<PathBuf>, path: PathBuf) -> io::Result<PgnFileAnswer> {
+    let entry = CollectionEntry::new(EntryKind::File, path)?;
+    let answer = pgn_file::opened(&entry.path);
+    if matches!(answer, PgnFileAnswer::File(_))
+        && let Ok(directory) = directory
+    {
+        recent_files::record(&directory, &entry.path);
+    }
+    Ok(answer)
 }
 
 fn picker_path(selected: Option<tauri_plugin_dialog::FilePath>) -> io::Result<Option<PathBuf>> {
@@ -614,16 +645,20 @@ pub(super) fn read_list<T: Default>(
 }
 
 pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<File> {
+    let lock = collection_lock_file(directory, filename)?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+fn collection_lock_file(directory: &Path, filename: &str) -> io::Result<File> {
     fs::create_dir_all(directory)?;
     // Separate app windows and processes may add to the same collection.
-    let lock = File::options()
+    File::options()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(directory.join(filename))?;
-    lock.lock()?;
-    Ok(lock)
+        .open(directory.join(filename))
 }
 
 pub(super) fn publish_collection(path: &Path, contents: &impl Serialize) -> io::Result<()> {
