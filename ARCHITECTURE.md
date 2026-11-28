@@ -34,6 +34,9 @@ The first user interface and the agents' test bed.
 
 Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify and count a selected collection.
 
+On a normal quit the shell keeps the open boards in boards.json beside files.json in the app's local data directory. For a board from a PGN file it also keeps the game as last read or saved there, so Save can detect a change to the file even after a restart.
+If a saved session is damaged, the app opens the boards it can read and tells the player where it kept the original file.
+
 ### `scripts/`
 
 The quality gate. `scripts/check.sh` is the entry point. Each script says in its first lines what it checks.
@@ -116,6 +119,10 @@ The Files page keeps references to PGN files and folders. A player can keep a re
 The app keeps a verified copy of that list in files.last-good.json. If the live list becomes unreadable, the player can recover it from Files. Recovery preserves the damaged bytes under a fresh name before replacing the list. It only changes collection metadata.
 
 When creating a PGN, the native save dialog starts in the selected folder. Without a selected folder, it suggests a folder named `zobrist` inside the personal Documents directory reported by the operating system. When the system has no Documents directory, the player chooses the destination in the dialog. The player can change the suggested location before saving.
+
+Desktop saves keep the 20 most recent pre-change states of each PGN under pgn-history in the app's local data directory. Each resolved absolute PGN path owns its own folder. Moving or removing the PGN leaves its states at the original path. Keeping each state's raw bytes, capture time, size and checksum in a separate file lets a player restore annotated or damaged PGNs exactly and keeps the other states usable if one is damaged.
+
+A board save can succeed when recording history fails and tells the player why. If another change holds the PGN's history lock, saves and restores wait up to five seconds. If the lock is still held, the app refuses the change so the player can retry. Restoring requires a verified state and a durable copy of the current bytes so the player can undo the restore. Both operations publish through the store's staged PGN write. The desktop supplies the history root and the command line currently supplies none. Revisit path ownership if players need history to follow a file to a new location.
 
 A single managed folder would require players to move or copy existing collections. Resolving a new name against the app's launch directory made its location depend on how the player started the app. The desktop shell uses `tauri-plugin-dialog` to offer the system's file, folder and save dialogs. Revisit the storage choice if players need a collection that travels between computers.
 

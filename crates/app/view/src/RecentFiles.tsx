@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CollectionEntry } from "./generated/CollectionEntry";
-import { ask } from "./ipc";
+import { ask, errorText } from "./ipc";
 import styles from "./RecentFiles.module.css";
 
 const { recent, path } = styles;
@@ -21,8 +21,7 @@ export function RecentFiles({ onOpen }: Props) {
       const request = ++latest;
       const result = await ask({ type: "GetRecentFiles" }).then(
         ({ entries }) => entries,
-        (reason: unknown) =>
-          reason instanceof Error ? reason.message : String(reason),
+        errorText,
       );
       if (request === latest) setFiles(result);
     };

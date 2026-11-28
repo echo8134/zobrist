@@ -2,8 +2,10 @@
 import type { AddedPgnPath } from "./AddedPgnPath";
 import type { AnalysisSnapshot } from "./AnalysisSnapshot";
 import type { BoardAppearance } from "./BoardAppearance";
+import type { BoardPicture } from "./BoardPicture";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
+import type { EarlierState } from "./EarlierState";
 import type { EngineEntry } from "./EngineEntry";
 import type { FileCollection } from "./FileCollection";
 import type { GamePicture } from "./GamePicture";
@@ -20,7 +22,19 @@ import type { VariationAnswer } from "./VariationAnswer";
 /**
  * What Rust answers. Each case has the name of its request.
  */
-export type Response = { "type": "AddEngineVariation", 
+export type Response = { "type": "RestoreBoards", 
+/**
+ * The games and their pictures at the saved places.
+ */
+boards: Array<BoardPicture>, 
+/**
+ * The selected runtime game number, when a board was selected.
+ */
+selected: number | null, 
+/**
+ * Where to find the original session if any part could not be restored.
+ */
+warning?: string, } | { "type": "QuitWithBoards" } | { "type": "AddEngineVariation", 
 /**
  * Whether anything changed in the game.
  */
@@ -176,7 +190,15 @@ entries: Array<CollectionEntry>, } | { "type": "OpenListedPgnFile",
 /**
  * The file with its games or why it could not be opened.
  */
-answer: PgnFileAnswer, } | { "type": "AddPgnPath", 
+answer: PgnFileAnswer, } | { "type": "ListPgnStates", 
+/**
+ * A damaged state still has its number.
+ */
+states: Array<EarlierState>, } | { "type": "PreparePgnRestore", 
+/**
+ * Identifies the bytes the player is about to replace.
+ */
+stamp: string, } | { "type": "RestorePgnState" } | { "type": "AddPgnPath", 
 /**
  * The new selection or the reason the file operation was refused.
  */

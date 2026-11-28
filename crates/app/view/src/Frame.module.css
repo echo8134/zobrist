@@ -6,3 +6,18 @@
     / auto 1fr;
   height: 100vh;
 }
+
+.startup {
+  padding: var(--area-padding);
+}
+
+.problem {
+  position: fixed;
+  z-index: 1;
+  inset: auto 0 0;
+  margin: 0;
+  padding: var(--refused-save-padding);
+  border-top: 1px solid var(--top-bar-line-color);
+  background: var(--background-color);
+  color: var(--refusal-color);
+}

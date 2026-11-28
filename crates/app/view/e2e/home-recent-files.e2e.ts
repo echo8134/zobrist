@@ -7,10 +7,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { target, withApp } from "./app-window";
+import { withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
 
+const screenshots = fileURLToPath(
+  new URL("../../../../target/e2e", import.meta.url),
+);
 const game = '[White "Ada"]\n[Black "Bo"]\n[Result "1-0"]\n\n1. e4 1-0\n';
 const recent = (app: WebdriverIO.Browser) =>
   app.$('main section[aria-label="Recent files"]');
@@ -44,7 +48,7 @@ describe("recent PGN files on Home", () => {
     writeFileSync(club, game);
     writeFileSync(league, '[White "Lea"]\n\n1. d4 *\n');
 
-    await withApp(join(work.path, "data"), async (app) => {
+    await withDesktopApp(join(work.path, "data"), async (app) => {
       await expect(app.$("main h1")).toHaveText("Home");
       await expect(recent(app).$("h2")).toHaveText("Recent files");
       await expect(recent(app).$("p")).toHaveText("No recent files yet.");
@@ -68,13 +72,13 @@ describe("recent PGN files on Home", () => {
       ).toEqual(["1", "Ada", "Bo", "1-0", "?", "?"]);
     });
 
-    await withApp(join(work.path, "data"), async (app) => {
+    await withDesktopApp(join(work.path, "data"), async (app) => {
       await expect(app.$("main h1")).toHaveText("Home");
       await expect(app.$("aria/Lichess game link")).toBeDisplayed();
       await expectRecent(app, [club, league]);
-      mkdirSync(join(target, "e2e"), { recursive: true });
+      mkdirSync(screenshots, { recursive: true });
       const picture = await app.saveScreenshot(
-        join(target, "e2e", "home-recent-files.png"),
+        join(screenshots, "home-recent-files.png"),
       );
       expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
         1280, 800,
@@ -96,7 +100,7 @@ describe("recent PGN files on Home", () => {
       join(folder, `${String(index + 1).padStart(2, "0")}.pgn`),
     );
     for (const path of paths) writeFileSync(path, game);
-    await withApp(join(work.path, "data"), async (app) => {
+    await withDesktopApp(join(work.path, "data"), async (app) => {
       await choosePage(app, "Files");
       await pick("Folder", folder, app);
       for (const path of paths) {
@@ -145,7 +149,7 @@ describe("recent PGN files on Home", () => {
     mkdirSync(directory, { recursive: true });
     writeFileSync(list, "[[");
     writeFileSync(path, game);
-    await withApp(join(work.path, "data"), async (app) => {
+    await withDesktopApp(join(work.path, "data"), async (app) => {
       await expect(recent(app).$("p")).toHaveText(
         `Could not read the recent files list at ${list}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Home.`,
       );

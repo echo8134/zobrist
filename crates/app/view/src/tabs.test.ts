@@ -77,6 +77,36 @@ test("a tab opens with the game that Rust answered and closes that game with its
   expect(shown()).toEqual({ tabs: [], page: "Home", shownTab: undefined });
 });
 
+test("boards reopen in order and Home stays visible when no board was selected", () => {
+  const { change, shown } = tabState({
+    tabs: [],
+    page: "Home",
+    shownTab: undefined,
+  });
+  const boards = [
+    { game: 11, picture: pictureAfterE4 },
+    { game: 12, picture },
+  ];
+
+  change({ type: "RestoreBoards", boards, selected: null });
+
+  expect(shown()).toEqual({
+    tabs: [
+      {
+        game: 11,
+        picture: pictureAfterE4,
+        bottomSide: "white",
+        gameData: "closed",
+      },
+      { game: 12, picture, bottomSide: "white", gameData: "closed" },
+    ],
+    page: "Home",
+    shownTab: undefined,
+  });
+  change({ type: "RestoreBoards", boards, selected: 11 });
+  expect(shown().shownTab).toBe(11);
+});
+
 test("a turn changes the side at the bottom of one tab only", () => {
   const tabs = [
     { game: 1, picture, bottomSide: "white", gameData: "closed" },
@@ -573,6 +603,33 @@ test("a refused first save keeps the form open to save and gives its reason", as
       refusedSave: { type: "Refusal", reason: "cannotWrite", system: null },
     },
   ]);
+});
+
+test("a first save with a history warning closes the form and cannot append twice", async () => {
+  const { change, shown, tabNow } = oneTab(changedWithoutFile);
+  await save(7, "Save", "/games/club.pgn", tabNow, change);
+  vi.mocked(ask).mockResolvedValueOnce({
+    type: "SaveGameAs",
+    answer: {
+      type: "SavedWithWarning",
+      picture: savedInFile,
+      warning:
+        "Game saved. Could not keep the earlier state in /history/club. The history folder is read-only.",
+    },
+  });
+
+  expect(await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change)).toBe(
+    true,
+  );
+  expect(shown().tabs[0]?.picture.unsaved).toBe(false);
+  expect(shown().tabs[0]?.gameData).toBe("closed");
+  expect(shown().tabs[0]?.saveWarning).toBe(
+    "Game saved. Could not keep the earlier state in /history/club. The history folder is read-only.",
+  );
+  expect(await save(7, "ConfirmSave", "/games/club.pgn", tabNow, change)).toBe(
+    false,
+  );
+  expect(vi.mocked(ask)).toHaveBeenCalledTimes(1);
 });
 
 test("two confirmations waiting on the same field save only one copy", async () => {

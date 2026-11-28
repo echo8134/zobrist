@@ -26,9 +26,23 @@ export const config: WebdriverIO.Config = {
   specs: ["./e2e/*.e2e.ts"],
   // The service starts one app for the whole run, so the spec files use it one after the other.
   maxInstances: 1,
-  // A reload gives each spec file the view in its first state. What Rust holds stays.
+  // A refresh restores open boards, so close the preceding spec’s tabs first.
   before: async (_capabilities, _specs, browser) => {
     await browser.switchToWindow("main");
+    const tabs = () => browser.$$('header [role="tab"]');
+    for (let count = await tabs().length; count > 0; count--) {
+      const first = browser.$('header [role="tablist"] > :first-child');
+      const discard = first.$("button=Close");
+      if (!(await discard.isExisting())) {
+        await first.$('[aria-label^="Close "]').click();
+        await browser.waitUntil(
+          async () =>
+            (await tabs().length) < count || (await discard.isExisting()),
+        );
+      }
+      if ((await tabs().length) === count) await discard.click();
+      await browser.waitUntil(async () => (await tabs().length) === count - 1);
+    }
     await browser.refresh();
   },
   onComplete: () => {
