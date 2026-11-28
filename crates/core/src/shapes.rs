@@ -2,6 +2,8 @@
 
 use shakmaty::Square;
 
+use crate::comment::without_commands;
+
 /// A color used to mark a square or draw an arrow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -108,7 +110,7 @@ impl Shapes {
         }
     }
 
-    fn read_command(&mut self, command: &str) -> Option<()> {
+    pub(crate) fn read_command(&mut self, command: &str) -> Option<()> {
         let (name, entries) = command.split_once(' ')?;
         match name {
             "csl" => {
@@ -153,22 +155,8 @@ fn parse_entries<T>(entries: &str, parse: impl Fn(Color, &[u8]) -> Option<T>) ->
 #[must_use]
 pub fn split(comment: &str) -> (String, Shapes) {
     let mut shapes = Shapes::default();
-    let mut parts = Vec::new();
-    let mut text_start = 0;
-    for (start, prefix) in comment.match_indices("[%") {
-        let body_start = start + prefix.len();
-        let body = &comment[body_start..];
-        let Some((length, "]")) = body.match_indices(['[', ']']).next() else {
-            continue;
-        };
-        if shapes.read_command(&body[..length]).is_some() {
-            parts.push(comment[text_start..start].trim());
-            text_start = body_start + length + 1;
-        }
-    }
-    parts.push(comment[text_start..].trim());
-    parts.retain(|part| !part.is_empty());
-    (parts.join(" "), shapes)
+    let text = without_commands(comment, |command| shapes.read_command(command));
+    (text, shapes)
 }
 
 /// Appends the squares and then the arrows to text that is already free of shape commands.

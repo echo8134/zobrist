@@ -9,7 +9,6 @@ import {
   type Change,
   closeOrAsk,
   closeTab,
-  commentOfCurrentPlace,
   goTo,
   isSaveKey,
   openGame,
@@ -436,73 +435,6 @@ test.each([
   },
 );
 
-const commented = (
-  text: string,
-  place: number[],
-  comments: { before?: string[]; after?: string[] },
-  variations: NotationMove[][] = [],
-) =>
-  ({
-    text,
-    place,
-    commentsBefore: comments.before ?? [],
-    commentsAfter: comments.after ?? [],
-    variations,
-  }) as NotationMove;
-const commentedNotation = [
-  commented("e4", [0], {
-    before: ["A short game"],
-    after: ["Best", "by test"],
-  }),
-  commented("e5", [0, 0], {}, [
-    [commented("c5", [0, 1], { after: ["Sicilian"] })],
-  ]),
-];
-
-test("the comment of a move is the text behind it, with a space between its parts", () => {
-  expect(
-    commentOfCurrentPlace({
-      place: [0],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("Best by test");
-  expect(
-    commentOfCurrentPlace({
-      place: [0, 1],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("Sicilian");
-  expect(
-    commentOfCurrentPlace({
-      place: [0, 0],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("");
-});
-
-test("the comment of the start is the text before the first move", () => {
-  expect(
-    commentOfCurrentPlace({
-      place: [],
-      notation: commentedNotation,
-      startComments: [],
-    }),
-  ).toBe("A short game");
-});
-
-test("the comment of a game without moves is its start comment", () => {
-  expect(
-    commentOfCurrentPlace({
-      place: [],
-      notation: [],
-      startComments: ["Not", "played"],
-    }),
-  ).toBe("Not played");
-});
-
 test("a game of a file opens in a tab, and a game that is open already gets no second tab", async () => {
   const { change, shown } = tabState({
     tabs: [{ game: 3, picture, bottomSide: "black", gameData: "closed" }],
@@ -596,6 +528,20 @@ function oneTab(ofTheTab: GamePicture) {
     state.shown().tabs.find((tab) => tab.game === game);
   return { ...state, tabNow };
 }
+
+test("a delayed engine edit cannot move the board back after navigation", () => {
+  const start = { ...savedInFile, revision: 4, place: [] };
+  const afterMove = { ...start, revision: 5, place: [0] };
+  const { change, tabNow } = oneTab(start);
+  change({ type: "drawPlace", game: 7, picture: afterMove });
+  change({
+    type: "drawPicture",
+    game: 7,
+    picture: { ...start, unsaved: true },
+    from: start,
+  });
+  expect(tabNow(7)?.picture).toBe(afterMove);
+});
 
 test("Save writes a game from a file back into its place", async () => {
   const { change, shown, tabNow } = oneTab(changedFromFile);

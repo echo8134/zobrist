@@ -241,13 +241,7 @@ impl ReopenedBoards {
                 }
                 let mut editor = GameEditor::new(board.game);
                 editor.go_to(Place(board.place)).ok()?;
-                Some((
-                    index,
-                    OpenGame {
-                        editor,
-                        file: board.origin,
-                    },
-                ))
+                Some((index, OpenGame::new(editor, board.origin)))
             })
             .collect();
         match count - self.boards.len() {

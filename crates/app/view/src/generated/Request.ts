@@ -26,7 +26,11 @@ fen: string, } | { "type": "OpenPgnText",
 /**
  * The PGN to read.
  */
-text: string, } | { "type": "GamePgn", 
+text: string, } | { "type": "OpenGameLink", 
+/**
+ * The link entered by the player.
+ */
+link: string, } | { "type": "GamePgn", 
 /**
  * The open game's number.
  */

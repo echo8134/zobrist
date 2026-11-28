@@ -36,6 +36,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum PgnCommand {
+    /// Fetch one finished game from a public Lichess link and write it as PGN.
+    Fetch {
+        /// The public game link.
+        link: String,
+    },
     /// Read every game of a PGN file and report what was read and what could not be.
     Check {
         /// The PGN file to read.
@@ -71,6 +76,11 @@ enum PgnCommand {
 
 #[derive(Subcommand)]
 enum DatabaseCommand {
+    /// Print how many games a database holds.
+    Info {
+        /// The database file to inspect.
+        database: PathBuf,
+    },
     /// Store every game of a PGN file and print the import report.
     Create {
         /// The PGN file to read.
@@ -116,6 +126,7 @@ fn main() -> ExitCode {
     // clap exits with status 2 on a usage error, which matches "the command could not run".
     match Arguments::parse().command {
         Command::Pgn { command } => match command {
+            PgnCommand::Fetch { link } => fetch_game(&link),
             PgnCommand::Check { file } => exit_code(&file, report(&file)),
             PgnCommand::Write { file } => exit_code(&file, write_games(&file)),
             PgnCommand::List { file } => exit_code(&file, list_games(&file)),
@@ -127,6 +138,7 @@ fn main() -> ExitCode {
             } => exit_code(&source, replace_game(&target, number, &source)),
         },
         Command::Database { command } => match command {
+            DatabaseCommand::Info { database } => exit_code(&database, info(&database)),
             DatabaseCommand::Create { pgn, database } => exit_code(&pgn, create(&pgn, &database)),
             DatabaseCommand::Export { database } => exit_code(&database, export(&database)),
         },
@@ -155,10 +167,7 @@ fn exit_code(path: &Path, result: Result<usize, Failure>) -> ExitCode {
             .ok();
             ExitCode::from(2)
         }
-        Err(Failure::Write(error) | Failure::Diagnostic(error)) => {
-            writeln!(io::stderr(), "zobrist: cannot write output: {error}").ok();
-            ExitCode::from(2)
-        }
+        Err(Failure::Write(error) | Failure::Diagnostic(error)) => cannot_write_output(&error),
         Err(Failure::Add(target, error)) => {
             writeln!(
                 io::stderr(),
@@ -186,6 +195,26 @@ fn exit_code(path: &Path, result: Result<usize, Failure>) -> ExitCode {
             .ok();
             ExitCode::from(2)
         }
+    }
+}
+
+fn cannot_write_output(error: &io::Error) -> ExitCode {
+    writeln!(io::stderr(), "zobrist: cannot write output: {error}").ok();
+    ExitCode::from(2)
+}
+
+fn fetch_game(link: &str) -> ExitCode {
+    let game = match zobrist_online::fetch_game(link) {
+        Ok(game) => game,
+        Err(refusal) => {
+            writeln!(io::stderr(), "zobrist: {refusal}").ok();
+            return ExitCode::from(2);
+        }
+    };
+    let mut output = PgnOutput::new(io::stdout().lock());
+    match output.write(&game).and_then(|()| output.output.flush()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => cannot_write_output(&error),
     }
 }
 
@@ -457,8 +486,17 @@ impl Drop for ProblemLog {
     }
 }
 
+fn cannot_read(error: zobrist_store::OpenError) -> Failure {
+    Failure::Read(io::Error::other(error))
+}
+
+fn info(path: &Path) -> Result<usize, Failure> {
+    let database = Database::open(path).map_err(cannot_read)?;
+    writeln!(io::stdout().lock(), "games: {}", database.game_count())?;
+    Ok(0)
+}
+
 fn export(path: &Path) -> Result<usize, Failure> {
-    let cannot_read = |error| Failure::Read(io::Error::other(error));
     let mut database = Database::open(path).map_err(cannot_read)?;
     let mut output = PgnOutput::new(io::stdout().lock());
     for game in database.games().map_err(cannot_read)? {

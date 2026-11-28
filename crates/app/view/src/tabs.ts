@@ -13,6 +13,14 @@ import { answersOnTheirWay, ask } from "./ipc";
 import type { Page } from "./PageArea";
 import type { PositionSetup } from "./positionSetup";
 
+export type BoardPlace = Pick<GamePicture, "revision" | "place">;
+
+export function sameBoardPlace(left: BoardPlace, right: BoardPlace) {
+  return (
+    left.revision === right.revision && left.place.join() === right.place.join()
+  );
+}
+
 /** The value of a tag of the game, or the empty text when the game has no such tag. */
 export function tagValue(picture: GamePicture, name: EditableTag) {
   return picture.tags.find((tag) => tag.name === name)?.value ?? "";
@@ -70,7 +78,12 @@ export type Change =
   | { type: "showTab"; game: number }
   | { type: "turnBoard"; game: number }
   | { type: "setGameData"; game: number; gameData: Tab["gameData"] }
-  | { type: "drawPicture"; game: number; picture: GamePicture }
+  | {
+      type: "drawPicture";
+      game: number;
+      picture: GamePicture;
+      from?: BoardPlace;
+    }
   | { type: "drawPlace"; game: number; picture: GamePicture }
   | { type: "refuseSave"; game: number; refusal: SaveRefusal }
   | { type: "askToClose"; game: number }
@@ -144,6 +157,10 @@ export function apply(shown: Shown, change: Change): Shown {
         bottomSide: tab.bottomSide === "white" ? "black" : "white",
       }));
     case "drawPicture":
+      if (change.from !== undefined) {
+        const tab = shown.tabs.find(({ game }) => game === change.game);
+        if (!tab || !sameBoardPlace(tab.picture, change.from)) return shown;
+      }
       // This is the picture after a change of the game or after a save, and the line of a
       // refused save goes with both.
       return withChangedTab(
@@ -317,20 +334,6 @@ export function annotate(
   change: (change: Change) => void,
 ) {
   return drawAnswer(game, ask({ ...annotation, game }), change);
-}
-
-export function commentOfCurrentPlace({
-  place,
-  notation,
-  startComments,
-}: Pick<GamePicture, "place" | "notation" | "startComments">): string {
-  const commentOfStart = notation[0]?.commentsBefore ?? startComments;
-  const currentMove = lineThatHolds(place, notation)?.find(
-    (move) => move.place.join() === place.join(),
-  );
-  const parts =
-    place.length === 0 ? commentOfStart : (currentMove?.commentsAfter ?? []);
-  return parts.join(" ");
 }
 
 /** Sends all shapes that the board shows at the current place and draws the answer. */

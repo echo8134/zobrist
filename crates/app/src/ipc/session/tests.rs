@@ -20,8 +20,14 @@ fn ask(games: &SharedGames, directory: &Path, request: Value) -> io::Result<Valu
         DesktopRequest::Session(request) => {
             block_on(games.answer_session(request, directory.to_owned()))?
         }
-        DesktopRequest::Collection(_) => {
-            return Err(io::Error::other("unexpected collection request"));
+        DesktopRequest::Analysis(request) => {
+            block_on(request.answer(games, directory.to_owned())).map_err(io::Error::other)?
+        }
+        DesktopRequest::Collection(_)
+        | DesktopRequest::Account(_)
+        | DesktopRequest::Appearance(_)
+        | DesktopRequest::Databases(_) => {
+            return Err(io::Error::other("unexpected request in board session test"));
         }
     };
     Ok(serde_json::to_value(response)?)
@@ -103,6 +109,12 @@ fn reopens_dirty_and_clean_boards_in_tab_order_and_saves_to_the_original_game() 
     assert_eq!(restore(&restored, &directory)?, answer);
 
     let send = |request| ask(&restored, &directory, request);
+    assert_eq!(
+        send(json!({"type":"Analysis","action":"Status","game":3,"generation":0}))?,
+        json!({"type":"Analysis","snapshot":{
+            "game":3,"place":[0,1],"revision":0,"generation":0,"state":{"type":"Stopped"}
+        }})
+    );
     let saved = send(json!({"type":"SaveGame","game":2}))?;
     assert_eq!(saved["answer"]["picture"]["unsaved"], false);
     assert_eq!(send(open(2))?["answer"]["game"], 2);

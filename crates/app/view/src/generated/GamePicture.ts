@@ -8,13 +8,14 @@ import type { MoveSquares } from "./MoveSquares";
 import type { MoveSymbol } from "./MoveSymbol";
 import type { NotationMove } from "./NotationMove";
 import type { PositionSymbol } from "./PositionSymbol";
+import type { RecordedClock } from "./RecordedClock";
 import type { Side } from "./Side";
 import type { Tag } from "./Tag";
 
 /**
  * Everything the view draws for one game, taken from the same editor position.
  */
-export type GamePicture = { tags: Array<Tag>, result: GameResult, fen: string, turn: Side, inCheck: boolean, legalMoves: Array<LegalMove>, canUndo: boolean, canRedo: boolean, startComments: Array<string>, place: Array<number>, notation: Array<NotationMove>, inVariation: boolean, hasNextMove: boolean, lastMove: MoveSquares | null, moveSymbol: MoveSymbol | null, positionSymbol: PositionSymbol | null, squares: Array<ColoredSquare>, arrows: Array<Arrow>, 
+export type GamePicture = { revision: number, tags: Array<Tag>, result: GameResult, fen: string, turn: Side, inCheck: boolean, legalMoves: Array<LegalMove>, comment: string, canUndo: boolean, canRedo: boolean, startComments: Array<string>, place: Array<number>, notation: Array<NotationMove>, inVariation: boolean, hasNextMove: boolean, lastMove: MoveSquares | null, moveSymbol: MoveSymbol | null, positionSymbol: PositionSymbol | null, evaluation?: string, clock?: RecordedClock, squares: Array<ColoredSquare>, arrows: Array<Arrow>, 
 /**
  * Where the game came from. A game that was never in a file has none.
  */

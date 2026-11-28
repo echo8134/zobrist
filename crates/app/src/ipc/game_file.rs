@@ -3,6 +3,7 @@
 use std::io;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -14,6 +15,8 @@ use super::{FirstStep, GamePicture, Games, Response, pgn_file};
 
 /// A game that is open in the app.
 pub(super) struct OpenGame {
+    pub(super) position: super::analysis::BoardPosition,
+    pub(super) analysis: Arc<Mutex<super::analysis::BoardAnalysis>>,
     pub(super) editor: GameEditor,
     /// Where the game came from. A game that was never in a file has none.
     pub(super) file: Option<InFile>,
@@ -31,8 +34,23 @@ pub(super) struct InFile {
 }
 
 impl OpenGame {
+    pub(super) fn new(editor: GameEditor, file: Option<InFile>) -> Self {
+        Self {
+            position: super::analysis::BoardPosition::new(&editor),
+            analysis: Arc::default(),
+            editor,
+            file,
+        }
+    }
+
     pub(super) fn picture(&self) -> GamePicture {
-        GamePicture::from_editor(&self.editor, self.file.as_ref())
+        GamePicture::from_editor(&self.editor, self.file.as_ref(), self.position.revision)
+    }
+
+    pub(super) fn edit<T>(&mut self, change: impl FnOnce(&mut GameEditor) -> T) -> T {
+        let result = change(&mut self.editor);
+        self.position.follow(&self.editor);
+        result
     }
 }
 
@@ -137,7 +155,7 @@ pub enum OpenGameAnswer {
 }
 
 pub(super) fn open(typed: String, number: u64) -> FirstStep {
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let read = read(&typed, number);
         move |games: &mut Games| Response::OpenGame {
             answer: match read {
@@ -228,7 +246,7 @@ pub(super) fn save(games: &Games, game: usize) -> FirstStep {
     };
     let (path, number, held) = (file.path.clone(), file.number, file.held.clone());
     let to_write = open.editor.game().clone();
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let written = write_in_place(&path, number, &held, &to_write).map(|()| InFile {
             path,
             number,
@@ -269,7 +287,7 @@ pub(super) fn save_as(games: &Games, game: usize, typed: String) -> FirstStep {
         return FirstStep::Answer(Box::new(Response::SaveGameAs { answer: None }));
     };
     let to_write = open.editor.game().clone();
-    FirstStep::file_work(move || {
+    FirstStep::blocking_work(move || {
         let written = write_as_last(&typed, &to_write).map(|(path, number)| InFile {
             path,
             number,

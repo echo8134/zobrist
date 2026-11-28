@@ -6,7 +6,7 @@ import { initial, write } from "@lichess-org/chessground/fen";
 import type { Key } from "@lichess-org/chessground/types";
 import "@lichess-org/chessground/assets/chessground.base.css";
 import "@lichess-org/chessground/assets/chessground.brown.css";
-import "@lichess-org/chessground/assets/chessground.cburnett.css";
+import "./pieces.css";
 import { useLayoutEffect, useRef, useState } from "react";
 import styles from "./Board.module.css";
 import type { GamePicture } from "./generated/GamePicture";

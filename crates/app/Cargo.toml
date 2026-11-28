@@ -12,7 +12,7 @@ workspace = true
 
 [features]
 # Starts a WebDriver server inside the app. Only the end-to-end test builds with it.
-webdriver = ["dep:tauri-plugin-wdio-webdriver"]
+webdriver = ["dep:tauri-plugin-wdio-webdriver", "zobrist-online/fixture"]
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
@@ -23,6 +23,8 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-wdio-webdriver = { version = "1.5.1", optional = true }
 ts-rs = "12.0.1"
 zobrist-core = { path = "../core", version = "0.1.0" }
+zobrist-engine = { path = "../engine", version = "0.1.0" }
+zobrist-online = { path = "../online", version = "0.1.0" }
 zobrist-store = { path = "../store", version = "0.1.0" }
 
 [build-dependencies]

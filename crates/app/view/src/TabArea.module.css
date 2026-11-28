@@ -58,3 +58,21 @@
   padding: var(--notation-area-padding);
   overflow-y: auto;
 }
+
+.recordedValues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--recorded-values-gap);
+  margin: 0;
+  padding: var(--recorded-values-padding);
+  border-bottom: var(--recorded-values-line-width) solid
+    var(--notation-area-line-color);
+  color: var(--move-number-color);
+  font-variant-numeric: tabular-nums;
+  list-style: none;
+}
+
+.recordedValues strong {
+  color: var(--text-color);
+  font-weight: var(--recorded-values-weight);
+}

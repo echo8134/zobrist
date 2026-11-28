@@ -9,25 +9,19 @@ use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
 
-use super::{PgnFile, PgnFileAnswer, RefusalReason, Request, Response, SessionRequest, pgn_file};
+use super::{EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Response, pgn_file};
 
-/// The command routes editor, collection and board session requests to their owners.
-#[derive(Deserialize, TS)]
-#[serde(untagged)]
-#[ts(export)]
-pub enum DesktopRequest {
-    /// Requests answered by the games and PGN editor.
-    Editor(Request),
-    /// Requests about the player's collection or the system picker.
-    Collection(CollectionRequest),
-    /// Requests to restore or save the open boards.
-    Session(SessionRequest),
-}
-
-/// An operation on the Files page that needs the desktop environment.
+/// A request about a desktop collection or its file picker.
 #[derive(Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum CollectionRequest {
+    /// Choose a local engine program.
+    PickEnginePath,
+    /// Read or change the registered local engines.
+    EngineInventory {
+        /// The requested inventory operation.
+        action: EngineAction,
+    },
     /// Choose an existing file, a folder, or a destination for a new PGN.
     PickPgnPath {
         /// Which dialog to show.
@@ -35,6 +29,8 @@ pub enum CollectionRequest {
         /// The selected folder, when choosing a new file.
         folder: Option<PathBuf>,
     },
+    /// Choose a native database to add to the Databases page.
+    PickDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Open or create the chosen item and keep it in the collection.
@@ -114,6 +110,25 @@ impl CollectionRequest {
     /// Answers on a blocking thread. A dialog or a folder read never takes the game lock.
     pub fn answer(self, window: &Window) -> io::Result<Response> {
         match self {
+            Self::PickEnginePath => {
+                let path = window
+                    .dialog()
+                    .file()
+                    .set_parent(window)
+                    .blocking_pick_file()
+                    .map(|file| file.into_path().map_err(io::Error::other))
+                    .transpose()?;
+                Ok(Response::PickEnginePath { path })
+            }
+            Self::EngineInventory { action } => {
+                let directory = window
+                    .path()
+                    .app_local_data_dir()
+                    .map_err(io::Error::other)?;
+                Ok(Response::EngineInventory {
+                    entries: action.apply(&directory)?,
+                })
+            }
             Self::PickPgnPath { choice, folder } => {
                 let dialog = window.dialog().file().set_parent(window);
                 let selected = match choice {
@@ -133,9 +148,7 @@ impl CollectionRequest {
                         dialog.blocking_save_file()
                     }
                 };
-                let path = selected
-                    .map(|file| file.into_path().map_err(io::Error::other))
-                    .transpose()?;
+                let path = picker_path(selected)?;
                 if matches!(choice, PickerChoice::File)
                     && path.as_deref().is_some_and(|file| !is_pgn(file))
                 {
@@ -145,6 +158,17 @@ impl CollectionRequest {
                     ));
                 }
                 Ok(Response::PickPgnPath { path })
+            }
+            Self::PickDatabasePath => {
+                let selected = window
+                    .dialog()
+                    .file()
+                    .set_parent(window)
+                    .add_filter("zobrist databases", &["zobrist"])
+                    .blocking_pick_file();
+                Ok(Response::PickDatabasePath {
+                    path: picker_path(selected)?,
+                })
             }
             Self::GetFileCollection => {
                 let directory = window
@@ -292,6 +316,12 @@ fn add(
     })
 }
 
+fn picker_path(selected: Option<tauri_plugin_dialog::FilePath>) -> io::Result<Option<PathBuf>> {
+    selected
+        .map(|file| file.into_path().map_err(io::Error::other))
+        .transpose()
+}
+
 fn suggested_folder(documents: Option<&Path>) -> Option<PathBuf> {
     let directory = documents?.join("zobrist");
     match fs::create_dir(&directory) {
@@ -328,37 +358,22 @@ fn children(path: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
-    let list = directory.join("files.json");
-    let entries = fs::read(&list).and_then(|bytes| {
-        let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(&bytes)?;
-        paths
-            .into_iter()
-            .map(|(kind, path)| CollectionEntry::new(kind, path))
-            .collect()
-    });
-    match entries {
-        Ok(entries) => Ok(entries),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(io::Error::new(
-            error.kind(),
-            format!(
-                "Could not read the file collection at {}. Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.",
-                list.display()
-            ),
-        )),
-    }
+    read_list(
+        &directory.join("files.json"),
+        "the file collection",
+        &list_recovery("existing PGN files", "Files"),
+        |bytes| {
+            let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(bytes)?;
+            paths
+                .into_iter()
+                .map(|(kind, path)| CollectionEntry::new(kind, path))
+                .collect()
+        },
+    )
 }
 
 fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {
-    fs::create_dir_all(directory)?;
-    // Separate app windows and processes may add to the same collection.
-    let lock = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(directory.join("files.lock"))?;
-    lock.lock()?;
+    let _lock = lock_collection(directory, "files.lock")?;
     let mut entries = collection(directory)?;
     if let Some(previous) = entries
         .iter_mut()
@@ -371,17 +386,62 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
     } else {
         entries.push(entry.clone());
     }
-    let staged = directory.join("files.tmp");
-    let mut file = File::create(&staged)?;
     let paths: Vec<_> = entries
         .iter()
         .map(|entry| (entry.kind, &entry.path))
         .collect();
-    serde_json::to_writer(&mut file, &paths)?;
+    publish_collection(&directory.join("files.json"), &paths)?;
+    Ok(entries)
+}
+
+pub(super) fn list_recovery(untouched: &str, page: &str) -> String {
+    format!(
+        "Your {untouched} are untouched. Restore the list from a backup or move it aside, then reopen {page}."
+    )
+}
+
+pub(super) fn read_list<T: Default>(
+    path: &Path,
+    description: &str,
+    recovery: &str,
+    parse: impl FnOnce(&[u8]) -> io::Result<T>,
+) -> io::Result<T> {
+    let result = match fs::read(path) {
+        Ok(bytes) => parse(&bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(T::default()),
+        Err(error) => Err(error),
+    };
+    result.map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "Could not read {description} at {}. {recovery}",
+                path.display()
+            ),
+        )
+    })
+}
+
+pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<File> {
+    fs::create_dir_all(directory)?;
+    // Separate app windows and processes may add to the same collection.
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join(filename))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+pub(super) fn publish_collection(path: &Path, contents: &impl Serialize) -> io::Result<()> {
+    let staged = path.with_extension("tmp");
+    let mut file = File::create(&staged)?;
+    serde_json::to_writer(&mut file, contents)?;
     file.sync_all()?;
     drop(file);
-    fs::rename(staged, directory.join("files.json"))?;
-    Ok(entries)
+    fs::rename(staged, path)
 }
 
 #[cfg(test)]
