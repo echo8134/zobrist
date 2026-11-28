@@ -159,6 +159,63 @@
   color: var(--refusal-color);
 }
 
+.history {
+  margin-top: var(--list-gap-above);
+  padding: var(--collection-inset) 0;
+  border-block: 1px solid var(--list-line-color);
+}
+
+.stateRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--collection-gap);
+  width: 100%;
+  min-height: var(--list-row-height);
+  padding: var(--entry-padding);
+  border: none;
+  border-radius: var(--entry-corner-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stateRow:hover {
+  background: var(--top-bar-background-color);
+}
+
+.stateRow span + span {
+  color: var(--file-line-color);
+}
+
+.confirmation {
+  width: min(var(--restore-dialog-width), 90vw);
+  padding: var(--collection-gap);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--entry-corner-radius);
+  background: var(--background-color);
+  color: inherit;
+}
+
+.confirmation::backdrop {
+  background: color-mix(in srgb, var(--text-color) 25%, transparent);
+}
+
+.confirmationActions {
+  display: flex;
+  justify-content: end;
+  gap: var(--files-toolbar-gap);
+  margin-top: var(--list-gap-above);
+}
+
+.button.restore {
+  background: var(--text-color);
+  color: var(--background-color);
+}
+
 /* The columns take their widths from the head row. */
 .list {
   width: 100%;

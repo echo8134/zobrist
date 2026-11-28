@@ -1,8 +1,7 @@
 //! The `zobrist` command line.
 
-use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufWriter, Read, Seek, Write};
+use std::io::{self, BufWriter, Seek, Write};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::process::{self, ExitCode};
@@ -10,7 +9,10 @@ use std::process::{self, ExitCode};
 use clap::{Parser, Subcommand};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{Database, DatabaseWriter, PgnGameRow, add_pgn_games, replace_pgn_game};
+use zobrist_store::{
+    Database, ImportError, PgnGameRow, PgnReport, add_pgn_games, import_pgn, problem_line,
+    read_pgn_entries, replace_pgn_game,
+};
 
 /// A personal chess database.
 #[derive(Parser)]
@@ -40,6 +42,19 @@ enum PgnCommand {
     Fetch {
         /// The public game link.
         link: String,
+    },
+    /// Append a player's public Lichess games from an inclusive UTC date range to a PGN.
+    DownloadPlayer {
+        /// The public Lichess username.
+        username: String,
+        /// First UTC calendar date to include.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        from: String,
+        /// Last UTC calendar date to include.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        to: String,
+        /// The PGN file to extend or create.
+        destination: PathBuf,
     },
     /// Read every game of a PGN file and report what was read and what could not be.
     Check {
@@ -97,15 +112,6 @@ enum DatabaseCommand {
 
 const MAX_KEPT_PROBLEM_LINES: usize = 10_000;
 
-#[derive(Default)]
-struct Report {
-    games: u64,
-    main_line_moves: usize,
-    variations: usize,
-    comments: usize,
-    problems: usize,
-}
-
 enum Failure {
     Read(io::Error),
     Create(PathBuf, io::Error),
@@ -127,6 +133,16 @@ fn main() -> ExitCode {
     match Arguments::parse().command {
         Command::Pgn { command } => match command {
             PgnCommand::Fetch { link } => fetch_game(&link),
+            PgnCommand::DownloadPlayer {
+                username,
+                from,
+                to,
+                destination,
+            } => match zobrist_online::download_player_games(&username, &from, &to, &destination) {
+                Ok(count) => report_added(count)
+                    .map_or_else(|error| cannot_write_output(&error), |()| ExitCode::SUCCESS),
+                Err(refusal) => online_refusal(refusal),
+            },
             PgnCommand::Check { file } => exit_code(&file, report(&file)),
             PgnCommand::Write { file } => exit_code(&file, write_games(&file)),
             PgnCommand::List { file } => exit_code(&file, list_games(&file)),
@@ -203,13 +219,15 @@ fn cannot_write_output(error: &io::Error) -> ExitCode {
     ExitCode::from(2)
 }
 
+fn online_refusal(refusal: impl std::fmt::Display) -> ExitCode {
+    writeln!(io::stderr(), "zobrist: {refusal}").ok();
+    ExitCode::from(2)
+}
+
 fn fetch_game(link: &str) -> ExitCode {
     let game = match zobrist_online::fetch_game(link) {
         Ok(game) => game,
-        Err(refusal) => {
-            writeln!(io::stderr(), "zobrist: {refusal}").ok();
-            return ExitCode::from(2);
-        }
+        Err(refusal) => return online_refusal(refusal),
     };
     let mut output = PgnOutput::new(io::stdout().lock());
     match output.write(&game).and_then(|()| output.output.flush()) {
@@ -226,7 +244,7 @@ fn report(path: &Path) -> Result<usize, Failure> {
     } else {
         usize::MAX
     };
-    let mut report = Report::default();
+    let mut report = PgnReport::default();
     let mut lines = Vec::new();
     pgn::read_games(&file, |entry| {
         if let Some(line) = report.count(&entry)
@@ -237,7 +255,7 @@ fn report(path: &Path) -> Result<usize, Failure> {
     })
     .map_err(Failure::Read)?;
     let mut out = io::stdout().lock();
-    report.print_totals(&mut out).map_err(Failure::Write)?;
+    print_totals(&report, &mut out).map_err(Failure::Write)?;
     if lines.len() == report.problems {
         for line in lines {
             writeln!(out, "{line}").map_err(Failure::Write)?;
@@ -256,46 +274,6 @@ fn report(path: &Path) -> Result<usize, Failure> {
         written.map_err(Failure::Write)?;
     }
     Ok(report.problems)
-}
-
-// Once a consumer fails, stop the PGN reader at its next refill. A pipe can stay open
-// indefinitely, and returning from the import lets its temporary files be removed.
-struct PgnInput {
-    file: File,
-    failure: RefCell<Option<Failure>>,
-}
-
-impl PgnInput {
-    fn for_each(
-        file: File,
-        mut each: impl FnMut(Entry) -> Result<(), Failure>,
-    ) -> Result<(), Failure> {
-        let input = Self {
-            file,
-            failure: RefCell::default(),
-        };
-        let read = pgn::read_games(&input, |entry| {
-            if input.failure.borrow().is_none()
-                && let Err(error) = each(entry)
-            {
-                input.failure.replace(Some(error));
-            }
-        });
-        match input.failure.into_inner() {
-            Some(error) => Err(error),
-            None => read.map_err(Failure::Read),
-        }
-    }
-}
-
-impl Read for &PgnInput {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if self.failure.borrow().is_some() {
-            Ok(0)
-        } else {
-            (&self.file).read(buffer)
-        }
-    }
 }
 
 struct PgnOutput<W> {
@@ -330,7 +308,7 @@ fn for_each_game(
     mut each: impl FnMut(&Game) -> io::Result<()>,
 ) -> Result<usize, Failure> {
     let mut problems = 0;
-    PgnInput::for_each(file, |entry| {
+    read_pgn_entries(file, Failure::Read, |entry| {
         if let Some(line) = problem_line(&entry) {
             writeln!(io::stderr().lock(), "{line}").map_err(Failure::Diagnostic)?;
             problems += 1;
@@ -371,7 +349,7 @@ fn list_games(path: &Path) -> Result<usize, Failure> {
 fn add_games(target: &Path, source: &Path) -> Result<usize, Failure> {
     let file = File::open(source).map_err(Failure::Read)?;
     let mut problems = 0;
-    let added = add_pgn_games(target, |append| {
+    let (added, _) = add_pgn_games(target, None, |append| {
         problems = for_each_game(file, append)?;
         Ok(())
     })
@@ -382,8 +360,12 @@ fn add_games(target: &Path, source: &Path) -> Result<usize, Failure> {
             failure
         }
     })?;
-    writeln!(io::stdout().lock(), "games added: {added}").map_err(Failure::Write)?;
+    report_added(added).map_err(Failure::Write)?;
     Ok(problems)
+}
+
+fn report_added(added: u64) -> io::Result<()> {
+    writeln!(io::stdout().lock(), "games added: {added}")
 }
 
 fn replace_game(target: &Path, number: NonZeroU64, source: &Path) -> Result<usize, Failure> {
@@ -405,37 +387,32 @@ fn replace_game(target: &Path, number: NonZeroU64, source: &Path) -> Result<usiz
             )));
         }
     };
-    replace_pgn_game(target, number, &game)
+    replace_pgn_game(target, number, &game, None, None)
         .map_err(|error| Failure::Replace(target.to_owned(), error))?;
     writeln!(io::stdout().lock(), "game replaced: {number}").map_err(Failure::Write)?;
     Ok(0)
 }
 
 fn create(source: &Path, database: &Path) -> Result<usize, Failure> {
-    let file = File::open(source).map_err(Failure::Read)?;
-    let cannot_create = |error| Failure::Create(database.to_owned(), error);
-    let mut writer = DatabaseWriter::create(database).map_err(cannot_create)?;
-    let mut report = Report::default();
     let mut problems = None;
-    PgnInput::for_each(file, |entry| {
-        if let Some(line) = report.count(&entry) {
+    let report = import_pgn(source, database, |line| {
+        if let Some(line) = line {
             let log = match &mut problems {
                 Some(log) => log,
-                None => problems.insert(ProblemLog::create(database).map_err(cannot_create)?),
+                None => problems.insert(ProblemLog::create(database)?),
             };
-            writeln!(log.file, "{line}").map_err(cannot_create)?;
-        }
-        if let Entry::Game { game, .. } = entry {
-            writer.push(&game).map_err(cannot_create)?;
+            writeln!(log.file, "{line}")?;
+        } else if let Some(log) = &mut problems {
+            log.file.rewind()?;
         }
         Ok(())
+    })
+    .map_err(|error| match error {
+        ImportError::Read(error) => Failure::Read(error),
+        ImportError::Create(error) => Failure::Create(database.to_owned(), error),
     })?;
-    if let Some(log) = &mut problems {
-        log.file.rewind().map_err(cannot_create)?;
-    }
-    writer.finish().map_err(cannot_create)?;
     let mut output = io::stdout().lock();
-    report.print_totals(&mut output).map_err(Failure::Write)?;
+    print_totals(&report, &mut output).map_err(Failure::Write)?;
     if let Some(log) = &mut problems {
         io::copy(log.file.get_mut(), &mut output).map_err(Failure::Write)?;
     }
@@ -507,46 +484,10 @@ fn export(path: &Path) -> Result<usize, Failure> {
     Ok(0)
 }
 
-impl Report {
-    fn count(&mut self, entry: &Entry) -> Option<String> {
-        if let Entry::Game { game, .. } = entry {
-            self.games += 1;
-            let counts = game.counts();
-            self.main_line_moves += counts.main_line_moves;
-            self.variations += counts.variations;
-            self.comments += counts.comments;
-        }
-        let line = problem_line(entry)?;
-        self.problems += 1;
-        Some(line)
-    }
-
-    fn print_totals(&self, mut out: impl Write) -> io::Result<()> {
-        writeln!(out, "games: {}", self.games)?;
-        writeln!(out, "main line moves: {}", self.main_line_moves)?;
-        writeln!(out, "variations: {}", self.variations)?;
-        writeln!(out, "comments: {}", self.comments)?;
-        writeln!(out, "problems: {}", self.problems)
-    }
-}
-
-fn problem_line(entry: &Entry) -> Option<String> {
-    match entry {
-        Entry::Game { game, problem, .. } => problem.as_ref().map(|problem| {
-            let kept = match game.counts().main_line_moves {
-                1 => "1 move kept".to_owned(),
-                moves => format!("{moves} moves kept"),
-            };
-            format!(
-                "game {} ({} - {}): {}, {kept}",
-                problem.game_number,
-                game.tag("White").unwrap_or("?"),
-                game.tag("Black").unwrap_or("?"),
-                problem.reason,
-            )
-        }),
-        Entry::StrayText { after_game, .. } => Some(format!(
-            "after game {after_game}: text that is not part of a game"
-        )),
-    }
+fn print_totals(report: &PgnReport, mut out: impl Write) -> io::Result<()> {
+    writeln!(out, "games: {}", report.games)?;
+    writeln!(out, "main line moves: {}", report.main_line_moves)?;
+    writeln!(out, "variations: {}", report.variations)?;
+    writeln!(out, "comments: {}", report.comments)?;
+    writeln!(out, "problems: {}", report.problems)
 }

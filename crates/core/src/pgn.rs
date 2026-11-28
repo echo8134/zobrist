@@ -42,6 +42,20 @@ const KEPT_BYTES: usize = 4 * SUPPORTED_TAG_LINE_LENGTH;
 /// has been handed out. Damage inside the PGN text never ends the reading. The reader buffers
 /// on its own, so pass a `File` directly.
 pub fn read_games<R: Read>(source: R, each: impl FnMut(Entry)) -> io::Result<()> {
+    read_entries(source, each, true)
+}
+
+/// Reads a framed PGN export. A damaged tag or comment returns an error even when an
+/// earlier unsupported variant move already supplied the entry's first problem.
+pub fn read_export_record(source: &[u8], each: impl FnMut(Entry)) -> io::Result<()> {
+    read_entries(source, each, false)
+}
+
+fn read_entries(
+    source: impl Read,
+    each: impl FnMut(Entry),
+    recover_damage: bool,
+) -> io::Result<()> {
     let trail = RefCell::new(Trail::default());
     let mut reader = Reader::build(WithoutByteOrderMarks::new(source, &trail))
         .set_supported_tag_line_length(SUPPORTED_TAG_LINE_LENGTH)
@@ -69,7 +83,7 @@ pub fn read_games<R: Read>(source: R, each: impl FnMut(Entry)) -> io::Result<()>
                 collector.finish_game_left_open(end(&reader)?);
                 return Ok(());
             }
-            Err(error) if is_damage(&error) => collector.recover(end(&reader)?),
+            Err(error) if recover_damage && is_damage(&error) => collector.recover(end(&reader)?),
             Err(error) => return Err(error),
         }
     }

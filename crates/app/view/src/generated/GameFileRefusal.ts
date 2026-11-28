@@ -3,4 +3,4 @@
 /**
  * Why Rust did not open a game of a file or save a game into one.
  */
-export type GameFileRefusal = "cannotRead" | "noSuchGame" | "noFile" | "fileChanged" | "cannotReplace" | "cannotWrite";
+export type GameFileRefusal = "cannotRead" | "noSuchGame" | "noFile" | "fileChanged" | "changeInProgress" | "cannotReplace" | "cannotWrite";

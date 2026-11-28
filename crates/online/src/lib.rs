@@ -1,4 +1,8 @@
-//! Fetch a finished standard chess game from its public Lichess link.
+//! Download public chess games from Lichess.
+
+mod player;
+
+pub use player::{PlayerExportError, download_player_games, download_player_games_with_history};
 
 use std::fmt;
 use std::io::Read as _;
@@ -6,7 +10,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, HeaderValue, RETRY_AFTER};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
@@ -83,13 +87,40 @@ fn game_id(link: &str) -> Result<&str, FetchError> {
 /// Download the PGN export and return its single finished standard game.
 pub fn fetch_game(link: &str) -> Result<Game, FetchError> {
     let id = game_id(link)?;
+    let bytes = request_export(
+        &format!("/game/export/{id}"),
+        "application/x-chess-pgn",
+        Some(REQUEST_TIMEOUT),
+        |response| {
+            let mut bytes = Vec::new();
+            let length = response
+                .take(MAX_EXPORT_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| FetchError::Unavailable)?;
+            if length as u64 > MAX_EXPORT_BYTES {
+                return Err(FetchError::TooLarge);
+            }
+            Ok(bytes)
+        },
+    )?;
+    parse_export(&bytes)
+}
+
+// A single game has a total deadline. A player export may run longer while reads keep succeeding.
+fn request_export<T, E: From<FetchError>>(
+    path: &str,
+    accept: &str,
+    deadline: Option<Duration>,
+    consume: impl FnOnce(Response) -> Result<T, E>,
+) -> Result<T, E> {
     let mut cooldown = COOLDOWN.lock().map_err(|_| FetchError::Unavailable)?;
     if cooldown.is_some_and(|(since, duration)| since.elapsed() < duration) {
-        return Err(FetchError::RateLimited);
+        return Err(FetchError::RateLimited.into());
     }
 
     let client = Client::builder()
         .user_agent("zobrist")
+        .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never());
     #[cfg(not(feature = "fixture"))]
@@ -102,36 +133,28 @@ pub fn fetch_game(link: &str) -> Result<Game, FetchError> {
             .ok_or(FetchError::Unavailable)?;
         (client.no_proxy(), format!("http://127.0.0.1:{port}"))
     };
-    let response = client
+    let request = client
         .build()
         .map_err(|_| FetchError::Unavailable)?
-        .get(format!("{host}/game/export/{id}"))
-        .header(ACCEPT, "application/x-chess-pgn")
-        .timeout(REQUEST_TIMEOUT)
-        .send()
-        .map_err(|_| FetchError::Unavailable)?;
+        .get(format!("{host}{path}"))
+        .header(ACCEPT, accept);
+    let request = match deadline {
+        Some(timeout) => request.timeout(timeout),
+        None => request,
+    };
+    let response = request.send().map_err(|_| FetchError::Unavailable)?;
     match response.status() {
-        StatusCode::OK => {}
-        StatusCode::NOT_FOUND => return Err(FetchError::NotFound),
+        StatusCode::OK => consume(response),
+        StatusCode::NOT_FOUND => Err(FetchError::NotFound.into()),
         StatusCode::TOO_MANY_REQUESTS => {
             *cooldown = Some((
                 Instant::now(),
                 retry_delay(response.headers().get(RETRY_AFTER)),
             ));
-            return Err(FetchError::RateLimited);
+            Err(FetchError::RateLimited.into())
         }
-        _ => return Err(FetchError::Unavailable),
+        _ => Err(FetchError::Unavailable.into()),
     }
-    let mut bytes = Vec::new();
-    let length = response
-        .take(MAX_EXPORT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| FetchError::Unavailable)?;
-    drop(cooldown);
-    if length as u64 > MAX_EXPORT_BYTES {
-        return Err(FetchError::TooLarge);
-    }
-    parse_export(&bytes)
 }
 
 fn retry_delay(value: Option<&HeaderValue>) -> Duration {

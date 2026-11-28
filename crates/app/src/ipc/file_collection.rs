@@ -1,5 +1,7 @@
 //! The player's collection of PGN files and folders at their original locations.
 
+mod recent_files;
+
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -8,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
+use zobrist_store::{PgnHistory, pgn_states, prepare_pgn_restore, restore_pgn_state};
 
 use super::{EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Response, pgn_file};
 
@@ -31,10 +34,42 @@ pub enum CollectionRequest {
     },
     /// Choose a native database to add to the Databases page.
     PickDatabasePath,
+    /// Choose a destination for a collection imported from PGN.
+    PickNewDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Recover the collection after the player chooses its last good copy.
     RecoverFileCollection,
+    /// Load the most recently opened PGN files, newest first.
+    GetRecentFiles,
+    /// Open a PGN selected in a list on Files or Home.
+    OpenListedPgnFile {
+        /// The absolute path of the selected file.
+        path: PathBuf,
+    },
+    /// List the states retained for one PGN.
+    ListPgnStates {
+        /// The selected PGN.
+        path: PathBuf,
+    },
+    /// Verify the chosen state and identify the current bytes for confirmation.
+    PreparePgnRestore {
+        /// The selected PGN.
+        path: PathBuf,
+        /// The stable number of the chosen state.
+        #[ts(type = "number")]
+        number: u64,
+    },
+    /// Restore a state the player confirmed.
+    RestorePgnState {
+        /// The selected PGN.
+        path: PathBuf,
+        /// The stable number of the chosen state.
+        #[ts(type = "number")]
+        number: u64,
+        /// The stamp returned for the confirmation.
+        stamp: String,
+    },
     /// Open or create the chosen item and keep it in the collection.
     AddPgnPath {
         /// Which picker supplied the path.
@@ -49,6 +84,40 @@ pub enum CollectionRequest {
         /// The folder to list.
         path: PathBuf,
     },
+}
+
+/// A durable state of the selected PGN.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+pub struct EarlierState {
+    #[ts(type = "number")]
+    number: u64,
+    details: Option<StateDetails>,
+}
+
+/// Capture time and size from a readable state header.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+struct StateDetails {
+    #[ts(type = "number")]
+    seconds: u64,
+    #[ts(type = "number")]
+    bytes: u64,
+}
+
+pub(super) fn history_at(root: &Path) -> PgnHistory<'_> {
+    #[cfg(feature = "webdriver")]
+    if let Some(captured_at) = std::env::var("ZOBRIST_TEST_HISTORY_TIME")
+        .ok()
+        .and_then(|value| value.parse().ok())
+    {
+        return PgnHistory { root, captured_at };
+    }
+    PgnHistory {
+        root,
+        captured_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    }
 }
 
 /// The kind of system dialog the player asked for.
@@ -97,6 +166,19 @@ pub enum FileCollection {
     },
 }
 
+impl FileCollection {
+    fn load(directory: &Path, recover: bool) -> Self {
+        let lock = lock_collection(directory, "files.lock").ok();
+        match read_collection(directory, lock.as_ref(), recover) {
+            Ok(entries) => Self::Ready { entries },
+            Err((error, recoverable)) => Self::Unavailable {
+                message: error.to_string(),
+                recoverable,
+            },
+        }
+    }
+}
+
 impl CollectionEntry {
     fn new(kind: EntryKind, path: PathBuf) -> io::Result<Self> {
         if !path.is_absolute() {
@@ -129,28 +211,18 @@ impl CollectionEntry {
 impl CollectionRequest {
     /// Answers on a blocking thread. A dialog or a folder read never takes the game lock.
     pub fn answer(self, window: &Window) -> io::Result<Response> {
+        let data_directory = || window.path().app_local_data_dir().map_err(io::Error::other);
+        let file_dialog = || window.dialog().file().set_parent(window);
+        let database_dialog = || file_dialog().add_filter("zobrist databases", &["zobrist"]);
         match self {
-            Self::PickEnginePath => {
-                let path = window
-                    .dialog()
-                    .file()
-                    .set_parent(window)
-                    .blocking_pick_file()
-                    .map(|file| file.into_path().map_err(io::Error::other))
-                    .transpose()?;
-                Ok(Response::PickEnginePath { path })
-            }
-            Self::EngineInventory { action } => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                Ok(Response::EngineInventory {
-                    entries: action.apply(&directory)?,
-                })
-            }
+            Self::PickEnginePath => Ok(Response::PickEnginePath {
+                path: picker_path(file_dialog().blocking_pick_file())?,
+            }),
+            Self::EngineInventory { action } => Ok(Response::EngineInventory {
+                entries: action.apply(&data_directory()?)?,
+            }),
             Self::PickPgnPath { choice, folder } => {
-                let dialog = window.dialog().file().set_parent(window);
+                let dialog = file_dialog();
                 let selected = match choice {
                     PickerChoice::Folder => dialog.blocking_pick_folder(),
                     PickerChoice::File => dialog
@@ -179,50 +251,59 @@ impl CollectionRequest {
                 }
                 Ok(Response::PickPgnPath { path })
             }
-            Self::PickDatabasePath => {
-                let selected = window
-                    .dialog()
-                    .file()
-                    .set_parent(window)
-                    .add_filter("zobrist databases", &["zobrist"])
-                    .blocking_pick_file();
-                Ok(Response::PickDatabasePath {
-                    path: picker_path(selected)?,
-                })
+            Self::PickDatabasePath => Ok(Response::PickDatabasePath {
+                path: picker_path(database_dialog().blocking_pick_file())?,
+            }),
+            Self::PickNewDatabasePath => Ok(Response::PickNewDatabasePath {
+                path: picker_path(
+                    database_dialog()
+                        .set_file_name("Collection.zobrist")
+                        .blocking_save_file(),
+                )?,
+            }),
+            Self::GetFileCollection => Ok(Response::GetFileCollection {
+                collection: FileCollection::load(&data_directory()?, false),
+            }),
+            Self::RecoverFileCollection => Ok(Response::RecoverFileCollection {
+                collection: FileCollection::load(&data_directory()?, true),
+            }),
+            Self::GetRecentFiles => Ok(Response::GetRecentFiles {
+                entries: recent_files::list(&data_directory()?)?,
+            }),
+            Self::OpenListedPgnFile { path } => Ok(Response::OpenListedPgnFile {
+                answer: open_listed(data_directory(), path)?,
+            }),
+            Self::ListPgnStates { path } => {
+                let states = pgn_states(&path, &data_directory()?)?
+                    .into_iter()
+                    .map(|state| EarlierState {
+                        number: state.number,
+                        details: state.details.map(|details| StateDetails {
+                            seconds: details.captured_at,
+                            bytes: details.length,
+                        }),
+                    })
+                    .collect();
+                Ok(Response::ListPgnStates { states })
             }
-            Self::GetFileCollection | Self::RecoverFileCollection => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                let recover = matches!(self, Self::RecoverFileCollection);
-                let lock = lock_collection(&directory, "files.lock").ok();
-                let collection = match read_collection(&directory, lock.as_ref(), recover) {
-                    Ok(entries) => FileCollection::Ready { entries },
-                    Err((error, recoverable)) => FileCollection::Unavailable {
-                        message: error.to_string(),
-                        recoverable,
-                    },
-                };
-                Ok(if recover {
-                    Response::RecoverFileCollection { collection }
-                } else {
-                    Response::GetFileCollection { collection }
-                })
+            Self::PreparePgnRestore { path, number } => Ok(Response::PreparePgnRestore {
+                stamp: prepare_pgn_restore(&path, &data_directory()?, number)?,
+            }),
+            Self::RestorePgnState {
+                path,
+                number,
+                stamp,
+            } => {
+                restore_pgn_state(&path, history_at(&data_directory()?), number, &stamp)?;
+                Ok(Response::RestorePgnState)
             }
             Self::AddPgnPath {
                 choice,
                 path,
                 folder,
-            } => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                Ok(Response::AddPgnPath {
-                    answer: add(&directory, choice, &path, folder.as_deref())?,
-                })
-            }
+            } => Ok(Response::AddPgnPath {
+                answer: add(&data_directory()?, choice, &path, folder.as_deref())?,
+            }),
             Self::ReadPgnFolder { path } => Ok(Response::ReadPgnFolder {
                 entries: children(&path)?,
             }),
@@ -339,12 +420,26 @@ fn add(
             error
         }
     })?;
+    if choice == PickerChoice::File {
+        recent_files::record(directory, &entry.path);
+    }
     Ok(AddedPgnPath::File {
         entry,
         entries,
         parent,
         file,
     })
+}
+
+fn open_listed(directory: io::Result<PathBuf>, path: PathBuf) -> io::Result<PgnFileAnswer> {
+    let entry = CollectionEntry::new(EntryKind::File, path)?;
+    let answer = pgn_file::opened(&entry.path);
+    if matches!(answer, PgnFileAnswer::File(_))
+        && let Ok(directory) = directory
+    {
+        recent_files::record(&directory, &entry.path);
+    }
+    Ok(answer)
 }
 
 fn picker_path(selected: Option<tauri_plugin_dialog::FilePath>) -> io::Result<Option<PathBuf>> {
@@ -555,16 +650,20 @@ pub(super) fn read_list<T: Default>(
 }
 
 pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<File> {
+    let lock = collection_lock_file(directory, filename)?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+fn collection_lock_file(directory: &Path, filename: &str) -> io::Result<File> {
     fs::create_dir_all(directory)?;
     // Separate app windows and processes may add to the same collection.
-    let lock = File::options()
+    File::options()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(directory.join(filename))?;
-    lock.lock()?;
-    Ok(lock)
+        .open(directory.join(filename))
 }
 
 pub(super) fn publish_collection(path: &Path, contents: &impl Serialize) -> io::Result<()> {

@@ -17,6 +17,7 @@ zobrist-app
 internal_edges="
 zobrist-store zobrist-core
 zobrist-online zobrist-core
+zobrist-online zobrist-store
 zobrist-engine zobrist-core
 zobrist-cli zobrist-core
 zobrist-cli zobrist-store

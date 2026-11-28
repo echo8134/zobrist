@@ -68,6 +68,9 @@ export function TabArea({
   onSetResult,
 }: Props) {
   const { panel, picture } = tab;
+  const saveMessage = tab.refusedSave
+    ? refusedSaveLine(tab.refusedSave)
+    : tab.saveWarning;
   // A layout effect, so that a key right after a new picture is drawn starts from that picture.
   // A plain effect runs later, and until then the key would start from the picture before.
   useLayoutEffect(() => {
@@ -172,9 +175,9 @@ export function TabArea({
             onSetGameData(tab.gameData === "closed" ? "open" : "closed")
           }
         />
-        {tab.refusedSave !== undefined && (
+        {saveMessage && (
           <p className={refusedSave} role="alert">
-            {refusedSaveLine(tab.refusedSave)}
+            {saveMessage}
           </p>
         )}
         <GameDataForm

@@ -19,10 +19,11 @@ pub use board_appearance::{AppearanceRequest, BoardAppearance};
 pub use database_collection::{DatabaseEntry, DatabaseRequest};
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
-    AddedPgnPath, CollectionEntry, CollectionRequest, EntryKind, FileCollection, PickerChoice,
+    AddedPgnPath, CollectionEntry, CollectionRequest, EarlierState, EntryKind, FileCollection,
+    PickerChoice,
 };
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
-use game_file::{InFile, OpenGame, SavedState};
+use game_file::{InFile, OpenGame, SaveHistory, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
 pub use session::{BoardPicture, SessionRequest};
 
@@ -652,6 +653,11 @@ pub enum Response {
         /// The absolute path returned by the system.
         path: Option<std::path::PathBuf>,
     },
+    /// The chosen destination for a new database, or nothing after cancellation.
+    PickNewDatabasePath {
+        /// The absolute path returned by the system.
+        path: Option<std::path::PathBuf>,
+    },
     /// The native databases registered on this device.
     ListDatabases {
         /// Names and locations of the registered collections.
@@ -664,6 +670,21 @@ pub enum Response {
         /// The verified number of games in the database.
         #[ts(type = "number")]
         games: u64,
+    },
+    /// The published and registered PGN import.
+    ImportDatabase {
+        /// The registered collections after the import.
+        entries: Vec<DatabaseEntry>,
+        /// Where the new collection was saved.
+        path: std::path::PathBuf,
+        /// Number of games written, including games with recoverable problems.
+        #[ts(type = "number")]
+        games: u64,
+        /// Total number of problems in the source.
+        problems: usize,
+        /// The first diagnostic in source order, when present.
+        #[serde(rename = "firstProblem")]
+        first_problem: Option<String>,
     },
     /// The result of opening the selected native database.
     InspectDatabase {
@@ -686,6 +707,28 @@ pub enum Response {
         /// The recovered entries or the reason recovery could not complete.
         collection: FileCollection,
     },
+    /// The files the player recently opened.
+    GetRecentFiles {
+        /// Up to ten PGN files, newest first.
+        entries: Vec<CollectionEntry>,
+    },
+    /// The PGN selected on Home or Files, or the refusal.
+    OpenListedPgnFile {
+        /// The file with its games or why it could not be opened.
+        answer: PgnFileAnswer,
+    },
+    /// Earlier states of this PGN, most recent first.
+    ListPgnStates {
+        /// A damaged state still has its number.
+        states: Vec<EarlierState>,
+    },
+    /// The current file as seen when the player chose a state.
+    PreparePgnRestore {
+        /// Identifies the bytes the player is about to replace.
+        stamp: String,
+    },
+    /// The chosen state is now on disk.
+    RestorePgnState,
     /// The collection and the selected file or folder after applying the picker result.
     AddPgnPath {
         /// The new selection or the reason the file operation was refused.
@@ -1108,7 +1151,7 @@ impl Games {
     /// [`SharedGames::answer`].
     #[must_use]
     pub fn answer(&mut self, request: Request) -> Response {
-        match self.begin(request) {
+        match self.begin(request, &SaveHistory::default()) {
             FirstStep::Answer(response) => *response,
             FirstStep::BlockingWork(work) => work()(self),
         }
@@ -1116,7 +1159,7 @@ impl Games {
 
     /// Applies the view's request and builds its answer before another request can edit the
     /// game. A request that waits for I/O only starts here.
-    fn begin(&mut self, request: Request) -> FirstStep {
+    fn begin(&mut self, request: Request, history: &SaveHistory) -> FirstStep {
         let response = match request {
             Request::Version => Response::Version {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -1211,8 +1254,10 @@ impl Games {
             Request::OpenPgnFile { path } => return pgn_file::open(path),
             Request::CreatePgnFile { path } => return pgn_file::create(path),
             Request::OpenGame { path, number } => return game_file::open(path, number),
-            Request::SaveGame { game } => return game_file::save(self, game),
-            Request::SaveGameAs { game, path } => return game_file::save_as(self, game, path),
+            Request::SaveGame { game } => return game_file::save(self, game, history),
+            Request::SaveGameAs { game, path } => {
+                return game_file::save_as(self, game, path, history);
+            }
         };
         FirstStep::Answer(Box::new(response))
     }
@@ -1263,9 +1308,22 @@ pub struct SharedGames {
     // A failed recovery must preserve this original before the next save of the boards.
     one_save: Mutex<Option<PathBuf>>,
     restored_selection: OnceLock<Option<usize>>,
+    history: SaveHistory,
 }
 
 impl SharedGames {
+    /// Enables PGN history for desktop saves, reporting a directory lookup failure at Save.
+    #[must_use]
+    pub fn with_history(directory: Result<PathBuf, String>) -> Self {
+        Self {
+            history: match directory {
+                Ok(path) => SaveHistory::Directory(path),
+                Err(reason) => SaveHistory::Unavailable(reason),
+            },
+            ..Self::default()
+        }
+    }
+
     /// Answers a request. It holds the lock on the games only for the steps that touch them.
     /// File and network I/O run between those steps, on a thread that may wait.
     pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
@@ -1280,7 +1338,7 @@ impl SharedGames {
         } else {
             None
         };
-        let first = self.games.lock().await.begin(request);
+        let first = self.games.lock().await.begin(request, &self.history);
         match first {
             FirstStep::Answer(response) => Ok(*response),
             FirstStep::BlockingWork(work) => {
