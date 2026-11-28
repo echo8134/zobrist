@@ -91,18 +91,31 @@ test("quitting waits for a new board and a save that was waiting for a field", a
     steps.push("saved");
   });
 
-  const quit = finishRequests("all").then(() => steps.push("quit"));
   finishTag();
   await answersOnTheirWay(7);
-  expect(steps).toEqual([]);
+  await invoke.withImplementation(
+    async (_command, { request }) => {
+      expect(request).toEqual({ type: "PrepareToClose", abandon: false });
+      return { type: "PrepareToClose", message: null };
+    },
+    async () => {
+      const showWaiting = vi.fn();
+      const quit = prepareToClose(
+        new AbortController().signal,
+        showWaiting,
+      ).then(() => steps.push("quit"));
+      await vi.waitFor(() => expect(showWaiting).toHaveBeenCalledWith(null));
+      expect(steps).toEqual([]);
 
-  finishSave();
-  await answersOnTheirWay(7);
-  expect(steps).toEqual(["saved"]);
+      finishSave();
+      await answersOnTheirWay(7);
+      expect(steps).toEqual(["saved"]);
 
-  finishOpen();
-  await quit;
-  expect(steps).toEqual(["saved", "opened", "quit"]);
+      finishOpen();
+      await quit;
+      expect(steps).toEqual(["saved", "opened", "quit"]);
+    },
+  );
 });
 
 test("a close waits for an import even if Rust receives the close request first", async () => {
@@ -188,8 +201,9 @@ test("a game can be saved while the tablebase is still answering", async () => {
   );
   const lookup = ask({ type: "LookupTablebase", game: 4, revision: 2 });
   expect(answersOnTheirWay(4)).toBeUndefined();
-  await finishRequests("boards");
-  await finishRequests("all");
+  await finishRequests();
+  invoke.mockResolvedValueOnce({ type: "PrepareToClose", message: null });
+  await prepareToClose(new AbortController().signal, vi.fn());
   refuse(new Error("offline"));
   await expect(lookup).rejects.toThrow("offline");
 });
@@ -209,9 +223,7 @@ test("a checkpoint waits for a game opening from a collection", async () => {
       path: "Study.zobrist",
       number: 2,
     }).then(() => steps.push("opened"));
-    const checkpoint = finishRequests("boards").then(() =>
-      steps.push("checkpoint"),
-    );
+    const checkpoint = finishRequests().then(() => steps.push("checkpoint"));
     await vi.runAllTimersAsync();
     finishOpen();
     await opening;

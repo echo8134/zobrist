@@ -54,17 +54,11 @@ export function ask<Asked extends Request>(
  * The senders need a turn to apply their answers before the view can take its snapshot.
  */
 export function answersOnTheirWay(
-  scope: number | "boards" | "all",
+  scope: number | "boards",
 ): Promise<void> | undefined {
-  const pending: Promise<unknown>[] = [];
-  if (scope === "all" && longRequests.size)
-    pending.push(Promise.allSettled(longRequests));
+  const pending = [];
   for (const [answer, action] of onTheirWay) {
-    if (
-      scope === "all" ||
-      scope === action ||
-      (scope === "boards" && action !== "background")
-    ) {
+    if (scope === action || (scope === "boards" && action !== "background")) {
       pending.push(answer);
     }
   }
@@ -73,12 +67,12 @@ export function answersOnTheirWay(
     : undefined;
 }
 
-/** Include requests that the senders start when they handle their answers. */
-export async function finishRequests(scope: "boards" | "all") {
+/** Wait for board actions, including any that their answers start. */
+export async function finishRequests() {
   // Chessground delivers a completed move in a timer after the mouse event.
   await new Promise<void>((resolve) => setTimeout(resolve, 1));
   for (;;) {
-    const pending = answersOnTheirWay(scope);
+    const pending = answersOnTheirWay("boards");
     if (!pending) return;
     await pending;
   }
@@ -118,6 +112,6 @@ export async function prepareToClose(
   if (secondClose.aborted) {
     await ask({ type: "PrepareToClose", abandon: true });
     longRequests.clear();
-    await finishRequests("boards");
+    await finishRequests();
   }
 }

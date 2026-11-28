@@ -40,7 +40,7 @@ export function boardSession(
       }
       cancel();
       const turn = setTimeout(async () => {
-        await finishRequests("boards");
+        await finishRequests();
         if (timer !== turn) return;
         let problem: string | undefined;
         try {
