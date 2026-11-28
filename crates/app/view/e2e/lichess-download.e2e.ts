@@ -163,7 +163,13 @@ describe("downloading public games from User", () => {
     }
   });
 
-  it("gives up a held download on a second close and keeps the original PGN", async () => {
+  it("gives up a held download on a second close and keeps the original PGN", () =>
+    closeHeldDownload(false));
+
+  it("closes while a game link waits behind a held download", () =>
+    closeHeldDownload(true));
+
+  async function closeHeldDownload(openGameLink: boolean) {
     mkdirSync(screenshots, { recursive: true });
     const work = mkdtempSync(join(screenshots, "close-download-"));
     const study = join(work, "study.pgn");
@@ -191,6 +197,18 @@ describe("downloading public games from User", () => {
             await app.waitUntil(async () =>
               (await exportPaths()).includes(january),
             );
+
+            if (openGameLink) {
+              await app.$("nav").$("aria/Home").click();
+              await app
+                .$("aria/Lichess game link")
+                .setValue("https://lichess.org/Ab12Cd34");
+              await app.$("button=Open game link").click();
+              await expect(app.$('main [role="status"]')).toHaveText(
+                "Opening game…",
+              );
+              expect(await exportPaths()).toEqual([january]);
+            }
 
             await window.close();
             await expect(
@@ -225,5 +243,5 @@ describe("downloading public games from User", () => {
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
-  });
+  }
 });
