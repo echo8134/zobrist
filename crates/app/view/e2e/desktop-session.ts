@@ -1,5 +1,8 @@
-import { createServer } from "node:net";
+import { strictEqual } from "node:assert";
+import { randomUUID } from "node:crypto";
+import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
+import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 import { cleanupWdioSession, startWdioSession } from "@wdio/tauri-service";
 
@@ -42,10 +45,20 @@ export async function withDesktopApp(
   exit: "close window" | "wait for exit" | "terminate process" = "close window",
 ) {
   const port = await freePort();
+  const application = join(target, "debug", "zobrist-app");
+  const stopSocket =
+    exit === "terminate process" ? `zobrist-${randomUUID()}` : undefined;
   const session = await startWdioSession(
     {
       browserName: "tauri",
-      "tauri:options": { application: join(target, "debug", "zobrist-app") },
+      "tauri:options": {
+        application: stopSocket
+          ? fileURLToPath(new URL("./supervise-app.py", import.meta.url))
+          : application,
+      },
+      "wdio:tauriServiceOptions": {
+        appArgs: stopSocket ? [stopSocket, application] : [],
+      },
     },
     {
       driverProvider: "embedded",
@@ -59,7 +72,14 @@ export async function withDesktopApp(
     await visit(session);
   } finally {
     try {
-      if (exit !== "terminate process") {
+      if (stopSocket) {
+        const socket = createConnection(`\0${stopSocket}`);
+        strictEqual(
+          await text(socket),
+          "stopped\n",
+          "Expected the desktop app and all its children to exit",
+        );
+      } else {
         const endpoint = `http://127.0.0.1:${port}`;
         if (exit === "close window") {
           await requestDriver(
