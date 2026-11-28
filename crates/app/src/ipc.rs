@@ -4,6 +4,7 @@
 //! TypeScript types of the view are generated from these two types.
 
 mod accounts;
+mod analysis;
 mod board_appearance;
 mod engines;
 mod file_collection;
@@ -11,6 +12,7 @@ mod game_file;
 mod pgn_file;
 
 pub use accounts::AccountRequest;
+pub use analysis::{AnalysisRequest, AnalysisSnapshot};
 pub use board_appearance::{AppearanceRequest, BoardAppearance};
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
@@ -45,6 +47,8 @@ pub use drawing::ShapeEdit;
 pub enum DesktopRequest {
     /// Requests answered by the games and PGN editor.
     Editor(Request),
+    /// Requests about the engine analysing an open game.
+    Analysis(AnalysisRequest),
     /// Requests about the player's collection or the system picker.
     Collection(CollectionRequest),
     /// Requests about the name saved on this device.
@@ -471,6 +475,11 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// The state of one search at one position.
+    Analysis {
+        /// Tagged with the game, revision and search generation.
+        snapshot: AnalysisSnapshot,
+    },
     /// The public Lichess name saved on this device.
     GetLichessName {
         /// Absent when the player has not saved a name.
@@ -731,6 +740,7 @@ impl PgnExport {
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GamePicture {
+    revision: usize,
     tags: Vec<Tag>,
     result: GameResult,
     fen: String,
@@ -886,7 +896,7 @@ impl NotationMove {
 }
 
 impl GamePicture {
-    fn from_editor(editor: &GameEditor, file: Option<&InFile>) -> Self {
+    fn from_editor(editor: &GameEditor, file: Option<&InFile>, revision: usize) -> Self {
         let position = editor.position();
         let mut current = CurrentPlace {
             in_variation: editor.in_variation(),
@@ -914,6 +924,7 @@ impl GamePicture {
             })
             .collect();
         Self {
+            revision,
             tags: editor
                 .game()
                 .tags()
@@ -962,8 +973,11 @@ impl Games {
     fn open(&mut self, game: Game, file: Option<InFile>) -> (usize, GamePicture) {
         let number = self.next_number;
         self.next_number = number.strict_add(1);
+        let editor = GameEditor::new(game);
         let open = OpenGame {
-            editor: GameEditor::new(game),
+            position: analysis::BoardPosition::new(&editor),
+            analysis: std::sync::Arc::default(),
+            editor,
             file,
         };
         let picture = open.picture();
@@ -1002,7 +1016,7 @@ impl Games {
     ) -> Option<GamePicture> {
         let open = self.open_games.get_mut(&game)?;
         // A refused edit leaves the editor at the position the view should draw.
-        let _result = change(&mut open.editor);
+        let _result = open.edit(change);
         Some(open.picture())
     }
 
@@ -1034,8 +1048,10 @@ impl Games {
             },
             Request::SetStartPosition { game, fen } => Response::SetStartPosition {
                 change: self.open_games.get_mut(&game).map(|open| {
-                    let refused = fen
-                        .is_none_or(|position| open.editor.set_start_position(position).is_err());
+                    let refused = fen.is_none_or(|position| {
+                        open.edit(|editor| editor.set_start_position(position))
+                            .is_err()
+                    });
                     PositionChange {
                         picture: open.picture(),
                         refused,
@@ -1101,7 +1117,12 @@ impl Games {
                 picture: self.edit(game, GameEditor::delete_rest),
             },
             Request::CloseGame { game } => {
-                self.open_games.remove(&game);
+                if let Some(open) = self.open_games.remove(&game) {
+                    return FirstStep::blocking_work(move || {
+                        analysis::close(&open.analysis);
+                        |_| Response::CloseGame
+                    });
+                }
                 Response::CloseGame
             }
             Request::OpenPgnFile { path } => return pgn_file::open(path),
@@ -1208,7 +1229,7 @@ mod tests {
     #[test]
     fn imported_shapes_follow_their_place_and_leave_midgame_prefaces_intact() -> io::Result<()> {
         let mut editor = import(b"{Start [%cal Rd1h5]} 1. e4 {Plan [%csl Gd4]} {more} {[%cal Ge2e4]} (1. d4 {[%csl Ba1]}) {Before [%csl Yb2]} e5 *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
         assert_eq!(
             picture["arrows"],
             json!([{ "color": "red", "from": "d1", "to": "h5" }])
@@ -1221,7 +1242,7 @@ mod tests {
         assert_eq!(notation[1]["commentsBefore"], json!(["Before [%csl Yb2]"]));
 
         editor.go_to(Place(vec![1])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
         assert_eq!(
             picture["squares"],
             json!([{ "color": "blue", "square": "a1" }])
@@ -1233,7 +1254,7 @@ mod tests {
     #[test]
     fn the_empty_game_shows_only_text_in_its_start_comments() -> io::Result<()> {
         let editor = import(b"{[%csl Gd4]} {Plan [%cal Ge2e4]} {[%clk 0:15]} *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
         assert_eq!(picture["startComments"], json!(["Plan", "[%clk 0:15]"]));
         assert_eq!(
             picture["squares"],
@@ -1255,7 +1276,7 @@ mod tests {
                 imported = Some(GameEditor::new(*game));
             }
         })?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap(), None))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap(), None, 0))?;
         assert_eq!(
             picture["tags"],
             json!([
@@ -1281,7 +1302,7 @@ mod tests {
         })?;
         let mut editor = GameEditor::new(imported.unwrap());
         editor.go_to(Place(vec![0])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
         assert_eq!(picture["moveSymbol"], "!");
         assert_eq!(picture["positionSymbol"], "=");
         assert_eq!(picture["startComments"], json!([]));

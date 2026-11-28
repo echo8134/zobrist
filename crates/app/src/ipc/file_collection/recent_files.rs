@@ -7,17 +7,17 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::{
-    CollectionEntry, EntryKind, collection_lock_file, publish_collection, read_or_default,
+    CollectionEntry, EntryKind, collection_lock_file, list_recovery, publish_collection, read_list,
 };
 
 const LIMIT: usize = 10;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub(super) fn list(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
-    read_or_default(
+    read_list(
         &directory.join("recent-files.json"),
         "the recent files list",
-        "Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Home.",
+        &list_recovery("existing PGN files", "Home"),
         |bytes| {
             let paths: Vec<PathBuf> = serde_json::from_slice(bytes)?;
             let mut seen = HashSet::new();

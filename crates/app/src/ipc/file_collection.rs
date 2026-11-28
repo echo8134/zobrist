@@ -353,10 +353,10 @@ fn children(path: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
-    read_or_default(
+    read_list(
         &directory.join("files.json"),
         "the file collection",
-        "Your existing PGN files are untouched. Restore the list from a backup or move it aside, then reopen Files.",
+        &list_recovery("existing PGN files", "Files"),
         |bytes| {
             let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(bytes)?;
             paths
@@ -389,7 +389,13 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
     Ok(entries)
 }
 
-pub(super) fn read_or_default<T: Default>(
+pub(super) fn list_recovery(untouched: &str, page: &str) -> String {
+    format!(
+        "Your {untouched} are untouched. Restore the list from a backup or move it aside, then reopen {page}."
+    )
+}
+
+pub(super) fn read_list<T: Default>(
     path: &Path,
     description: &str,
     recovery: &str,

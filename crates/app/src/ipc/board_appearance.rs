@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::Response;
-use super::file_collection::{lock_collection, publish_collection, read_or_default};
+use super::file_collection::{lock_collection, publish_collection, read_list};
 
 /// The board preferences shown on the Settings page and saved on this device.
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -61,7 +61,7 @@ impl AppearanceRequest {
         let name = "settings.json";
         match self {
             Self::GetBoardAppearance => {
-                let appearance = read_or_default(
+                let appearance = read_list(
                     &directory.join(name),
                     "the board settings",
                     "Restore the file from a backup or move it aside, then restart zobrist.",

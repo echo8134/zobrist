@@ -158,6 +158,9 @@ export function TabArea({
         tab={tab}
         change={change}
         className={notationArea}
+        annotations={
+          <AnnotationPanel picture={picture} onAnnotate={onAnnotate} />
+        }
       >
         <NotationTools
           picture={picture}
@@ -189,7 +192,6 @@ export function TabArea({
             onGoTo={onGoTo}
           />
         </div>
-        <AnnotationPanel picture={picture} onAnnotate={onAnnotate} />
       </PositionPanel>
     </main>
   );

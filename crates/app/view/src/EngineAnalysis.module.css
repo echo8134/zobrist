@@ -1,0 +1,68 @@
+.panel {
+  flex: none;
+  padding: var(--annotation-panel-padding);
+  border-top: 1px solid var(--notation-area-line-color);
+}
+
+.panel header,
+.panel li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--annotation-panel-gap);
+}
+
+.panel header {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: var(--top-bar-name-weight);
+}
+
+.panel button {
+  height: var(--button-height);
+  padding: var(--button-padding);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel button:hover {
+  background: var(--top-bar-background-color);
+}
+
+.panel ol,
+.panel p {
+  margin: var(--annotation-panel-gap) 0 0;
+  padding: 0;
+}
+
+.panel li {
+  line-height: var(--move-line-height);
+}
+
+.panel ol {
+  max-height: 25vh;
+  overflow-y: auto;
+}
+
+.panel strong {
+  flex: none;
+  min-width: var(--list-number-width);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--top-bar-name-weight);
+}
+
+.panel p {
+  color: var(--file-line-color);
+}
+
+.panel [role="alert"] {
+  color: var(--refusal-color);
+}
