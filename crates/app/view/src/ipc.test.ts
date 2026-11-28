@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test, vi } from "vitest";
-import { answersOnTheirWay, ask } from "./ipc";
+import { answersOnTheirWay, ask, finishBoardActions } from "./ipc";
 
 // The stand-in for Rust. Only the module under test imports the real function.
 const invoke = vi.hoisted(() => vi.fn());
@@ -62,4 +62,45 @@ test("a request that Rust could not answer holds up nothing", async () => {
   await answersOnTheirWay(9);
 
   expect(answersOnTheirWay(9)).toBeUndefined();
+});
+
+test("quitting waits for a new board and a save that was waiting for a field", async () => {
+  let finishTag = () => {};
+  let finishOpen = () => {};
+  let finishSave = () => {};
+  invoke.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finishTag = resolve;
+    }),
+  );
+  invoke.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finishOpen = resolve;
+    }),
+  );
+  invoke.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finishSave = resolve;
+    }),
+  );
+  const steps: string[] = [];
+  void ask({ type: "SetTag", game: 7, tag: "White", text: "Epsilon" });
+  void ask({ type: "NewGame" }).then(() => steps.push("opened"));
+  void answersOnTheirWay(7)?.then(async () => {
+    await ask({ type: "SaveGame", game: 7 });
+    steps.push("saved");
+  });
+
+  const quit = finishBoardActions().then(() => steps.push("quit"));
+  finishTag();
+  await answersOnTheirWay(7);
+  expect(steps).toEqual([]);
+
+  finishSave();
+  await answersOnTheirWay(7);
+  expect(steps).toEqual(["saved"]);
+
+  finishOpen();
+  await quit;
+  expect(steps).toEqual(["saved", "opened", "quit"]);
 });

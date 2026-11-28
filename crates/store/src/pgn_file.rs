@@ -123,14 +123,54 @@ impl PgnBatch {
 /// Follows symbolic links and stages the new file beside the destination.
 /// Calls `supply` with a function that writes one game at a time. An error from
 /// either function discards the staged file and leaves the target as it was.
+/// Refuses an append when the end of the target takes in the added games.
 /// Returns the number of games added after syncing and publishing the file.
 pub fn add_pgn_games<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<u64, E> {
-    let (staged, games) = stage_with_added(target, supply)?;
+    let mut added = 0;
+    let mut first = None;
+    let (mut staged, prefix_length) = stage_with_added(target, |append| {
+        supply(&mut |game| {
+            append(game)?;
+            // Only the first game has to start a new game after bytes we did not write.
+            first.get_or_insert_with(|| game.clone());
+            added += 1;
+            Ok(())
+        })
+    })?;
+    if let Some(first) = first
+        && prefix_length > 0
+    {
+        staged.file.rewind()?;
+        let mut old_games = 0;
+        pgn::read_games((&staged.file).take(prefix_length), |entry| {
+            if matches!(entry, Entry::Game { .. }) {
+                old_games += 1;
+            }
+        })?;
+        staged.file.rewind()?;
+        let mut games = 0;
+        let mut first_reads_back = false;
+        pgn::read_games(&staged.file, |entry| {
+            if let Entry::Game { game, .. } = entry {
+                if games == old_games {
+                    first_reads_back = *game == first;
+                }
+                games += 1;
+            }
+        })?;
+        if !first_reads_back || games != old_games + added {
+            return Err(refusal(
+                "the added games would not read back as separate games after the existing games"
+                    .to_owned(),
+            )
+            .into());
+        }
+    }
     staged.publish()?;
-    Ok(games)
+    Ok(added)
 }
 
 /// Adds one game as the last game of a PGN file, creating the target if necessary, and returns
@@ -165,28 +205,27 @@ pub fn add_pgn_game(target: &Path, game: &Game) -> io::Result<NonZeroU64> {
     Ok(number)
 }
 
-/// Stages the target with the supplied games behind its old bytes, and counts those games.
+/// Stages the target with the supplied games and returns the length of the prefix, including the separator.
 fn stage_with_added<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<(Staged, u64), E> {
-    let (staged, separator) = Staged::for_append(target)?;
+    let (mut staged, separator) = Staged::for_append(target)?;
+    let prefix_length = staged.file.stream_position()? + separator.len() as u64;
     let mut output = BufWriter::new(&staged.file);
     let mut separator = Some(separator);
-    let mut games = 0;
     supply(&mut |game| {
         // A caller can ignore a failed game. Only a complete write restores the separator.
         let before = separator.take().ok_or_else(failed_write)?;
         output.write_all(before)?;
         pgn::write_game(game, &mut output)?;
         separator = Some(b"\n");
-        games += 1;
         Ok(())
     })?;
     separator.ok_or_else(failed_write)?;
     output.flush()?;
     drop(output);
-    Ok((staged, games))
+    Ok((staged, prefix_length))
 }
 
 /// Replaces game `number` of a PGN file, counting from 1, and keeps every other byte of the

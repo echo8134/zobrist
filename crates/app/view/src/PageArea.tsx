@@ -1,4 +1,6 @@
 import { type ReactNode, Suspense, use, useActionState, useState } from "react";
+import { BoardSettingsForm } from "./BoardSettings";
+import { DatabasesPage } from "./DatabasesPage";
 import { EnginesPage } from "./EnginesPage";
 import { FilesPage } from "./FilesPage";
 import formStyles from "./FilesPage.module.css";
@@ -74,13 +76,14 @@ function GameLinkForm({ change }: Pick<Props, "change">) {
 }
 
 const contents: Record<Exclude<Page, "Files" | "Home">, ReactNode> = {
-  Databases: null,
+  Databases: <DatabasesPage />,
   Events: null,
   Engines: <EnginesPage />,
   User: <UserPage />,
   Settings: (
     <Suspense>
       <VersionLine />
+      <BoardSettingsForm />
     </Suspense>
   ),
 };

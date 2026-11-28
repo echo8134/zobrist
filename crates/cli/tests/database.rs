@@ -43,6 +43,41 @@ fn export(database: &Path) -> io::Result<Output> {
 }
 
 #[test]
+fn info_prints_the_verified_game_count() {
+    let directory = Directory::new("info").unwrap();
+    let empty = directory.0.join("empty.pgn");
+    fs::write(&empty, "").unwrap();
+    for (input, count) in [
+        (Path::new("tests/fixtures/clean.pgn"), "games: 2\n"),
+        (&empty, "games: 0\n"),
+    ] {
+        let database = directory
+            .0
+            .join(input.file_name().unwrap())
+            .with_extension("zobrist");
+        assert!(create(input, &database).unwrap().status.success());
+        let output = command()
+            .args(["database", "info"])
+            .arg(database)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stdout, count.as_bytes());
+        assert_eq!(output.stderr, b"");
+    }
+    let refused = command()
+        .args(["database", "info", "tests/fixtures/clean.pgn"])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    assert_eq!(refused.stdout, b"");
+    assert_eq!(
+        refused.stderr,
+        b"zobrist: cannot read tests/fixtures/clean.pgn: not a zobrist database\n"
+    );
+}
+
+#[test]
 fn imports_every_game_and_exports_the_same_bytes_as_pgn_write() {
     let directory = Directory::new("round-trip").unwrap();
     for (name, status, report) in [

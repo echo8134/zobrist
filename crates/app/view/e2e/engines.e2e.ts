@@ -5,54 +5,14 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { cleanupWdioSession, startWdioSession } from "@wdio/tauri-service";
+import { visitPage } from "./desktop-session";
 import { pick } from "./file-picker";
 
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
-
-async function freePort() {
-  const socket = createServer();
-  await new Promise<void>((ready, reject) => {
-    socket.once("error", reject).listen(0, "127.0.0.1", ready);
-  });
-  const address = socket.address();
-  await new Promise<void>((done) => socket.close(() => done()));
-  if (!address || typeof address === "string") throw Error("Expected a port");
-  return address.port;
-}
-
-// A separate app process per visit exercises startup with the same data directory.
-async function openEngines(
-  work: string,
-  visit: (session: WebdriverIO.Browser) => Promise<void>,
-) {
-  const session = await startWdioSession(
-    {
-      browserName: "tauri",
-      "tauri:options": { application: join(target, "debug", "zobrist-app") },
-    },
-    {
-      driverProvider: "embedded",
-      embeddedPort: await freePort(),
-      env: {
-        XDG_DATA_HOME: join(work, "data"),
-        XDG_CACHE_HOME: join(work, "cache"),
-      },
-    },
-  );
-  try {
-    await session.switchToWindow("main");
-    await session.$("nav").$("aria/Engines").click();
-    await visit(session);
-  } finally {
-    await cleanupWdioSession(session);
-  }
-}
 
 async function checkRows(
   session: WebdriverIO.Browser,
@@ -87,7 +47,7 @@ describe("the page Engines", () => {
           mode: 0o700,
         });
       }
-      await openEngines(work, async (session) => {
+      await visitPage(work, "Engines", async (session) => {
         await expect(session.$("main p")).toHaveText(empty);
         await pick("Engine", null, session);
         await expect(session.$("main p")).toHaveText(empty);
@@ -106,7 +66,7 @@ describe("the page Engines", () => {
           1280, 800,
         ]);
       });
-      await openEngines(work, async (session) => {
+      await visitPage(work, "Engines", async (session) => {
         await checkRows(session, work, ["sample-b", "sample-a"]);
         await pick("Engine", join(work, "missing"), session);
         await expect(session.$('main [role="alert"]')).toHaveText(

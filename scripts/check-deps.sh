@@ -47,6 +47,8 @@ fail() {
   failed=1
 }
 
+grep -qxF zobrist-engine <<<"$members" || fail "Add crates/engine to the workspace members"
+
 while read -r member; do
   [ -z "$member" ] && continue
   grep -qxF "$member" <<<"$workspace_crates" \

@@ -7,6 +7,7 @@ use shakmaty::Square::{
     G1, H1, H5,
 };
 use shakmaty::fen::Fen;
+use shakmaty::uci::UciMove;
 use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role};
 use zobrist_core::editor::{
     AnnotationError, EditVariationError, EditableTag, GameEditor, MoveSymbol, NoSuchPlace, Place,
@@ -179,6 +180,67 @@ fn plays_the_game_and_its_variations_one_board_move_at_a_time() -> io::Result<()
     Ok(())
 }
 
+fn uci_line(moves: &str) -> io::Result<Vec<UciMove>> {
+    moves
+        .split_whitespace()
+        .map(|text| text.parse().map_err(io::Error::other))
+        .collect()
+}
+
+#[test]
+fn adding_a_line_reuses_shared_moves_and_has_one_undo_at_the_original_position() -> io::Result<()> {
+    let before = "1. e4 e5 2. Nf3 *\n";
+    let after = "1. e4 e5 (1... c5 2. Nf3) 2. Nf3 *\n";
+    let line = uci_line("e2e4 c7c5 g1f3")?;
+    let mut editor = open(before)?;
+    assert_eq!(editor.add_variation(&line), Ok(true));
+    assert_eq!(editor.add_variation(&line), Ok(false));
+    assert_state(&editor, &[], after)?;
+    assert_eq!(editor.position(), &Chess::default());
+    assert!(editor.undo());
+    assert_state(&editor, &[], before)?;
+    assert!(!editor.can_undo());
+    assert!(editor.redo());
+    assert_state(&editor, &[], after)
+}
+
+#[test]
+fn adding_a_line_extends_an_annotated_variation_and_keeps_the_board_at_its_origin() -> io::Result<()>
+{
+    let before = "1. e4 e5 (1... c5 {Sharp}) 2. Nf3 *\n";
+    let after = "1. e4 e5 (1... c5 {Sharp} 2. Nf3 d6) 2. Nf3 *\n";
+    let mut editor = open(before)?;
+    editor.go_to(Place(vec![0])).unwrap();
+    let position = editor.position().clone();
+    assert_eq!(editor.add_variation(&uci_line("c7c5 g1f3 d7d6")?), Ok(true));
+    assert_eq!(editor.position(), &position);
+    assert_state(&editor, &[0], after)?;
+    assert!(editor.undo());
+    assert_state(&editor, &[0], before)
+}
+
+#[test]
+fn refusing_a_line_or_repeating_one_preserves_the_game_and_both_history_stacks() -> io::Result<()> {
+    let before = "1. e4 e5 *\n";
+    let mut editor = open(before)?;
+    editor.set_comment("Start").unwrap();
+    editor.set_comment("Edited").unwrap();
+    assert!(editor.undo());
+    let annotated = "{Start} 1. e4 e5 *\n";
+    assert_state(&editor, &[], annotated)?;
+    assert_eq!(
+        editor.add_variation(&uci_line("e2e4 c7c5 e2e5")?),
+        Err(PlayError::IllegalMove)
+    );
+    assert_eq!(editor.add_variation(&uci_line("e2e4 e7e5")?), Ok(false));
+    assert_state(&editor, &[], annotated)?;
+    assert!(editor.redo());
+    assert_state(&editor, &[], "{Edited} 1. e4 e5 *\n")?;
+    assert!(editor.undo());
+    assert!(editor.undo());
+    assert_state(&editor, &[], before)
+}
+
 #[test]
 fn numbers_first_moves_in_reading_order_and_keeps_their_nesting() -> io::Result<()> {
     let text = "1. e4 (1. d4 (1. c4)) (1. Nf3) *\n";
@@ -345,6 +407,10 @@ fn enforces_the_actual_variation_depth_even_when_a_place_is_short() -> io::Resul
     editor.back();
     let at_limit = editor.game().clone();
     assert_eq!(editor.play(B1, C3, None), Err(PlayError::TooDeep));
+    assert_eq!(
+        editor.add_variation(&uci_line("b1c3")?),
+        Err(PlayError::TooDeep)
+    );
     assert_state(&editor, &[depth, 1], &limit)?;
     editor.play(G1, F3, None).unwrap();
     assert_state(&editor, &[depth, 1, 0], &limit)?;

@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { EngineAnalysis } from "./EngineAnalysis";
 import { answersOnTheirWay, ask } from "./ipc";
 import { PositionSetupPanel } from "./PositionSetupPanel";
 import styles from "./PositionTools.module.css";
@@ -137,10 +138,12 @@ export function PositionPanel({
   change,
   className,
   children,
+  annotations,
   onEditSetup,
 }: Props & {
   className: string | undefined;
   children: ReactNode;
+  annotations: ReactNode;
   onEditSetup: (edit: SetupEdit) => void;
 }) {
   const { game, panel } = tab;
@@ -233,16 +236,7 @@ export function PositionPanel({
       </div>
     );
   } else {
-    controls = (
-      <>
-        {children}
-        {tab.openingProblem && (
-          <p className={openingProblem} role="alert">
-            {tab.openingProblem}
-          </p>
-        )}
-      </>
-    );
+    controls = children;
   }
   return (
     <aside
@@ -252,6 +246,18 @@ export function PositionPanel({
       inert={panel?.status === "pending"}
     >
       {controls}
+      <EngineAnalysis
+        game={game}
+        origin={tab.picture}
+        change={change}
+        hidden={panel !== undefined}
+      />
+      {panel === undefined && annotations}
+      {panel === undefined && tab.openingProblem && (
+        <p className={openingProblem} role="alert">
+          {tab.openingProblem}
+        </p>
+      )}
     </aside>
   );
 }
