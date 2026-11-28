@@ -24,7 +24,7 @@ Runs a local UCI program and collects the lines it reports for each search. It u
 
 ### `crates/online` (zobrist-online)
 
-Owns outgoing connections to chess sites. It resolves a public Lichess game link, fetches its PGN export, and returns one finished standard game or the reason it could not be opened.
+Owns outgoing connections to chess sites. It can open one finished standard game from a Lichess link or download a player's public games for an inclusive range of UTC dates. For a player download, it gives the exported PGNs to `store` and appends them as a batch after the download finishes.
 
 ### `crates/cli` (zobrist-cli)
 
@@ -45,6 +45,7 @@ The quality gate. `scripts/check.sh` is the entry point. Each script says in its
 
 ```
 core  <-  store, engine, online  <-  cli, app
+store <-  online
 ```
 
 Read each arrow as "is depended on by". `store`, `engine`, and `online` may depend on `core`. `cli` and `app` may use each of these crates and `core` directly. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. No workspace crate may depend directly on `rusqlite`. Only `app` may depend directly on the `tauri` crates. Only `online` may depend directly on `reqwest`.
@@ -99,6 +100,8 @@ While the engine runs, the view polls through the typed request. Each answer ide
 ### One client for outgoing connections to chess sites
 
 The CLI and desktop both open public Lichess links through `zobrist-online`. The crate owns the provider's HTTPS address, request limits, and cooldown. It uses `reqwest` (MIT OR Apache-2.0) with native TLS and returns game types from `zobrist-core`. Keeping this code in each interface would duplicate the request rules. Putting it in `core` would give the chess model an I/O dependency.
+
+For a player download, `online` uses `time` to convert the selected UTC dates and `serde_json` to extract the PGN from each export record. Its dependency on `store` lets both interfaces call one operation that publishes the entire batch or reports a refusal. The PGN keeps its variant tags and annotations, and the local destination path stays on the device. After the export is complete, the batch uses the same staged write as other PGN saves. A desktop caller can supply its history folder and receive a capture warning. The CLI supplies no history folder.
 
 Future connections to chess sites, including account features, belong in this crate. Revisit the client choice if a provider requires a transport it cannot support.
 

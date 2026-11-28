@@ -41,6 +41,19 @@ enum PgnCommand {
         /// The public game link.
         link: String,
     },
+    /// Append a player's public Lichess games from an inclusive UTC date range to a PGN.
+    DownloadPlayer {
+        /// The public Lichess username.
+        username: String,
+        /// First UTC calendar date to include.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        from: String,
+        /// Last UTC calendar date to include.
+        #[arg(long, value_name = "YYYY-MM-DD")]
+        to: String,
+        /// The PGN file to extend or create.
+        destination: PathBuf,
+    },
     /// Read every game of a PGN file and report what was read and what could not be.
     Check {
         /// The PGN file to read.
@@ -127,6 +140,16 @@ fn main() -> ExitCode {
     match Arguments::parse().command {
         Command::Pgn { command } => match command {
             PgnCommand::Fetch { link } => fetch_game(&link),
+            PgnCommand::DownloadPlayer {
+                username,
+                from,
+                to,
+                destination,
+            } => match zobrist_online::download_player_games(&username, &from, &to, &destination) {
+                Ok(count) => report_added(count)
+                    .map_or_else(|error| cannot_write_output(&error), |()| ExitCode::SUCCESS),
+                Err(refusal) => online_refusal(refusal),
+            },
             PgnCommand::Check { file } => exit_code(&file, report(&file)),
             PgnCommand::Write { file } => exit_code(&file, write_games(&file)),
             PgnCommand::List { file } => exit_code(&file, list_games(&file)),
@@ -203,13 +226,15 @@ fn cannot_write_output(error: &io::Error) -> ExitCode {
     ExitCode::from(2)
 }
 
+fn online_refusal(refusal: impl std::fmt::Display) -> ExitCode {
+    writeln!(io::stderr(), "zobrist: {refusal}").ok();
+    ExitCode::from(2)
+}
+
 fn fetch_game(link: &str) -> ExitCode {
     let game = match zobrist_online::fetch_game(link) {
         Ok(game) => game,
-        Err(refusal) => {
-            writeln!(io::stderr(), "zobrist: {refusal}").ok();
-            return ExitCode::from(2);
-        }
+        Err(refusal) => return online_refusal(refusal),
     };
     let mut output = PgnOutput::new(io::stdout().lock());
     match output.write(&game).and_then(|()| output.output.flush()) {
@@ -382,8 +407,12 @@ fn add_games(target: &Path, source: &Path) -> Result<usize, Failure> {
             failure
         }
     })?;
-    writeln!(io::stdout().lock(), "games added: {added}").map_err(Failure::Write)?;
+    report_added(added).map_err(Failure::Write)?;
     Ok(problems)
+}
+
+fn report_added(added: u64) -> io::Result<()> {
+    writeln!(io::stdout().lock(), "games added: {added}")
 }
 
 fn replace_game(target: &Path, number: NonZeroU64, source: &Path) -> Result<usize, Failure> {

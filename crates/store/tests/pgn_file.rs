@@ -8,8 +8,8 @@ use shakmaty::{Chess, Outcome};
 use zobrist_core::game::{Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
 use zobrist_store::{
-    PgnGameRow, PgnHistory, PgnState, PgnStateDetails, add_pgn_game, add_pgn_games, pgn_states,
-    prepare_pgn_restore, read_pgn_game, replace_pgn_game, restore_pgn_state,
+    PgnBatch, PgnGameRow, PgnHistory, PgnState, PgnStateDetails, add_pgn_game, add_pgn_games,
+    pgn_states, prepare_pgn_restore, read_pgn_game, replace_pgn_game, restore_pgn_state,
 };
 
 const OLD_GAME: &[u8] = b"[White \"Old\"]\n\n1. e4 e5 1-0";
@@ -31,6 +31,85 @@ fn game(text: &[u8]) -> io::Result<Game> {
 
 fn number(number: u64) -> io::Result<NonZeroU64> {
     NonZeroU64::new(number).ok_or_else(|| io::Error::other("game numbers start at 1"))
+}
+
+#[test]
+fn batch_preserves_a_variant_and_appends_after_a_save_during_staging() -> io::Result<()> {
+    let root = target("batch-save");
+    fs::create_dir(&root)?;
+    let path = root.join("Study.pgn");
+    let original = "[Event \"Original\"]\n\n1. c4 {Keep my note} *";
+    let saved = "[Event \"Local save\"]\n\n1. d4 *";
+    let variant = "[Event \"Drops\"]\r\n[Variant \"Crazyhouse\"]\r\n[Result \"1-0\"]\r\n\r\n1. N@e4 { [%clk 0:03:05] } 1-0\r\n";
+    fs::write(&path, original)?;
+    let mut batch = PgnBatch::new()?;
+    batch.push(variant)?;
+    add_pgn_game(&path, &game(saved.as_bytes())?, None)?;
+    batch.push(variant)?;
+    assert_eq!(batch.append_to(&path, Some(history(&root)))?, (2, None));
+    assert_eq!(
+        fs::read_to_string(&path)?,
+        format!("{original}\n\n{saved}\n\n{variant}\n{variant}")
+    );
+    let stamp = prepare_pgn_restore(&path, &root, 1)?;
+    restore_pgn_state(&path, history(&root), 1, &stamp)?;
+    assert_eq!(
+        fs::read_to_string(&path)?,
+        format!("{original}\n\n{saved}\n")
+    );
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn a_nonempty_batch_creates_its_destination() -> io::Result<()> {
+    let path = target("new-batch");
+    let mut batch = PgnBatch::new()?;
+    batch.push("1. d4 d5 1/2-1/2")?;
+    assert_eq!(batch.append_to(&path, None)?, (1, None));
+    assert_eq!(fs::read_to_string(&path)?, "1. d4 d5 1/2-1/2\n");
+    fs::remove_file(path)
+}
+
+#[test]
+fn empty_or_failed_batches_never_publish() -> io::Result<()> {
+    let path = target("empty-batch");
+    assert_eq!(PgnBatch::new()?.append_to(&path, None)?, (0, None));
+    assert!(!path.exists());
+    for bad in [
+        "",
+        "[Result \"*\"]\n\n1. e4 *",
+        "[Event \"Cut\"]\n\n1. e4",
+        "1. e4 { the result is 1-0",
+        "1. e4 *\n\n1. c4 1-0",
+        "[Result \"0-1\"]\n\n1. e4 1-0",
+    ] {
+        let mut batch = PgnBatch::new()?;
+        batch.push("1. e4 e5 1-0")?;
+        assert_eq!(
+            batch.push(bad).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(batch.append_to(&path, None).is_err());
+        assert!(!path.exists());
+    }
+    Ok(())
+}
+
+#[test]
+fn batch_refuses_destinations_that_absorb_the_first_record() -> io::Result<()> {
+    let path = target("batch-open");
+    for old in ["1. d4 {unfinished", "1. d4 *\n\n[Black \"Cut"] {
+        fs::write(&path, old)?;
+        let mut batch = PgnBatch::new()?;
+        batch.push("[Event \"First\"]\n\n1. e4 1-0")?;
+        batch.push("[Event \"Second\"]\n\n1. d4 0-1")?;
+        assert_eq!(
+            batch.append_to(&path, None).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(fs::read_to_string(&path)?, old);
+    }
+    fs::remove_file(path)
 }
 
 #[test]
@@ -510,9 +589,17 @@ fn refuses_a_save_and_restore_while_another_handle_holds_the_history_lock() -> i
             send.send(refuse(restore_pgn_state(&file, history(&root), 1, &stamp)))
                 .ok();
         });
+        let mut batch = PgnBatch::new()?;
+        batch.push("1. e4 1-0")?;
+        scope.spawn(|| {
+            send.send(refuse(
+                batch.append_to(&file, Some(history(&root))).map(drop),
+            ))
+            .ok();
+        });
         // Leave room for worker scheduling around the five-second lock deadline.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
-        for _ in 0..2 {
+        for _ in 0..3 {
             let answer =
                 receive.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
             assert_eq!(

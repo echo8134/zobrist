@@ -52,7 +52,8 @@ mod pgn_file;
 mod pgn_history;
 
 pub use pgn_file::{
-    PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, read_pgn_game, replace_pgn_game,
+    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, read_pgn_game,
+    replace_pgn_game,
 };
 
 pub use pgn_history::{
