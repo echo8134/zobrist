@@ -1,18 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { boardSession } from "./boardSession";
-import {
-  type DroppedPaths,
-  fileOfThePage,
-  openPgnPath,
-  readFileAgain,
-} from "./FilesPage";
-import styles from "./Frame.module.css";
-import { IconBar } from "./IconBar";
-import { ask } from "./ipc";
-import { PageArea } from "./PageArea";
-import { editSetup } from "./positionSetup";
-import { TabArea } from "./TabArea";
-import { TopBar } from "./TopBar";
+import { boardSession } from "../board/boardSession";
+import { editSetup } from "../board/positionSetup";
+import { TabArea } from "../board/TabArea";
 import {
   annotate,
   apply,
@@ -30,7 +19,18 @@ import {
   setShapes,
   setTag,
   tabName,
-} from "./tabs";
+} from "../board/tabs";
+import {
+  type DroppedPaths,
+  fileOfThePage,
+  openPgnPath,
+  readFileAgain,
+} from "../FilesPage";
+import { ask } from "../ipc";
+import styles from "./Frame.module.css";
+import { IconBar } from "./IconBar";
+import { PageArea } from "./PageArea";
+import { TopBar } from "./TopBar";
 
 declare global {
   interface WindowEventMap {

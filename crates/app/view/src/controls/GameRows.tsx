@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { GameRow } from "./generated/GameRow";
+import type { GameRow } from "../generated/GameRow";
 
 type Props = {
   rows: GameRow[];

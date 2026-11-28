@@ -1,4 +1,4 @@
-import { ask, finishRequests, prepareToClose } from "./ipc";
+import { ask, finishRequests, prepareToClose } from "../ipc";
 import type { Change, Shown } from "./tabs";
 
 /** Wait for the player's board actions to settle before sending the current tab order. */

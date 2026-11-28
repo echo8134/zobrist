@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, use, useRef, useState } from "react";
+import type { BoardAppearance } from "../generated/BoardAppearance";
+import { ask } from "../ipc";
 import styles from "./BoardSettings.module.css";
-import type { BoardAppearance } from "./generated/BoardAppearance";
-import { ask } from "./ipc";
 
 const { settings: panel, group, row, refusal } = styles;
 

@@ -1,17 +1,17 @@
 import { ArrowUpDown } from "lucide-react";
 import { useEffect, useLayoutEffect } from "react";
-import { AnnotationPanel } from "./AnnotationPanel";
+import { AnnotationPanel } from "../AnnotationPanel";
+import { IconButton } from "../controls/IconButton";
+import type { EditableTag } from "../generated/EditableTag";
+import type { GameResult } from "../generated/GameResult";
+import { Notation } from "../Notation";
+import { Tablebase } from "../Tablebase";
 import { Board } from "./Board";
 import { GameDataForm } from "./GameDataForm";
-import type { EditableTag } from "./generated/EditableTag";
-import type { GameResult } from "./generated/GameResult";
-import { IconButton } from "./IconButton";
-import { Notation } from "./Notation";
 import { NotationTools } from "./NotationTools";
 import { PositionPanel, PositionTools } from "./PositionTools";
 import type { SetupEdit } from "./positionSetup";
 import styles from "./TabArea.module.css";
-import { Tablebase } from "./Tablebase";
 import {
   type Annotation,
   type Change,

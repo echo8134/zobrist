@@ -1,9 +1,9 @@
 import { ChevronDown } from "lucide-react";
 import { useId, useLayoutEffect, useState } from "react";
+import type { EditableTag } from "../generated/EditableTag";
+import type { GamePicture } from "../generated/GamePicture";
+import type { GameResult } from "../generated/GameResult";
 import styles from "./GameDataForm.module.css";
-import type { EditableTag } from "./generated/EditableTag";
-import type { GamePicture } from "./generated/GamePicture";
-import type { GameResult } from "./generated/GameResult";
 import { isSaveKey, type Tab, tagValue } from "./tabs";
 
 const { form, field, fieldName, control, refused, hint, choice, actions } =

@@ -2,8 +2,8 @@ import "@fontsource-variable/inter";
 import "./design.css";
 import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { BoardSettingsProvider } from "./BoardSettings";
-import { Frame } from "./Frame";
+import { BoardSettingsProvider } from "./board/BoardSettings";
+import { Frame } from "./frame/Frame";
 
 const root = document.getElementById("root");
 if (root === null) {

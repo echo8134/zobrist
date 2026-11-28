@@ -1,6 +1,6 @@
 import { PanelLeft, Plus, X } from "lucide-react";
 import { useId } from "react";
-import { IconButton } from "./IconButton";
+import { IconButton } from "../controls/IconButton";
 import styles from "./TopBar.module.css";
 
 const {

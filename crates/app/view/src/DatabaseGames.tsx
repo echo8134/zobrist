@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { GameRows } from "./controls/GameRows";
 import styles from "./DatabaseGames.module.css";
 import files from "./FilesPage.module.css";
-import { GameRows } from "./GameRows";
 import type { DatabaseGameQuery } from "./generated/DatabaseGameQuery";
 import type { Response } from "./generated/Response";
 import { ask } from "./ipc";

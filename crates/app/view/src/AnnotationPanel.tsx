@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef } from "react";
 import styles from "./AnnotationPanel.module.css";
+import { type Annotation, isSaveKey } from "./board/tabs";
 import type { GamePicture } from "./generated/GamePicture";
 import type { MoveSymbol } from "./generated/MoveSymbol";
 import type { PositionSymbol } from "./generated/PositionSymbol";
-import { type Annotation, isSaveKey } from "./tabs";
 
 const { annotationPanel, commentField, symbolRow, symbolButton } = styles;
 
