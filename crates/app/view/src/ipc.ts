@@ -17,6 +17,8 @@ export function ask<Asked extends Request>(
   const answer = invoke<Extract<Response, { type: Asked["type"] }>>("answer", {
     request,
   });
+  // A read-only lookup can outlive a save or the board that requested it.
+  if (request.type === "LookupTablebase") return answer;
   if (request.type === "ImportDatabase") {
     const pending = answer.finally(() => longRequests.delete(pending));
     longRequests.add(pending);

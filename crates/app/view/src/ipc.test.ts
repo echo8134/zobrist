@@ -183,3 +183,17 @@ test("closing twice abandons the task immediately and still waits for the pendin
     finishImport();
   }
 });
+
+test("a game can be saved while the tablebase is still answering", async () => {
+  let refuse = (_reason: unknown) => {};
+  invoke.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      refuse = reject;
+    }),
+  );
+  const lookup = ask({ type: "LookupTablebase", game: 4, revision: 2 });
+  expect(answersOnTheirWay(4)).toBeUndefined();
+  await finishBoardActions();
+  refuse(new Error("offline"));
+  await expect(lookup).rejects.toThrow("offline");
+});

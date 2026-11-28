@@ -7,7 +7,7 @@ use time::Date;
 use time::format_description::well_known::Iso8601;
 use zobrist_store::{PendingWrite, PgnBatch, PgnHistory};
 
-use crate::{FetchError, request_export};
+use crate::{Endpoint, FetchError, request};
 
 const MAX_RECORD_BYTES: u64 = 4 << 20;
 const MAX_BATCH_BYTES: u64 = 1 << 30;
@@ -115,14 +115,19 @@ pub fn download_player_games_for_task(
     write: &Arc<PendingWrite>,
 ) -> Result<(u64, Option<String>), PlayerExportError> {
     let path = export_path(username, from, to)?;
-    let batch = request_export(&path, "application/x-ndjson", None, |response| {
-        read_batch(
-            BufReader::new(response),
-            MAX_RECORD_BYTES,
-            MAX_BATCH_BYTES,
-            write,
-        )
-    })?;
+    let batch = request(
+        Endpoint::Export(&path),
+        "application/x-ndjson",
+        None,
+        |response| {
+            read_batch(
+                BufReader::new(response),
+                MAX_RECORD_BYTES,
+                MAX_BATCH_BYTES,
+                write,
+            )
+        },
+    )?;
     match batch {
         Some(batch) => batch
             .append_to(destination, history)

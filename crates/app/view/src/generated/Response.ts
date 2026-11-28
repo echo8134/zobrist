@@ -18,6 +18,7 @@ import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
 import type { PositionDraft } from "./PositionDraft";
 import type { SaveGameAnswer } from "./SaveGameAnswer";
+import type { TablebaseAnswer } from "./TablebaseAnswer";
 import type { VariationAnswer } from "./VariationAnswer";
 
 /**
@@ -83,7 +84,11 @@ opened: OpenedGame | null, } | { "type": "OpenGameLink",
 /**
  * The outcome of the fetch.
  */
-answer: OpenGameLinkAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
+answer: OpenGameLinkAnswer, } | { "type": "LookupTablebase", 
+/**
+ * The answer to this board's lookup.
+ */
+answer: TablebaseAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
 /**
  * Absent when the game is no longer open.
  */
