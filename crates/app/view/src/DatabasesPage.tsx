@@ -24,6 +24,12 @@ const {
 type Selection = { path: string } & (
   | { kind: "Checking" }
   | { kind: "Count"; games: number }
+  | {
+      kind: "Imported";
+      games: number;
+      problems: number;
+      firstProblem: string | null;
+    }
   | { kind: "Failed"; message: string }
 );
 
@@ -38,15 +44,18 @@ export function DatabasesPage() {
   const [entries, setEntries] = useState<DatabaseEntry[] | null>(null);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
+  const [activity, setActivity] = useState<"Ready" | "Busy" | "Importing">(
+    "Busy",
+  );
+  const busy = activity !== "Ready";
 
   const run = useCallback((action: () => Promise<void>) => {
-    setBusy(true);
+    setActivity("Busy");
     setError(null);
     pending = pending
       .then(action)
       .catch((cause: unknown) => setError(errorText(cause)))
-      .finally(() => setBusy(false));
+      .finally(() => setActivity("Ready"));
   }, []);
 
   useEffect(() => {
@@ -60,6 +69,27 @@ export function DatabasesPage() {
       const answer = await ask({ type: "AddDatabase", path });
       setEntries(answer.entries);
       setSelected({ kind: "Count", path, games: answer.games });
+    });
+  }
+
+  function importPgn() {
+    run(async () => {
+      const { path: source } = await ask({
+        type: "PickPgnPath",
+        choice: "File",
+        folder: null,
+      });
+      if (source === null) return;
+      const { path: destination } = await ask({ type: "PickNewDatabasePath" });
+      if (destination === null) return;
+      setActivity("Importing");
+      const { entries, path, games, problems, firstProblem } = await ask({
+        type: "ImportDatabase",
+        source,
+        destination,
+      });
+      setEntries(entries);
+      setSelected({ kind: "Imported", path, games, problems, firstProblem });
     });
   }
 
@@ -89,6 +119,14 @@ export function DatabasesPage() {
         <button className={button} type="button" disabled={busy} onClick={add}>
           Add collection…
         </button>
+        <button
+          className={button}
+          type="button"
+          disabled={busy}
+          onClick={importPgn}
+        >
+          {activity === "Importing" ? "Importing PGN…" : "Import PGN…"}
+        </button>
       </div>
       <div className={workspace}>
         <section className={collection} aria-label="This device">
@@ -117,13 +155,24 @@ export function DatabasesPage() {
             <>
               <div className={titleRow}>
                 <h2 className={title}>{entry.name}</h2>
-                {selected.kind === "Count" && (
+                {"games" in selected && (
                   <span className={count}>
                     {selected.games} {selected.games === 1 ? "game" : "games"}
                   </span>
                 )}
               </div>
               <p className={pathText}>{entry.path}</p>
+              {selected.kind === "Imported" && (
+                <div role="status">
+                  <p className={line}>
+                    {selected.problems}{" "}
+                    {selected.problems === 1 ? "problem" : "problems"}
+                  </p>
+                  {selected.firstProblem !== null && (
+                    <p className={line}>{selected.firstProblem}</p>
+                  )}
+                </div>
+              )}
               {selected.kind === "Checking" && (
                 <p className={line} role="status">
                   Checking collection…

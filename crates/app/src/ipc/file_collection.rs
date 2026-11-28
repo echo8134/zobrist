@@ -31,6 +31,8 @@ pub enum CollectionRequest {
     },
     /// Choose a native database to add to the Databases page.
     PickDatabasePath,
+    /// Choose a destination for a collection imported from PGN.
+    PickNewDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Open or create the chosen item and keep it in the collection.
@@ -109,6 +111,13 @@ impl CollectionEntry {
 impl CollectionRequest {
     /// Answers on a blocking thread. A dialog or a folder read never takes the game lock.
     pub fn answer(self, window: &Window) -> io::Result<Response> {
+        let database_dialog = || {
+            window
+                .dialog()
+                .file()
+                .set_parent(window)
+                .add_filter("zobrist databases", &["zobrist"])
+        };
         match self {
             Self::PickEnginePath => {
                 let path = window
@@ -159,17 +168,16 @@ impl CollectionRequest {
                 }
                 Ok(Response::PickPgnPath { path })
             }
-            Self::PickDatabasePath => {
-                let selected = window
-                    .dialog()
-                    .file()
-                    .set_parent(window)
-                    .add_filter("zobrist databases", &["zobrist"])
-                    .blocking_pick_file();
-                Ok(Response::PickDatabasePath {
-                    path: picker_path(selected)?,
-                })
-            }
+            Self::PickDatabasePath => Ok(Response::PickDatabasePath {
+                path: picker_path(database_dialog().blocking_pick_file())?,
+            }),
+            Self::PickNewDatabasePath => Ok(Response::PickNewDatabasePath {
+                path: picker_path(
+                    database_dialog()
+                        .set_file_name("Collection.zobrist")
+                        .blocking_save_file(),
+                )?,
+            }),
             Self::GetFileCollection => {
                 let directory = window
                     .path()

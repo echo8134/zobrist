@@ -17,7 +17,7 @@ choice: PickerChoice,
 /**
  * The selected folder, when choosing a new file.
  */
-folder: string | null, } | { "type": "PickDatabasePath" } | { "type": "GetFileCollection" } | { "type": "AddPgnPath", 
+folder: string | null, } | { "type": "PickDatabasePath" } | { "type": "PickNewDatabasePath" } | { "type": "GetFileCollection" } | { "type": "AddPgnPath", 
 /**
  * Which picker supplied the path.
  */
