@@ -77,6 +77,13 @@
   --version-line-gap: 8px;
   --version-line-color: #6b6b6b;
 
+  --settings-width: 440px;
+  --settings-gap: 24px;
+  --settings-row-height: 48px;
+  --settings-choice-width: 144px;
+  --board-green-light: #eeeed2;
+  --board-green-dark: #769656;
+
   --user-content-width: 560px;
   --user-section-gap: 28px;
   --user-row-gap: 12px;
@@ -130,6 +137,11 @@
   --notation-tools-gap: 2px;
   --notation-tools-group-gap: 12px;
   --notation-tools-line-color: #e6e6e6;
+
+  --recorded-values-gap: 4px 16px;
+  --recorded-values-padding: 8px 16px;
+  --recorded-values-line-width: 1px;
+  --recorded-values-weight: 600;
 
   --refused-save-padding: 6px 16px;
   --refused-save-size: 12px;
