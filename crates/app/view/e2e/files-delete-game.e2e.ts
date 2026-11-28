@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { visitPage } from "./desktop-session";
+import { play, waitForSession } from "./board";
+import { visitPage, withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
 
 const screenshots = fileURLToPath(
@@ -302,6 +303,52 @@ describe("deleting one PGN game on Files", function () {
       await restore(session, 2);
       await checkRows(session, ["Bea"]);
       expect(bytes()).toBe(bea);
+    });
+  });
+
+  it("saves the renumbered game after deletion and an unexpected shutdown", async () => {
+    const data = join(work, "data");
+    const sessionFile = join(data, "io.github.echo8134.zobrist", "boards.json");
+    const edited = '[White "Bea"]\n[Black "Bo"]\n\n1. d4 d5 *\n';
+    // If the old number survives, Save can silently replace the identical neighbour.
+    writeFileSync(path, `${ada}\r\n${bea}\n${bea}`);
+    const snapshot = (number: number) => ({
+      boards: [
+        { game: edited, place: [0, 0], origin: { path, number, held: bea } },
+      ],
+      selected: null,
+    });
+    await withDesktopApp(
+      data,
+      async (app) => {
+        await files(app);
+        await pick("File", path, app);
+        await app.$("aria/Open game 2").click();
+        await app.$("main aside ol").$("button=d4").click();
+        await play(app, "d7", "d5", "d5");
+        await files(app);
+        await waitForSession(app, sessionFile, snapshot(2));
+        await remove(app, 1);
+        await confirm(app);
+        await checkRows(app, ["Bea", "Bea"]);
+        await waitForSession(app, sessionFile, snapshot(1));
+      },
+      {},
+      "terminate process",
+    );
+
+    await withDesktopApp(data, async (app) => {
+      await app.$("header").$("button=Bea - Bo").click();
+      await expect(app.$("main aside ol [aria-current]")).toHaveText("d5");
+      await app.$("main aside").$("aria/Save").click();
+      await expect(
+        app.$('header [aria-selected="true"] span:empty'),
+      ).not.toExist();
+      expect(readFileSync(path)).toEqual(
+        Buffer.from(
+          '[White "Bea"]\n[Black "Bo"]\n\n1. d4 d5 *\n\n[White "Bea"]\n[Black "Bo"]\n\n1. d4 *\n',
+        ),
+      );
     });
   });
 
