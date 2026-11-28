@@ -280,6 +280,9 @@ describe("boards after quitting and starting zobrist", function () {
         );
         await openBoardWithVariation(app);
         await waitForSession(app, session, { boards, selected: 1 });
+        // A normal quit would apply this draft when the comment field loses focus.
+        await comment(app).setValue("Still typing");
+        await expect(comment(app)).toBeFocused();
       },
       "terminate process",
     );
@@ -292,6 +295,7 @@ describe("boards after quitting and starting zobrist", function () {
           await tabs(app).map((tab) => tab.getAttribute("aria-label")),
         ).toEqual(["Gamma - Delta, not saved", "New game, not saved"]);
         await expectSelectedVariation(app);
+        await expect(comment(app)).toHaveValue("");
         await captureWindow(app, "boards-after-crash.png");
         await app.$("header").$("button=Gamma - Delta").click();
         await expectMove(app, "Qh4#");
@@ -339,6 +343,12 @@ describe("boards after quitting and starting zobrist", function () {
         await expect(app.$('[role="alert"]')).toHaveText(
           `1 board could not be reopened. The original file was kept at ${backup}. Your PGN files are untouched. You can open a board and keep playing.`,
         );
+        expect(
+          JSON.parse(readFileSync(`${directory}/boards.json`, "utf8")),
+        ).toEqual({
+          boards: [{ game: "1. d4 *\n", place: [0], origin: null }],
+          selected: 0,
+        });
       },
       "terminate process",
     );
