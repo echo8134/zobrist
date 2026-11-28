@@ -134,6 +134,44 @@ fn reopens_dirty_and_clean_boards_in_tab_order_and_saves_to_the_original_game() 
 }
 
 #[test]
+fn a_deleted_game_still_needs_saving_after_reopening_the_boards() -> io::Result<()> {
+    let directory = directory("deleted-game")?;
+    let path = directory.join("Club.pgn");
+    fs::write(&path, b"*\n\n[White \"Bea\"]\n\n1. d4 *\n")?;
+    let games = SharedGames::with_history(Ok(directory.clone()));
+    let send = |request| ask(&games, &directory, request);
+    let listed = send(json!({"type":"OpenPgnFile","path":path}))?;
+    for number in [1, 2] {
+        send(json!({"type":"OpenGame","path":path,"number":number}))?;
+    }
+    let deleted = send(json!({"type":"DeletePgnGame","path":path,"number":1,
+        "version":listed["answer"]["version"]}))?;
+    assert_eq!(deleted["answer"]["type"], "Deleted");
+    quit(&games, &directory, &[1, 2], Some(1))?;
+
+    let reopened = SharedGames::with_history(Ok(directory.clone()));
+    let answer = restore(&reopened, &directory)?;
+    assert_eq!(answer["boards"][0]["picture"]["unsaved"], true);
+    assert_eq!(answer["boards"][0]["picture"]["file"], json!(null));
+    assert_eq!(
+        answer["boards"][1]["picture"]["file"],
+        json!({"path":path,"number":1})
+    );
+    assert_eq!(fs::read(&path)?, b"[White \"Bea\"]\n\n1. d4 *\n");
+    let saved = ask(
+        &reopened,
+        &directory,
+        json!({"type":"SaveGameAs","game":1,"path":path}),
+    )?;
+    assert_eq!(
+        saved["answer"]["picture"]["file"],
+        json!({"path":path,"number":2})
+    );
+    assert_eq!(fs::read(&path)?, b"[White \"Bea\"]\n\n1. d4 *\n\n*\n");
+    fs::remove_dir_all(directory)
+}
+
+#[test]
 fn reopens_both_boards_when_a_new_game_reuses_the_first_boards_file_and_number() -> io::Result<()> {
     let directory = directory("shared-origin")?;
     let source = directory.join("games.pgn");

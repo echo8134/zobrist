@@ -635,6 +635,30 @@ test("a delayed engine edit cannot move the board back after navigation", () => 
   expect(tabNow(7)?.picture).toBe(afterMove);
 });
 
+test("renumbering a file keeps newer board edits and ignores a superseded row", () => {
+  const { change, tabNow } = oneTab({ ...changedFromFile, place: [0, 0] });
+  change({
+    type: "updateGameFile",
+    game: 7,
+    previous: inClub,
+    file: { path: "/games/club.pgn", number: 1 },
+    unsaved: false,
+  });
+  change({
+    type: "updateGameFile",
+    game: 7,
+    previous: inClub,
+    file: null,
+    unsaved: true,
+  });
+  expect(tabNow(7)?.picture.file).toEqual({
+    path: "/games/club.pgn",
+    number: 1,
+  });
+  expect(tabNow(7)?.picture.place).toEqual([0, 0]);
+  expect(tabNow(7)?.picture.unsaved).toBe(true);
+});
+
 test("Save writes a game from a file back into its place", async () => {
   const { change, shown, tabNow } = oneTab(changedFromFile);
   vi.mocked(ask).mockResolvedValueOnce({

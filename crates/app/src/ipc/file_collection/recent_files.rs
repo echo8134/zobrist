@@ -82,11 +82,12 @@ mod tests {
         let game =
             env::temp_dir().join(format!("zobrist-recent-no-directory-{}.pgn", process::id()));
         fs::write(&game, "[White \"Ada\"]\n[Black \"Bo\"]\n\n1. e4 1-0\n")?;
+        let (_, _, version) = zobrist_store::list_pgn_games(&game)?;
         let directory = Err(io::Error::other("No local data directory"));
         let answer = open_listed(directory, game.clone())?;
         assert_eq!(
             json!(answer),
-            json!({"type":"File","path":game, "problems":0, "rows":[
+            json!({"type":"File","path":game, "version":version, "problems":0, "rows":[
                 {"number":1,"white":"Ada","black":"Bo","result":"1-0","date":"?","event":"?"}
             ]})
         );

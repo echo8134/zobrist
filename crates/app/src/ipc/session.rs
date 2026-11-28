@@ -13,7 +13,7 @@ use ts_rs::TS;
 use zobrist_core::editor::{GameEditor, Place};
 use zobrist_core::game::Game;
 
-use super::{GamePicture, Games, InFile, OpenGame, Response, SharedGames};
+use super::{GamePicture, GameSource, Games, OpenGame, Response, SharedGames};
 
 /// An operation on the board tabs kept across app restarts.
 #[derive(Deserialize, TS)]
@@ -55,7 +55,8 @@ struct SavedBoard {
     #[serde(with = "game_pgn")]
     game: Game,
     place: Vec<usize>,
-    origin: Option<InFile>,
+    #[serde(default)]
+    origin: GameSource,
 }
 
 impl From<&OpenGame> for SavedBoard {
@@ -288,10 +289,8 @@ impl ReopenedBoards {
             .enumerate()
             .filter_map(|(index, value)| {
                 let board: SavedBoard = serde_json::from_value(value).ok()?;
-                if board
-                    .origin
-                    .as_ref()
-                    .is_some_and(|origin| !origin.path.is_absolute())
+                if let GameSource::Listed(file) = &board.origin
+                    && !file.path.is_absolute()
                 {
                     return None;
                 }
