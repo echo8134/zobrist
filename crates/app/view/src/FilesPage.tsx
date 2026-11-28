@@ -14,6 +14,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { App, Component } from "./component";
 import styles from "./controls/CollectionPage.module.css";
 import { GameRows } from "./controls/GameRows";
 import { EarlierStates, FileConfirmation } from "./EarlierStates";
@@ -27,7 +28,7 @@ import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
 import type { PickerChoice } from "./generated/PickerChoice";
 import type { RefusalReason } from "./generated/RefusalReason";
 import { ask, errorText } from "./ipc";
-import { fileWasOpened } from "./RecentFiles";
+import { fileWasOpened, RecentFiles } from "./RecentFiles";
 
 const {
   toolbar,
@@ -278,7 +279,7 @@ export async function openListed(
   }
 }
 
-export type DroppedPaths = Pick<
+type DroppedPaths = Pick<
   Extract<CollectionRequest, { type: "DropPgnPaths" }>,
   "paths"
 >;
@@ -363,6 +364,23 @@ async function rereadAfterRestore(path: string) {
       await openPgnPath("File", path);
     }
   }
+}
+
+/**
+ * Opens a game of a PGN file on a board, or shows the board that holds it already. Tells whether
+ * Rust opened the game.
+ */
+export async function openGame(
+  path: string,
+  number: number,
+  openOnBoard: App["openOnBoard"],
+) {
+  const { answer } = await ask({ type: "OpenGame", path, number });
+  if (answer.type === "Refusal") {
+    return false;
+  }
+  openOnBoard({ game: answer.game, picture: answer.picture });
+  return true;
 }
 
 type Props = {
@@ -686,3 +704,32 @@ export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
     </>
   );
 }
+
+export const files = {
+  name: "Files",
+  page: {
+    icon: Folder,
+    view: ({ app }) => (
+      <FilesPage
+        onOpenGame={(path, number) => openGame(path, number, app.openOnBoard)}
+        onGameFileChanged={(changed) => app.tell("gameFileChanged", changed)}
+      />
+    ),
+  },
+  home: ({ app }) => (
+    <RecentFiles
+      onOpen={(entry) => {
+        app.showPage();
+        void openListed(entry);
+      }}
+    />
+  ),
+  hears: {
+    gamesWritten: () => void readFileAgain(),
+    pathsDropped: (dropped, app) => {
+      app.showPage();
+      void openPgnPath(dropped);
+    },
+  },
+  saveTarget: fileOfThePage,
+} as const satisfies Component;

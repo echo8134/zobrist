@@ -1,4 +1,4 @@
-import { Folder, House, type LucideIcon, Settings } from "lucide-react";
+import { House, type LucideIcon, Settings } from "lucide-react";
 import { components, type PageName } from "../components/list";
 import styles from "./IconBar.module.css";
 
@@ -6,7 +6,6 @@ const { iconBar, collapsed, group, entry, name } = styles;
 
 const pages: readonly { page: PageName; icon: LucideIcon }[] = [
   { page: "Home", icon: House },
-  { page: "Files", icon: Folder },
   ...components.map((listed) => ({
     page: listed.name,
     icon: listed.page.icon,

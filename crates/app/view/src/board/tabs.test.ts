@@ -12,7 +12,6 @@ import {
   closeTab,
   goTo,
   isSaveKey,
-  openGame,
   openTab,
   placeToAskFor,
   playMove,
@@ -530,22 +529,15 @@ test.each([
   },
 );
 
-test("a game of a file opens in a tab, and a game that is open already gets no second tab", async () => {
+test("a game opens in a tab, and a game that is open already gets no second tab", () => {
   const { change, shown } = tabState({
     tabs: [{ game: 3, picture, bottomSide: "black", gameData: "closed" }],
     page: "Files",
     shownTab: undefined,
   });
-  vi.mocked(ask).mockResolvedValueOnce({
-    type: "OpenGame",
-    answer: { type: "Game", game: 7, picture: pictureAfterE4 },
-  });
 
-  expect(await openGame("/games/club.pgn", 2, change)).toBe(true);
+  change({ type: "openTab", game: 7, picture: pictureAfterE4 });
 
-  expect(vi.mocked(ask).mock.calls).toEqual([
-    [{ type: "OpenGame", path: "/games/club.pgn", number: 2 }],
-  ]);
   expect(shown()).toEqual({
     tabs: [
       { game: 3, picture, bottomSide: "black", gameData: "closed" },
@@ -561,11 +553,7 @@ test("a game of a file opens in a tab, and a game that is open already gets no s
   });
 
   // Rust answers with the open game that exists.
-  vi.mocked(ask).mockResolvedValueOnce({
-    type: "OpenGame",
-    answer: { type: "Game", game: 3, picture },
-  });
-  expect(await openGame("/games/club.pgn", 1, change)).toBe(true);
+  change({ type: "openTab", game: 3, picture });
   expect(shown()).toEqual({
     tabs: [
       { game: 3, picture, bottomSide: "black", gameData: "closed" },
@@ -579,18 +567,6 @@ test("a game of a file opens in a tab, and a game that is open already gets no s
     page: "Files",
     shownTab: 3,
   });
-});
-
-test("a game that Rust does not open changes nothing", async () => {
-  const atStart: Shown = { tabs: [], page: "Files", shownTab: undefined };
-  const { change, shown } = tabState(atStart);
-  vi.mocked(ask).mockResolvedValueOnce({
-    type: "OpenGame",
-    answer: { type: "Refusal", reason: "noSuchGame", system: null },
-  });
-
-  expect(await openGame("/games/club.pgn", 9, change)).toBe(false);
-  expect(shown()).toEqual(atStart);
 });
 
 const inClub = { path: "/games/club.pgn", number: 2 };

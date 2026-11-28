@@ -49,7 +49,11 @@ const providers = [
 // Returning to User while a save finishes must read the name after that write.
 let lastWrite: Promise<void> = Promise.resolve();
 
-export function UserPage() {
+export function UserPage({
+  onGamesWritten,
+}: {
+  onGamesWritten: (path: string) => void;
+}) {
   const [savedName, setSavedName] = useState<string | null>();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
@@ -172,7 +176,11 @@ export function UserPage() {
                     </div>
                     {savedName !== undefined && errorMessage}
                   </form>
-                  <LichessDownload savedName={savedName} writing={writing} />
+                  <LichessDownload
+                    savedName={savedName}
+                    writing={writing}
+                    onGamesWritten={onGamesWritten}
+                  />
                 </>
               )}
             </details>
@@ -185,5 +193,10 @@ export function UserPage() {
 
 export const user = {
   name: "User",
-  page: { icon: User, view: () => <UserPage /> },
+  page: {
+    icon: User,
+    view: ({ app }) => (
+      <UserPage onGamesWritten={(path) => app.tell("gamesWritten", { path })} />
+    ),
+  },
 } as const satisfies Component;

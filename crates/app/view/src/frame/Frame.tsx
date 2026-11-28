@@ -20,22 +20,17 @@ import {
   setTag,
   tabName,
 } from "../board/tabs";
-import type { App } from "../component";
-import {
-  type DroppedPaths,
-  fileOfThePage,
-  openPgnPath,
-  readFileAgain,
-} from "../FilesPage";
+import type { App, Notices } from "../component";
+import { components } from "../components/list";
 import { ask } from "../ipc";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
-import { PageArea } from "./PageArea";
+import { type Listed, PageArea } from "./PageArea";
 import { TopBar } from "./TopBar";
 
 declare global {
   interface WindowEventMap {
-    "zobrist-file-drop": CustomEvent<DroppedPaths>;
+    "zobrist-file-drop": CustomEvent<Notices["pathsDropped"]>;
   }
 }
 
@@ -62,13 +57,31 @@ export function Frame() {
     },
     [session],
   );
-  const app = useMemo<App>(
-    () => ({
-      openOnBoard: ({ game, picture }) =>
-        change({ type: "openTab", game, picture }),
-    }),
-    [change],
-  );
+  const { tell, listed } = useMemo(() => {
+    const heard: {
+      [Notice in keyof Notices]?: (detail: Notices[Notice]) => void;
+    } = {
+      gameFileChanged: (changed) =>
+        change({ type: "updateGameFile", ...changed }),
+    };
+    const openOnBoard: App["openOnBoard"] = ({ game, picture }) =>
+      change({ type: "openTab", game, picture });
+    const tell: App["tell"] = (notice, detail) => {
+      heard[notice]?.(detail);
+      for (const { component, app } of listed) {
+        component.hears?.[notice]?.(detail, app);
+      }
+    };
+    const listed: readonly Listed[] = components.map((entry) => ({
+      component: entry,
+      app: {
+        openOnBoard,
+        tell,
+        showPage: () => change({ type: "showPage", page: entry.name }),
+      },
+    }));
+    return { tell, listed };
+  }, [change]);
   const restoring = useRef<Promise<boolean> | undefined>(undefined);
   const restore = useCallback(() => {
     if (restoring.current !== undefined) return;
@@ -93,11 +106,10 @@ export function Frame() {
       const focused = document.activeElement;
       if (focused instanceof HTMLElement) focused.blur();
     };
-    const onDrop = async (event: CustomEvent<DroppedPaths>) => {
+    const onDrop = async (event: CustomEvent<Notices["pathsDropped"]>) => {
       if (!(await restoring.current) || document.body.inert) return;
       leaveFocusedField();
-      change({ type: "showPage", page: "Files" });
-      await openPgnPath(event.detail);
+      tell("pathsDropped", event.detail);
     };
     const close = async () => {
       if (closing) {
@@ -136,7 +148,7 @@ export function Frame() {
       window.removeEventListener("zobrist-file-drop", onDrop);
       session.cancel();
     };
-  }, [change, restore, session]);
+  }, [change, restore, session, tell]);
 
   if (shown === undefined) {
     return (
@@ -160,8 +172,12 @@ export function Frame() {
   const tabNow = (game: number) =>
     newest.current.tabs.find((each) => each.game === game);
   const saveGame = async (game: number, tool: SaveTool) => {
-    if (await save(game, tool, fileOfThePage(), tabNow, change)) {
-      await readFileAgain();
+    const target = listed
+      .find(({ component }) => component.saveTarget !== undefined)
+      ?.component.saveTarget?.();
+    if (await save(game, tool, target, tabNow, change)) {
+      const path = tabNow(game)?.picture.file?.path;
+      if (path !== undefined) tell("gamesWritten", { path });
     }
   };
 
@@ -208,7 +224,7 @@ export function Frame() {
         onChoose={(chosen) => change({ type: "showPage", page: chosen })}
       />
       {tab === undefined ? (
-        <PageArea page={page} change={change} app={app} />
+        <PageArea page={page} change={change} listed={listed} />
       ) : (
         <TabArea
           key={tab.game}

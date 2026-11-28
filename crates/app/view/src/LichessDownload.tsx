@@ -1,5 +1,4 @@
 import { useState, useSyncExternalStore } from "react";
-import { fileOfThePage, readFileAgain } from "./FilesPage";
 import { ask, errorText } from "./ipc";
 import styles from "./UserPage.module.css";
 
@@ -19,7 +18,12 @@ function show(download: Download | null) {
   changes.dispatchEvent(new Event("change"));
 }
 
-async function download(name: string, from: string, to: string) {
+async function download(
+  name: string,
+  from: string,
+  to: string,
+  onGamesWritten: (path: string) => void,
+) {
   if (current?.busy) return;
   show({ name, busy: true, message: "Choose a PGN file…" });
   try {
@@ -46,7 +50,7 @@ async function download(name: string, from: string, to: string) {
       busy: false,
       message: warning ? `${count} ${warning}` : count,
     });
-    if (added > 0 && fileOfThePage() === path) void readFileAgain();
+    if (added > 0) onGamesWritten(path);
   } catch (error) {
     show({ name, busy: false, message: errorText(error) });
   }
@@ -55,9 +59,11 @@ async function download(name: string, from: string, to: string) {
 export function LichessDownload({
   savedName,
   writing,
+  onGamesWritten,
 }: {
   savedName: string | null | undefined;
   writing: boolean;
+  onGamesWritten: (path: string) => void;
 }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -71,7 +77,8 @@ export function LichessDownload({
       aria-label="Public Lichess games"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!disabled && savedName) void download(savedName, from, to);
+        if (!disabled && savedName)
+          void download(savedName, from, to, onGamesWritten);
       }}
     >
       <div className={dateRange}>

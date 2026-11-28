@@ -1,12 +1,10 @@
 import { Suspense, use, useActionState, useState } from "react";
 import { BoardSettingsForm } from "../board/BoardSettings";
-import { type Change, openGame } from "../board/tabs";
-import type { App } from "../component";
-import { components, type PageName } from "../components/list";
+import type { Change } from "../board/tabs";
+import type { Component, PageApp } from "../component";
+import type { PageName } from "../components/list";
 import formStyles from "../controls/CollectionPage.module.css";
-import { FilesPage, openListed } from "../FilesPage";
 import { ask } from "../ipc";
-import { RecentFiles } from "../RecentFiles";
 import styles from "./PageArea.module.css";
 
 const { area, heading, versionLine, gameLink } = styles;
@@ -18,10 +16,13 @@ function VersionLine() {
   return <p className={versionLine}>zobrist {use(version).version}</p>;
 }
 
+/** A component of the list with the handle that the frame made for it. */
+export type Listed = { component: Component; app: PageApp };
+
 type Props = {
   page: PageName;
   change: (change: Change) => void;
-  app: App;
+  listed: readonly Listed[];
 };
 
 function GameLinkForm({ change }: Pick<Props, "change">) {
@@ -63,35 +64,26 @@ function GameLinkForm({ change }: Pick<Props, "change">) {
   );
 }
 
-export function PageArea({ page, change, app }: Props) {
-  const View = components.find((listed) => listed.name === page)?.page.view;
+export function PageArea({ page, change, listed }: Props) {
+  const shown = listed.find(({ component }) => component.name === page);
   return (
     <main className={area}>
       <h1 className={heading}>{page}</h1>
       {page === "Home" ? (
         <>
           <GameLinkForm change={change} />
-          <RecentFiles
-            onOpen={(entry) => {
-              change({ type: "showPage", page: "Files" });
-              void openListed(entry);
-            }}
-          />
+          {listed.map(
+            ({ component: { name, home: Home }, app }) =>
+              Home && <Home key={name} app={app} />,
+          )}
         </>
-      ) : page === "Files" ? (
-        <FilesPage
-          onOpenGame={(path, number) => openGame(path, number, change)}
-          onGameFileChanged={(tab) =>
-            change({ type: "updateGameFile", ...tab })
-          }
-        />
       ) : page === "Settings" ? (
         <Suspense>
           <VersionLine />
           <BoardSettingsForm />
         </Suspense>
       ) : (
-        View && <View app={app} />
+        shown && <shown.component.page.view app={shown.app} />
       )}
     </main>
   );
