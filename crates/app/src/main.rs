@@ -23,6 +23,9 @@ async fn answer(
             .app_local_data_dir()
             .map_err(std::io::Error::other)
     };
+    let write = games
+        .start_write(&request)
+        .map_err(|error| error.to_string())?;
     let task = match request {
         DesktopRequest::Editor(request) => {
             return games
@@ -35,9 +38,15 @@ async fn answer(
             let response = games
                 .answer_session(request, directory)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| {
+                    games.resume_writes();
+                    error.to_string()
+                })?;
             if matches!(response, Response::QuitWithBoards) {
-                window.destroy().map_err(|error| error.to_string())?;
+                window.destroy().map_err(|error| {
+                    games.resume_writes();
+                    error.to_string()
+                })?;
             }
             return Ok(response);
         }
@@ -49,7 +58,9 @@ async fn answer(
                 .map_err(|error| error.to_string());
         }
         DesktopRequest::Collection(request) => spawn_blocking(move || request.answer(&window)),
-        DesktopRequest::Databases(request) => spawn_blocking(move || request.answer(&window)),
+        DesktopRequest::Databases(request) => {
+            spawn_blocking(move || request.answer(&window, write.as_ref()))
+        }
         DesktopRequest::Account(request) => {
             spawn_blocking(move || request.answer(&data_directory(&window)?))
         }

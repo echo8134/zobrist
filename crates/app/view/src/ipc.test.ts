@@ -1,5 +1,10 @@
 import { expect, expectTypeOf, test, vi } from "vitest";
-import { answersOnTheirWay, ask, finishBoardActions } from "./ipc";
+import {
+  answersOnTheirWay,
+  ask,
+  finishBoardActions,
+  prepareToClose,
+} from "./ipc";
 
 // The stand-in for Rust. Only the module under test imports the real function.
 const invoke = vi.hoisted(() => vi.fn());
@@ -103,4 +108,78 @@ test("quitting waits for a new board and a save that was waiting for a field", a
   finishOpen();
   await quit;
   expect(steps).toEqual(["saved", "opened", "quit"]);
+});
+
+test("a close waits for an import even if Rust receives the close request first", async () => {
+  let finishImport = () => {};
+  invoke
+    .mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishImport = resolve;
+      }),
+    )
+    .mockResolvedValueOnce({ type: "PrepareToClose", message: null })
+    .mockResolvedValueOnce({
+      type: "PrepareToClose",
+      message: "Still importing.",
+    })
+    .mockResolvedValueOnce({ type: "PrepareToClose", message: null });
+  void ask({
+    type: "ImportDatabase",
+    source: "a.pgn",
+    destination: "a.zobrist",
+  });
+  const showWaiting = vi.fn();
+  const closing = prepareToClose(new AbortController().signal, showWaiting);
+  try {
+    await vi.waitFor(() =>
+      expect(showWaiting).toHaveBeenCalledWith("Still importing."),
+    );
+  } finally {
+    finishImport();
+    await closing;
+  }
+});
+
+test("closing twice abandons the task immediately and still waits for the pending board edit", async () => {
+  let finishEdit = () => {};
+  let finishImport = () => {};
+  invoke
+    .mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishEdit = resolve;
+      }),
+    )
+    .mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishImport = resolve;
+      }),
+    )
+    .mockResolvedValueOnce({ type: "PrepareToClose", message: null });
+  void ask({ type: "SetTag", game: 7, tag: "White", text: "Epsilon" });
+  void ask({
+    type: "ImportDatabase",
+    source: "a.pgn",
+    destination: "a.zobrist",
+  });
+  const second = new AbortController();
+  const readyToSaveBoards = vi.fn();
+  const closing = prepareToClose(second.signal, vi.fn()).then(
+    readyToSaveBoards,
+  );
+  second.abort();
+  try {
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("answer", {
+        request: { type: "PrepareToClose", abandon: true },
+      }),
+    );
+    expect(readyToSaveBoards).not.toHaveBeenCalled();
+    finishEdit();
+    await closing;
+    expect(readyToSaveBoards).toHaveBeenCalledOnce();
+  } finally {
+    finishEdit();
+    finishImport();
+  }
 });

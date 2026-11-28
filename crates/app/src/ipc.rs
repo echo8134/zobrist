@@ -10,6 +10,7 @@ mod database_collection;
 mod engines;
 mod file_collection;
 mod game_file;
+mod long_tasks;
 mod pgn_file;
 mod session;
 
@@ -24,6 +25,7 @@ pub use file_collection::{
 };
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SaveHistory, SavedState};
+pub use long_tasks::RunningWrite;
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
 pub use session::{BoardPicture, SessionRequest};
 
@@ -487,6 +489,11 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// Whether the player needs to wait for a background task before quitting.
+    PrepareToClose {
+        /// The sentence to show while waiting.
+        message: Option<&'static str>,
+    },
     /// The boards in tab order after restoring the session.
     RestoreBoards {
         /// The games and their pictures at the saved places.
@@ -1304,6 +1311,7 @@ impl FirstStep {
 /// The open games behind their lock, as the requests of the view share them.
 #[derive(Default)]
 pub struct SharedGames {
+    long_tasks: std::sync::Mutex<long_tasks::LongTasks>,
     games: std::sync::Arc<Mutex<Games>>,
     // A failed recovery must preserve this original before the next save of the boards.
     one_save: Mutex<Option<PathBuf>>,

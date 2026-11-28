@@ -19,6 +19,11 @@ use super::{GamePicture, Games, InFile, OpenGame, Response, SharedGames};
 #[derive(Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum SessionRequest {
+    /// Check for tasks on first close, or stop pending writes on second close.
+    PrepareToClose {
+        /// Whether the player has closed the window again.
+        abandon: bool,
+    },
     /// Load the board session at startup.
     RestoreBoards,
     /// Save the boards before closing the window.
@@ -64,10 +69,10 @@ impl SharedGames {
         request: SessionRequest,
         directory: PathBuf,
     ) -> io::Result<Response> {
-        // A board snapshot needs the origin installed by any preceding Save.
-        let mut pending_backup = self.one_save.lock().await;
         match request {
+            SessionRequest::PrepareToClose { abandon } => Ok(self.prepare_to_close(abandon)),
             SessionRequest::RestoreBoards => {
+                let mut pending_backup = self.one_save.lock().await;
                 if let Some(&selected) = self.restored_selection.get() {
                     return Ok(self.games.lock().await.board_pictures(selected, None));
                 }
@@ -90,6 +95,8 @@ impl SharedGames {
                 Ok(games.board_pictures(selected_game, restored.warning))
             }
             SessionRequest::QuitWithBoards { boards, selected } => {
+                // A board snapshot needs the origin installed by any preceding Save.
+                let mut pending_backup = self.one_save.lock().await;
                 let snapshot = self.games.lock().await.snapshot(&boards, selected)?;
                 if let Some(path) = pending_backup.clone() {
                     let result = spawn_blocking(move || preserve_original(&path))

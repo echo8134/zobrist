@@ -3,7 +3,11 @@
 /**
  * An operation on the board tabs kept across normal quits.
  */
-export type SessionRequest = { "type": "RestoreBoards" } | { "type": "QuitWithBoards", 
+export type SessionRequest = { "type": "PrepareToClose", 
+/**
+ * Whether the player has closed the window again.
+ */
+abandon: boolean, } | { "type": "RestoreBoards" } | { "type": "QuitWithBoards", 
 /**
  * Open game numbers in tab order.
  */

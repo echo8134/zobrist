@@ -4,6 +4,7 @@ import type { Response } from "./generated/Response";
 
 // Requests without a game include the ones that open a new board.
 const onTheirWay = new Map<number | undefined, Promise<void>>();
+const longRequests = new Set<Promise<unknown>>();
 
 export function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -16,6 +17,11 @@ export function ask<Asked extends Request>(
   const answer = invoke<Extract<Response, { type: Asked["type"] }>>("answer", {
     request,
   });
+  if (request.type === "ImportDatabase") {
+    const pending = answer.finally(() => longRequests.delete(pending));
+    longRequests.add(pending);
+    return pending;
+  }
   const game = "game" in request ? request.game : undefined;
   const handled: Promise<void> = Promise.allSettled([
     onTheirWay.get(game),
@@ -51,5 +57,39 @@ export async function finishBoardActions() {
   await new Promise<void>((resolve) => setTimeout(resolve, 1));
   while (onTheirWay.size > 0) {
     await Promise.all(onTheirWay.values());
+  }
+}
+
+/** Shows Rust's reason for waiting and gives up the tasks if the window is closed again. */
+export async function prepareToClose(
+  secondClose: AbortSignal,
+  showWaiting: (message: string | null) => void,
+) {
+  const repeated = new Promise<void>((resolve) => {
+    if (secondClose.aborted) resolve();
+    else secondClose.addEventListener("abort", () => resolve(), { once: true });
+  });
+  async function waitForTasks() {
+    for (;;) {
+      // A pending picker can start an import or download when its answer arrives.
+      await finishBoardActions();
+      if (secondClose.aborted) return;
+      const { message } = await ask({ type: "PrepareToClose", abandon: false });
+      if (secondClose.aborted || (message === null && longRequests.size === 0))
+        return;
+      showWaiting(message);
+      // The close request can reach Rust before the request that started the task.
+      const changed =
+        message === null || longRequests.size === 0
+          ? new Promise<void>((resolve) => setTimeout(resolve, 50))
+          : Promise.race(longRequests).catch(() => {});
+      await Promise.race([changed, repeated]);
+    }
+  }
+  await Promise.race([waitForTasks(), repeated]);
+  if (secondClose.aborted) {
+    await ask({ type: "PrepareToClose", abandon: true });
+    longRequests.clear();
+    await finishBoardActions();
   }
 }

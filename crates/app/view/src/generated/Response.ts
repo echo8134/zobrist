@@ -22,7 +22,11 @@ import type { VariationAnswer } from "./VariationAnswer";
 /**
  * What Rust answers. Each case has the name of its request.
  */
-export type Response = { "type": "RestoreBoards", 
+export type Response = { "type": "PrepareToClose", 
+/**
+ * The sentence to show while waiting.
+ */
+message: string | null, } | { "type": "RestoreBoards", 
 /**
  * The games and their pictures at the saved places.
  */

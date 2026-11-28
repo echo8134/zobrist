@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager as _, Window};
 use ts_rs::TS;
-use zobrist_store::{Database, ImportError, OpenError, import_pgn};
+use zobrist_store::{Database, ImportError, OpenError, PendingWrite, import_pgn_for_task};
 
-use super::Response;
 use super::file_collection::{list_recovery, lock_collection, publish_collection, read_list};
+use super::{Response, RunningWrite};
 
 /// One local collection in the Databases list.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -51,15 +51,15 @@ pub enum DatabaseRequest {
 
 impl DatabaseRequest {
     /// Answers on the blocking worker that owns this desktop request.
-    pub fn answer(self, window: &Window) -> io::Result<Response> {
+    pub fn answer(self, window: &Window, write: Option<&RunningWrite>) -> io::Result<Response> {
         let directory = window
             .path()
             .app_local_data_dir()
             .map_err(io::Error::other)?;
-        self.apply(&directory)
+        self.apply(&directory, write.map(RunningWrite::permission))
     }
 
-    fn apply(self, directory: &Path) -> io::Result<Response> {
+    fn apply(self, directory: &Path, write: Option<&PendingWrite>) -> io::Result<Response> {
         let catalog = directory.join("databases.json");
         match self {
             Self::ListDatabases => Ok(Response::ListDatabases {
@@ -76,12 +76,18 @@ impl DatabaseRequest {
             } => {
                 file_name(&destination)?;
                 let mut first_problem = None;
-                let report = import_pgn(&source, &destination, |line| {
-                    if first_problem.is_none() {
-                        first_problem = line;
-                    }
-                    Ok(())
-                })
+                let standalone = PendingWrite::default();
+                let report = import_pgn_for_task(
+                    &source,
+                    &destination,
+                    write.unwrap_or(&standalone),
+                    |line| {
+                        if first_problem.is_none() {
+                            first_problem = line;
+                        }
+                        Ok(())
+                    },
+                )
                 .map_err(|error| match error {
                     ImportError::Read(error) => io::Error::new(
                         error.kind(),
@@ -220,7 +226,7 @@ mod tests {
             source,
             destination: destination.clone(),
         }
-        .apply(&directory)
+        .apply(&directory, None)
         .unwrap_err();
         assert_eq!(
             error.to_string(),
@@ -237,7 +243,7 @@ mod tests {
                 DatabaseRequest::AddDatabase {
                     path: destination.clone()
                 }
-                .apply(&directory)?
+                .apply(&directory, None)?
             ),
             json!({"type":"AddDatabase","entries":[{"name":"Study.zobrist","path":destination}],"games":1})
         );
@@ -258,7 +264,7 @@ mod tests {
             source,
             destination: destination.clone(),
         }
-        .apply(&directory)?;
+        .apply(&directory, None)?;
         assert_eq!(
             json!(answer),
             json!({
@@ -296,7 +302,10 @@ mod tests {
                     path: database.clone(),
                 },
             ] {
-                assert_eq!(request.apply(&directory).unwrap_err().to_string(), message);
+                assert_eq!(
+                    request.apply(&directory, None).unwrap_err().to_string(),
+                    message
+                );
                 assert_eq!(fs::read(&list)?, damaged);
                 assert_eq!(fs::read(&database)?, original);
             }
@@ -318,7 +327,7 @@ mod tests {
             DatabaseRequest::AddDatabase {
                 path: path.to_owned(),
             }
-            .apply(&directory)
+            .apply(&directory, None)
         };
         thread::scope(|scope| -> io::Result<()> {
             let saving = scope.spawn(|| add(&first));
@@ -335,7 +344,7 @@ mod tests {
             json!({"type":"AddDatabase","entries":both,"games":0})
         );
         assert_eq!(
-            json!(DatabaseRequest::ListDatabases.apply(&directory)?),
+            json!(DatabaseRequest::ListDatabases.apply(&directory, None)?),
             json!({"type":"ListDatabases","entries":both})
         );
         let invalid = directory.join("Invalid.zobrist");
@@ -350,7 +359,7 @@ mod tests {
             DatabaseRequest::InspectDatabase {
                 path: first.clone(),
             }
-            .apply(&directory)
+            .apply(&directory, None)
         };
         assert_eq!(inspect().unwrap_err().to_string(), "File unavailable");
         fs::rename(away, &first)?;
@@ -361,7 +370,7 @@ mod tests {
         let remaining = DatabaseRequest::RemoveDatabase {
             path: first.clone(),
         }
-        .apply(&directory)?;
+        .apply(&directory, None)?;
         assert_eq!(
             json!(remaining),
             json!({"type":"RemoveDatabase","entries":[

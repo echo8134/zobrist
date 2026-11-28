@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { fileOfThePage, readFileAgain } from "./FilesPage";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
-import { ask, finishBoardActions } from "./ipc";
+import { ask, prepareToClose } from "./ipc";
 import { PageArea } from "./PageArea";
 import { editSetup } from "./positionSetup";
 import { TabArea } from "./TabArea";
@@ -26,11 +26,12 @@ import {
   tabName,
 } from "./tabs";
 
-const { frame, startup, problem: problemLine } = styles;
+const { frame, startup, waiting: waitingLine, problem: problemLine } = styles;
 
 export function Frame() {
   const [shown, setShown] = useState<Shown>();
   const [problem, setProblem] = useState<string>();
+  const [waiting, setWaiting] = useState<string | null>(null);
   const [iconBarOpen, setIconBarOpen] = useState(true);
   // A save or a close reads changes that React may not have drawn yet.
   const newest = useRef<Shown>({ tabs: [], page: "Home", shownTab: undefined });
@@ -57,8 +58,13 @@ export function Frame() {
   }, [change]);
 
   useLayoutEffect(() => {
+    let closing: AbortController | undefined;
     const close = async () => {
-      if (document.body.inert) return;
+      if (closing) {
+        closing.abort();
+        return;
+      }
+      closing = new AbortController();
       const focused = document.activeElement;
       if (focused instanceof HTMLElement) focused.blur();
       document.body.inert = true;
@@ -72,7 +78,7 @@ export function Frame() {
       }
       try {
         if (await restoring.current) {
-          await finishBoardActions();
+          await prepareToClose(closing.signal, setWaiting);
           const { tabs, shownTab } = newest.current;
           await ask({
             type: "QuitWithBoards",
@@ -84,6 +90,8 @@ export function Frame() {
       } catch (error) {
         setProblem(`Cannot save your boards before quitting. ${String(error)}`);
       }
+      setWaiting(null);
+      closing = undefined;
       document.body.inert = false;
       input.abort();
     };
@@ -121,6 +129,20 @@ export function Frame() {
 
   return (
     <div className={frame}>
+      {waiting && (
+        <dialog
+          className={waitingLine}
+          aria-labelledby="closing-message"
+          ref={(dialog) => {
+            if (dialog && !dialog.open) dialog.showModal();
+          }}
+          onCancel={(event) => event.preventDefault()}
+        >
+          <p role="status" id="closing-message">
+            {waiting}
+          </p>
+        </dialog>
+      )}
       {problem && (
         <p role="alert" className={problemLine}>
           {problem}

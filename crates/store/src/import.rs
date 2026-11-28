@@ -5,7 +5,7 @@ use std::path::Path;
 
 use zobrist_core::pgn::{self, Entry};
 
-use crate::DatabaseWriter;
+use crate::{DatabaseWriter, PendingWrite};
 
 /// Totals for PGN entries read in source order.
 #[derive(Default)]
@@ -37,10 +37,21 @@ pub enum ImportError {
 pub fn import_pgn(
     source: &Path,
     destination: &Path,
+    diagnostics: impl FnMut(Option<String>) -> io::Result<()>,
+) -> Result<PgnReport, ImportError> {
+    import_pgn_for_task(source, destination, &PendingWrite::default(), diagnostics)
+}
+
+/// Imports a PGN with an owner's permission to publish the new database.
+pub fn import_pgn_for_task(
+    source: &Path,
+    destination: &Path,
+    task: &PendingWrite,
     mut diagnostics: impl FnMut(Option<String>) -> io::Result<()>,
 ) -> Result<PgnReport, ImportError> {
     let file = File::open(source).map_err(ImportError::Read)?;
-    let mut writer = DatabaseWriter::create(destination).map_err(ImportError::Create)?;
+    let mut writer =
+        DatabaseWriter::create_for_task(destination, task).map_err(ImportError::Create)?;
     let mut report = PgnReport::default();
     read_pgn_entries(file, ImportError::Read, |entry| {
         if let Some(line) = report.count(&entry) {
@@ -52,7 +63,7 @@ pub fn import_pgn(
         Ok(())
     })?;
     diagnostics(None).map_err(ImportError::Create)?;
-    writer.finish().map_err(ImportError::Create)?;
+    writer.finish_for_task(task).map_err(ImportError::Create)?;
     Ok(report)
 }
 
