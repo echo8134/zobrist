@@ -23,6 +23,10 @@
                   "@lichess-org/chessground/**"
                 ],
                 "message": "Draw a board through src/board/Board.tsx. No other file of the view imports the board component."
+              },
+              {
+                "group": ["**/components/**", "!**/components/list"],
+                "message": "Reach a component only through src/components/list.ts. The files of a component are private to its folder."
               }
             ]
           }
@@ -46,6 +50,45 @@
                       "@lichess-org/chessground/**"
                     ],
                     "message": "Draw a board through src/board/Board.tsx. No other file of the view imports the board component."
+                  },
+                  {
+                    "group": ["**/components/**", "!**/components/list"],
+                    "message": "Reach a component only through src/components/list.ts. The files of a component are private to its folder."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/board/**", "!src/board/Board.tsx", "src/controls/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@tauri-apps/api", "@tauri-apps/api/*"],
+                    "message": "Call Rust through src/ipc.ts. No other file of the view imports the Tauri API."
+                  },
+                  {
+                    "group": [
+                      "@lichess-org/chessground",
+                      "@lichess-org/chessground/**"
+                    ],
+                    "message": "Draw a board through src/board/Board.tsx. No other file of the view imports the board component."
+                  },
+                  {
+                    "group": ["**/components/**", "!**/components/list"],
+                    "message": "Reach a component only through src/components/list.ts. The files of a component are private to its folder."
+                  },
+                  {
+                    "group": ["**/frame", "**/frame/**"],
+                    "message": "src/board and src/controls import no file of src/frame. The frame imports the board, never the other way."
                   }
                 ]
               }
@@ -66,6 +109,84 @@
                   {
                     "group": ["@tauri-apps/api", "@tauri-apps/api/*"],
                     "message": "Call Rust through src/ipc.ts. No other file of the view imports the Tauri API."
+                  },
+                  {
+                    "group": ["**/components/**", "!**/components/list"],
+                    "message": "Reach a component only through src/components/list.ts. The files of a component are private to its folder."
+                  },
+                  {
+                    "group": ["**/frame", "**/frame/**"],
+                    "message": "src/board and src/controls import no file of src/frame. The frame imports the board, never the other way."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/components/list.ts", "src/components/list.test.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@tauri-apps/api", "@tauri-apps/api/*"],
+                    "message": "Call Rust through src/ipc.ts. No other file of the view imports the Tauri API."
+                  },
+                  {
+                    "group": [
+                      "@lichess-org/chessground",
+                      "@lichess-org/chessground/**"
+                    ],
+                    "message": "Draw a board through src/board/Board.tsx. No other file of the view imports the board component."
+                  },
+                  {
+                    "group": ["./*/**"],
+                    "message": "Import a component by its folder, which resolves to its index.tsx. Its other files are private."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/components/*/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@tauri-apps/api", "@tauri-apps/api/*"],
+                    "message": "Call Rust through src/ipc.ts. No other file of the view imports the Tauri API."
+                  },
+                  {
+                    "group": [
+                      "@lichess-org/chessground",
+                      "@lichess-org/chessground/**"
+                    ],
+                    "message": "Draw a board through src/board/Board.tsx. No other file of the view imports the board component."
+                  },
+                  {
+                    "group": [
+                      "../**",
+                      "**/../**",
+                      "!../../component",
+                      "!../../ipc",
+                      "!../../generated/**",
+                      "!../../controls/**",
+                      "../../*/**/../**"
+                    ],
+                    "message": "A component imports its own folder, src/component.ts, src/ipc.ts, src/generated and src/controls. For anything another component knows, add a notice to src/component.ts."
                   }
                 ]
               }
