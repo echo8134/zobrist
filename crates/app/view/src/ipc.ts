@@ -2,8 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DesktopRequest as Request } from "./generated/DesktopRequest";
 import type { Response } from "./generated/Response";
 
-// Requests without a game include the ones that open a new board.
-const onTheirWay = new Map<number | undefined, Promise<void>>();
+const onTheirWay = new Map<Promise<void>, number | "boards" | "background">();
 const longRequests = new Set<Promise<unknown>>();
 
 export function errorText(error: unknown) {
@@ -17,6 +16,8 @@ export function ask<Asked extends Request>(
   const answer = invoke<Extract<Response, { type: Asked["type"] }>>("answer", {
     request,
   });
+  // A close query must not count itself among the requests it is checking.
+  if (request.type === "PrepareToClose") return answer;
   // A read-only lookup can outlive a save or the board that requested it.
   if (request.type === "LookupTablebase") return answer;
   if (
@@ -28,18 +29,23 @@ export function ask<Asked extends Request>(
     return pending;
   }
   const game = "game" in request ? request.game : undefined;
-  const handled: Promise<void> = Promise.allSettled([
-    onTheirWay.get(game),
-    answer,
-  ])
+  // A game link only joins the open boards once its fetch has finished.
+  const opensOrChangesBoards =
+    request.type === "NewGame" ||
+    request.type === "OpenPgnText" ||
+    request.type === "OpenGame" ||
+    request.type === "OpenDatabaseGame" ||
+    request.type === "DeletePgnGame";
+  const handled: Promise<void> = Promise.allSettled([answer])
     // A sender handles its answer in the same turn of the event loop in which it came.
     .then(() => new Promise<void>((nextTurn) => setTimeout(nextTurn)))
     .then(() => {
-      if (onTheirWay.get(game) === handled) {
-        onTheirWay.delete(game);
-      }
+      onTheirWay.delete(handled);
     });
-  onTheirWay.set(game, handled);
+  onTheirWay.set(
+    handled,
+    game ?? (opensOrChangesBoards ? "boards" : "background"),
+  );
   return answer;
 }
 
@@ -52,16 +58,27 @@ export function ask<Asked extends Request>(
  * closely can reach a game in the other order. A save waits here, or it could write the game
  * without the change that the player made right before it.
  */
-export function answersOnTheirWay(game: number) {
-  return onTheirWay.get(game);
+export function answersOnTheirWay(
+  scope: number | "boards",
+): Promise<void> | undefined {
+  const pending = [];
+  for (const [answer, action] of onTheirWay) {
+    if (scope === action || (scope === "boards" && action !== "background"))
+      pending.push(answer);
+  }
+  return pending.length
+    ? Promise.all(pending).then(() => undefined)
+    : undefined;
 }
 
 /** Waits for pending actions, including requests that their answers start. */
 export async function finishBoardActions() {
   // Chessground delivers a completed move in a timer after the mouse event.
   await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  while (onTheirWay.size > 0) {
-    await Promise.all(onTheirWay.values());
+  for (;;) {
+    const pending = answersOnTheirWay("boards");
+    if (!pending) return;
+    await pending;
   }
 }
 
@@ -75,14 +92,18 @@ export async function prepareToClose(
     else secondClose.addEventListener("abort", () => resolve(), { once: true });
   });
   async function waitForTasks() {
-    for (;;) {
-      // A pending picker can start an import or download when its answer arrives.
-      await finishBoardActions();
-      if (secondClose.aborted) return;
+    // Chessground delivers a completed move in a timer after the mouse event.
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    while (!secondClose.aborted) {
       const { message } = await ask({ type: "PrepareToClose", abandon: false });
-      if (secondClose.aborted || (message === null && longRequests.size === 0))
-        return;
+      if (secondClose.aborted) return;
       showWaiting(message);
+      if (message === null && longRequests.size === 0) {
+        if (onTheirWay.size === 0) return;
+        // A picker can start a long task while another request is still pending.
+        await Promise.race([repeated, ...onTheirWay.keys()]);
+        continue;
+      }
       // The close request can reach Rust before the request that started the task.
       const changed =
         message === null || longRequests.size === 0
