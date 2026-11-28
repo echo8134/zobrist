@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { GameRows } from "./controls/GameRows";
+import files from "../../controls/CollectionPage.module.css";
+import { GameRows } from "../../controls/GameRows";
+import type { DatabaseGameQuery } from "../../generated/DatabaseGameQuery";
+import type { Response } from "../../generated/Response";
+import { ask } from "../../ipc";
 import styles from "./DatabaseGames.module.css";
-import files from "./FilesPage.module.css";
-import type { DatabaseGameQuery } from "./generated/DatabaseGameQuery";
-import type { Response } from "./generated/Response";
-import { ask } from "./ipc";
 
 const { filters, paging, sort } = styles;
 const { numberColumn, resultColumn, dateColumn, button, count, refusal, list } =

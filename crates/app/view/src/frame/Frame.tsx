@@ -20,6 +20,7 @@ import {
   setTag,
   tabName,
 } from "../board/tabs";
+import type { App } from "../component";
 import {
   type DroppedPaths,
   fileOfThePage,
@@ -60,6 +61,13 @@ export function Frame() {
       session.changed(before, next);
     },
     [session],
+  );
+  const app = useMemo<App>(
+    () => ({
+      openOnBoard: ({ game, picture }) =>
+        change({ type: "openTab", game, picture }),
+    }),
+    [change],
   );
   const restoring = useRef<Promise<boolean> | undefined>(undefined);
   const restore = useCallback(() => {
@@ -200,7 +208,7 @@ export function Frame() {
         onChoose={(chosen) => change({ type: "showPage", page: chosen })}
       />
       {tab === undefined ? (
-        <PageArea page={page} change={change} />
+        <PageArea page={page} change={change} app={app} />
       ) : (
         <TabArea
           key={tab.game}

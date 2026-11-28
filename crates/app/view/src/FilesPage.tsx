@@ -14,9 +14,9 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import styles from "./controls/CollectionPage.module.css";
 import { GameRows } from "./controls/GameRows";
 import { EarlierStates, FileConfirmation } from "./EarlierStates";
-import styles from "./FilesPage.module.css";
 import type { ChangedGameFile } from "./generated/ChangedGameFile";
 import type { CollectionEntry } from "./generated/CollectionEntry";
 import type { CollectionRequest } from "./generated/CollectionRequest";
