@@ -10,7 +10,7 @@ use ts_rs::TS;
 use zobrist_store::{Database, OpenError};
 
 use super::Response;
-use super::file_collection::{CollectionList, lock_collection, publish_collection};
+use super::file_collection::{list_recovery, lock_collection, publish_collection, read_list};
 
 /// One local collection in the Databases list.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -101,13 +101,18 @@ fn game_count(path: &Path) -> io::Result<u64> {
 }
 
 fn paths(catalog: &Path) -> io::Result<BTreeSet<PathBuf>> {
-    CollectionList::Databases.read(catalog, |bytes| {
-        let paths: BTreeSet<PathBuf> = serde_json::from_slice(bytes)?;
-        for path in &paths {
-            file_name(path)?;
-        }
-        Ok(paths)
-    })
+    read_list(
+        catalog,
+        "the database collection",
+        &list_recovery("existing database files", "Databases"),
+        |bytes| {
+            let paths: BTreeSet<PathBuf> = serde_json::from_slice(bytes)?;
+            for path in &paths {
+                file_name(path)?;
+            }
+            Ok(paths)
+        },
+    )
 }
 
 fn entries(paths: &BTreeSet<PathBuf>) -> io::Result<Vec<DatabaseEntry>> {

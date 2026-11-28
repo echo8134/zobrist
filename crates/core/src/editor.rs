@@ -366,6 +366,18 @@ impl GameEditor {
         &self.current.place
     }
 
+    /// The played moves from the game's starting position to the current place.
+    #[must_use]
+    pub fn moves_to_place(&self) -> Vec<Move> {
+        let mut moves = Vec::with_capacity(self.place().0.len());
+        if let MainLine::Moves(line) = self.game().main_line() {
+            // The editor only stores a place after it has successfully walked that path.
+            let _continuation =
+                Continuation::at(line, &self.place().0, |node| moves.push(node.played()));
+        }
+        moves
+    }
+
     /// Walks the main line from the start. Each move gives its place and nested variations.
     pub fn walk(&self) -> impl Iterator<Item = PlacedStep<'_>> {
         walk_line(self.current.game.steps(), Place::default(), 0)

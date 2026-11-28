@@ -1,4 +1,5 @@
 import { type ReactNode, Suspense, use, useActionState, useState } from "react";
+import { BoardSettingsForm } from "./BoardSettings";
 import { DatabasesPage } from "./DatabasesPage";
 import { EnginesPage } from "./EnginesPage";
 import { FilesPage } from "./FilesPage";
@@ -82,6 +83,7 @@ const contents: Record<Exclude<Page, "Files" | "Home">, ReactNode> = {
   Settings: (
     <Suspense>
       <VersionLine />
+      <BoardSettingsForm />
     </Suspense>
   ),
 };

@@ -9,25 +9,7 @@ use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
 
-use super::{
-    AccountRequest, DatabaseRequest, EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Request,
-    Response, pgn_file,
-};
-
-/// The command routes game, file, account and database requests to their owners.
-#[derive(Deserialize, TS)]
-#[serde(untagged)]
-#[ts(export)]
-pub enum DesktopRequest {
-    /// Requests answered by the games and PGN editor.
-    Editor(Request),
-    /// Requests about the player's collection or the system picker.
-    Collection(CollectionRequest),
-    /// Requests about the name saved on this device.
-    Account(AccountRequest),
-    /// Requests about native databases registered on this device.
-    Databases(DatabaseRequest),
-}
+use super::{EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Response, pgn_file};
 
 /// A request about a desktop collection or its file picker.
 #[derive(Deserialize, TS)]
@@ -376,44 +358,18 @@ fn children(path: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 fn collection(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
-    CollectionList::Files.read(&directory.join("files.json"), |bytes| {
-        let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(bytes)?;
-        paths
-            .into_iter()
-            .map(|(kind, path)| CollectionEntry::new(kind, path))
-            .collect()
-    })
-}
-
-pub(super) enum CollectionList {
-    Files,
-    Databases,
-}
-
-impl CollectionList {
-    pub(super) fn read<T: Default>(
-        self,
-        list: &Path,
-        parse: impl FnOnce(&[u8]) -> io::Result<T>,
-    ) -> io::Result<T> {
-        match fs::read(list).and_then(|bytes| parse(&bytes)) {
-            Ok(entries) => Ok(entries),
-            Err(error) if error.kind() == ErrorKind::NotFound => Ok(T::default()),
-            Err(error) => {
-                let (collection, files, page) = match self {
-                    Self::Files => ("file", "PGN files", "Files"),
-                    Self::Databases => ("database", "database files", "Databases"),
-                };
-                Err(io::Error::new(
-                    error.kind(),
-                    format!(
-                        "Could not read the {collection} collection at {}. Your existing {files} are untouched. Restore the list from a backup or move it aside, then reopen {page}.",
-                        list.display()
-                    ),
-                ))
-            }
-        }
-    }
+    read_list(
+        &directory.join("files.json"),
+        "the file collection",
+        &list_recovery("existing PGN files", "Files"),
+        |bytes| {
+            let paths: Vec<(EntryKind, PathBuf)> = serde_json::from_slice(bytes)?;
+            paths
+                .into_iter()
+                .map(|(kind, path)| CollectionEntry::new(kind, path))
+                .collect()
+        },
+    )
 }
 
 fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<CollectionEntry>> {
@@ -436,6 +392,34 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
         .collect();
     publish_collection(&directory.join("files.json"), &paths)?;
     Ok(entries)
+}
+
+pub(super) fn list_recovery(untouched: &str, page: &str) -> String {
+    format!(
+        "Your {untouched} are untouched. Restore the list from a backup or move it aside, then reopen {page}."
+    )
+}
+
+pub(super) fn read_list<T: Default>(
+    path: &Path,
+    description: &str,
+    recovery: &str,
+    parse: impl FnOnce(&[u8]) -> io::Result<T>,
+) -> io::Result<T> {
+    let result = match fs::read(path) {
+        Ok(bytes) => parse(&bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(T::default()),
+        Err(error) => Err(error),
+    };
+    result.map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "Could not read {description} at {}. {recovery}",
+                path.display()
+            ),
+        )
+    })
 }
 
 pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<File> {

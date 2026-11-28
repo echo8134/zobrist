@@ -14,7 +14,7 @@ import type { Tag } from "./Tag";
 /**
  * Everything the view draws for one game, taken from the same editor position.
  */
-export type GamePicture = { tags: Array<Tag>, result: GameResult, fen: string, turn: Side, inCheck: boolean, legalMoves: Array<LegalMove>, canUndo: boolean, canRedo: boolean, startComments: Array<string>, place: Array<number>, notation: Array<NotationMove>, inVariation: boolean, hasNextMove: boolean, lastMove: MoveSquares | null, moveSymbol: MoveSymbol | null, positionSymbol: PositionSymbol | null, squares: Array<ColoredSquare>, arrows: Array<Arrow>, 
+export type GamePicture = { revision: number, tags: Array<Tag>, result: GameResult, fen: string, turn: Side, inCheck: boolean, legalMoves: Array<LegalMove>, canUndo: boolean, canRedo: boolean, startComments: Array<string>, place: Array<number>, notation: Array<NotationMove>, inVariation: boolean, hasNextMove: boolean, lastMove: MoveSquares | null, moveSymbol: MoveSymbol | null, positionSymbol: PositionSymbol | null, squares: Array<ColoredSquare>, arrows: Array<Arrow>, 
 /**
  * Where the game came from. A game that was never in a file has none.
  */
