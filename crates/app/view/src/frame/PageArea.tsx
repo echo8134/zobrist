@@ -1,10 +1,10 @@
 import { type ReactNode, Suspense, use, useActionState, useState } from "react";
 import { BoardSettingsForm } from "../board/BoardSettings";
 import { type Change, openGame } from "../board/tabs";
-import { DatabasesPage } from "../DatabasesPage";
-import { EnginesPage } from "../EnginesPage";
+import { DatabasesPage } from "../components/databases/DatabasesPage";
+import { EnginesPage } from "../components/engines/EnginesPage";
+import formStyles from "../controls/CollectionPage.module.css";
 import { FilesPage, openListed } from "../FilesPage";
-import formStyles from "../FilesPage.module.css";
 import { ask } from "../ipc";
 import { RecentFiles } from "../RecentFiles";
 import { UserPage } from "../UserPage";

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import type { DesktopRequest } from "../../generated/DesktopRequest";
+import type { Response } from "../../generated/Response";
+import { ask } from "../../ipc";
 import styles from "./EnginesPage.module.css";
-import type { DesktopRequest } from "./generated/DesktopRequest";
-import type { Response } from "./generated/Response";
-import { ask } from "./ipc";
 
 const { panel, engines, engine } = styles;
 

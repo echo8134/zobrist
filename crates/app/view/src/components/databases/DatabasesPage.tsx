@@ -1,10 +1,10 @@
 import { Database } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
-import type { Change } from "./board/tabs";
+import type { Change } from "../../board/tabs";
+import styles from "../../controls/CollectionPage.module.css";
+import type { DatabaseEntry } from "../../generated/DatabaseEntry";
+import { ask } from "../../ipc";
 import { DatabaseGames } from "./DatabaseGames";
-import styles from "./FilesPage.module.css";
-import type { DatabaseEntry } from "./generated/DatabaseEntry";
-import { ask } from "./ipc";
 
 const {
   toolbar,
