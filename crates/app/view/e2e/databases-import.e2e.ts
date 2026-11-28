@@ -1,17 +1,22 @@
+import { execFileSync } from "node:child_process";
 import {
+  closeSync,
+  constants,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
 import { play, waitForSession } from "./board";
-import { visitPage } from "./desktop-session";
+import { visitPage, withDesktopApp } from "./desktop-session";
 import { answerNextPicker } from "./file-picker";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -128,6 +133,40 @@ describe("import a PGN into a local collection", () => {
       );
       await app.$("button=Recovered.zobrist").click();
       await expect(app.$("span=3 games")).toBeDisplayed();
+    });
+  });
+
+  it("waits for an import on quit and leaves only the finished collection", async () => {
+    const source = join(directory, "held.pgn");
+    const study = join(collections, "Study.zobrist");
+    execFileSync("mkfifo", [source]);
+    await withDesktopApp(
+      join(directory, "data"),
+      async (app) => {
+        await app.$("nav").$("aria/Databases").click();
+        const pipe = openSync(source, constants.O_RDWR);
+        try {
+          writeSync(pipe, readFileSync(clean));
+          await startImport(app, source, study);
+          // The importer has opened the pipe and created its staging folder. EOF releases it.
+          await app.waitUntil(() =>
+            readdirSync(collections, { withFileTypes: true }).some((entry) =>
+              entry.isDirectory(),
+            ),
+          );
+          expect(await app.closeWindow()).toEqual(["main"]);
+          await expect(app.$("button=Importing PGN…")).toBeDisplayed();
+        } finally {
+          closeSync(pipe);
+        }
+      },
+      {},
+      "wait for exit",
+    );
+    expect(readdirSync(collections)).toEqual(["Study.zobrist"]);
+    await onDatabases(async (app) => {
+      await app.$("button=Study.zobrist").click();
+      await expect(app.$("span=2 games")).toBeDisplayed();
     });
   });
 

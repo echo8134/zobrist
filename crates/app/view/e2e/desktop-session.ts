@@ -39,7 +39,7 @@ export async function withDesktopApp(
   data: string,
   visit: (session: WebdriverIO.Browser) => Promise<void>,
   env: Record<string, string> = {},
-  exit: "close window" | "terminate process" = "close window",
+  exit: "close window" | "wait for exit" | "terminate process" = "close window",
 ) {
   const port = await freePort();
   const session = await startWdioSession(
@@ -59,12 +59,14 @@ export async function withDesktopApp(
     await visit(session);
   } finally {
     try {
-      if (exit === "close window") {
+      if (exit !== "terminate process") {
         const endpoint = `http://127.0.0.1:${port}`;
-        await requestDriver(
-          `${endpoint}/session/${session.sessionId}/window`,
-          "DELETE",
-        );
+        if (exit === "close window") {
+          await requestDriver(
+            `${endpoint}/session/${session.sessionId}/window`,
+            "DELETE",
+          );
+        }
         await session.waitUntil(
           async () => !(await requestDriver(`${endpoint}/status`, "GET")),
           { timeoutMsg: "The app is still running after closing its window" },
