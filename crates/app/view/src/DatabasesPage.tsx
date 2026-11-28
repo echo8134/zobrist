@@ -1,5 +1,5 @@
 import { Database } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import styles from "./FilesPage.module.css";
 import type { DatabaseEntry } from "./generated/DatabaseEntry";
 import { ask } from "./ipc";
@@ -33,42 +33,84 @@ type Selection = { path: string } & (
   | { kind: "Failed"; message: string }
 );
 
-// Returning to the page must load the list after a pending add or removal.
-let pending = Promise.resolve();
+type Kept = {
+  entries: DatabaseEntry[] | null;
+  selected: Selection | null;
+  error: { source: "Import" | "Page"; message: string } | null;
+  activity: "Ready" | "Busy" | "Importing";
+};
+
+let kept: Kept = {
+  entries: null,
+  selected: null,
+  error: null,
+  activity: "Ready",
+};
+const listeners = new Set<() => void>();
+
+function keep(change: Partial<Kept>) {
+  kept = { ...kept, ...change };
+  for (const notify of listeners) notify();
+}
+
+function subscribe(notify: () => void) {
+  listeners.add(notify);
+  return () => {
+    listeners.delete(notify);
+  };
+}
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function run(action: () => Promise<void>) {
+  if (kept.activity !== "Ready") return;
+  // Rereading the list on return must preserve the saved path of a failed import.
+  const importError = kept.error?.source === "Import" ? kept.error : null;
+  keep({ activity: "Busy", error: importError });
+  void action()
+    .catch((cause: unknown) => {
+      if (kept.error?.source !== "Import") {
+        keep({ error: { source: "Page", message: errorText(cause) } });
+      }
+    })
+    .finally(() => keep({ activity: "Ready" }));
+}
+
+function counted(
+  path: string,
+  games: number,
+  previous: Selection | null,
+): Selection {
+  return previous?.kind === "Imported" && previous.path === path
+    ? { ...previous, games }
+    : { kind: "Count", path, games };
+}
+
 export function DatabasesPage() {
-  const [entries, setEntries] = useState<DatabaseEntry[] | null>(null);
-  const [selected, setSelected] = useState<Selection | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [activity, setActivity] = useState<"Ready" | "Busy" | "Importing">(
-    "Busy",
+  const { entries, selected, error, activity } = useSyncExternalStore(
+    subscribe,
+    () => kept,
   );
   const busy = activity !== "Ready";
 
-  const run = useCallback((action: () => Promise<void>) => {
-    setActivity("Busy");
-    setError(null);
-    pending = pending
-      .then(action)
-      .catch((cause: unknown) => setError(errorText(cause)))
-      .finally(() => setActivity("Ready"));
-  }, []);
-
   useEffect(() => {
-    run(async () => setEntries((await ask({ type: "ListDatabases" })).entries));
-  }, [run]);
+    run(async () =>
+      keep({ entries: (await ask({ type: "ListDatabases" })).entries }),
+    );
+  }, []);
 
   function add() {
     run(async () => {
       const { path } = await ask({ type: "PickDatabasePath" });
       if (path === null) return;
+      keep({ error: null });
       const answer = await ask({ type: "AddDatabase", path });
-      setEntries(answer.entries);
-      setSelected({ kind: "Count", path, games: answer.games });
+      keep({
+        entries: answer.entries,
+        selected: counted(path, answer.games, kept.selected),
+      });
     });
   }
 
@@ -82,33 +124,48 @@ export function DatabasesPage() {
       if (source === null) return;
       const { path: destination } = await ask({ type: "PickNewDatabasePath" });
       if (destination === null) return;
-      setActivity("Importing");
-      const { entries, path, games, problems, firstProblem } = await ask({
-        type: "ImportDatabase",
-        source,
-        destination,
+      const previous = kept.selected;
+      keep({
+        activity: "Importing",
+        error: null,
+        selected:
+          previous?.kind === "Imported"
+            ? { kind: "Count", path: previous.path, games: previous.games }
+            : previous,
       });
-      setEntries(entries);
-      setSelected({ kind: "Imported", path, games, problems, firstProblem });
+      try {
+        const { entries, path, games, problems, firstProblem } = await ask({
+          type: "ImportDatabase",
+          source,
+          destination,
+        });
+        keep({
+          entries,
+          selected: { kind: "Imported", path, games, problems, firstProblem },
+        });
+      } catch (cause) {
+        keep({ error: { source: "Import", message: errorText(cause) } });
+      }
     });
   }
 
   function inspect(path: string) {
-    setSelected({ kind: "Checking", path });
     run(async () => {
+      const previous = kept.selected;
+      keep({ selected: { kind: "Checking", path }, error: null });
       try {
         const { games } = await ask({ type: "InspectDatabase", path });
-        setSelected({ kind: "Count", path, games });
+        keep({ selected: counted(path, games, previous) });
       } catch (cause) {
-        setSelected({ kind: "Failed", path, message: errorText(cause) });
+        keep({ selected: { kind: "Failed", path, message: errorText(cause) } });
       }
     });
   }
 
   function remove(path: string) {
     run(async () => {
-      setEntries((await ask({ type: "RemoveDatabase", path })).entries);
-      setSelected(null);
+      const { entries } = await ask({ type: "RemoveDatabase", path });
+      keep({ entries, selected: null, error: null });
     });
   }
 
@@ -197,7 +254,7 @@ export function DatabasesPage() {
           )}
           {error && (
             <p className={refusal} role="status">
-              {error}
+              {error.message}
             </p>
           )}
         </section>
