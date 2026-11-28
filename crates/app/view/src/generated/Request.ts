@@ -31,7 +31,15 @@ text: string, } | { "type": "OpenGameLink",
 /**
  * The link entered by the player.
  */
-link: string, } | { "type": "GamePgn", 
+link: string, } | { "type": "LookupTablebase", 
+/**
+ * The open game on the board.
+ */
+game: number, 
+/**
+ * The position revision the board displayed at the click.
+ */
+revision: number, } | { "type": "GamePgn", 
 /**
  * The open game's number.
  */

@@ -85,6 +85,7 @@ fn second_game_at_its_start(path: &Path, number: u64) -> Value {
     legal_moves.sort_by_key(Value::to_string);
     json!({
         "revision": 0, "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (32 on the board).",
         "turn": "white", "inCheck": false,
         "legalMoves": legal_moves,
         "canUndo": false, "canRedo": false, "inVariation": false, "hasNextMove": true,

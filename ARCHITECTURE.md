@@ -24,7 +24,7 @@ Runs a local UCI program and collects the lines it reports for each search. It u
 
 ### `crates/online` (zobrist-online)
 
-Owns outgoing connections to chess sites. It can open one finished standard game from a Lichess link or download a player's public games for an inclusive range of UTC dates. For a player download, it gives the exported PGNs to `store` and appends them as a batch after the download finishes.
+Owns outgoing connections to chess sites. It can open one finished standard game from a Lichess link or download a player's public games for an inclusive range of UTC dates. For a player download, it gives the exported PGNs to `store` and appends them as a batch after the download finishes. When a player asks from the board, it sends the current FEN to the Lichess endgame tablebase and returns the position and move outcomes from the moving side's perspective.
 
 ### `crates/cli` (zobrist-cli)
 
