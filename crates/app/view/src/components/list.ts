@@ -1,9 +1,9 @@
 import type { Component } from "../component";
-import { files } from "../FilesPage";
-import { user } from "../UserPage";
 import { databases } from "./databases";
 import { engines } from "./engines";
 import { events } from "./events";
+import { files } from "./files";
+import { user } from "./user";
 
 /** The one list of components. Its order is the order of the icon bar and of Home. */
 export const components = [

@@ -14,21 +14,21 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { App, Component } from "./component";
-import styles from "./controls/CollectionPage.module.css";
-import { GameRows } from "./controls/GameRows";
+import type { App } from "../../component";
+import styles from "../../controls/CollectionPage.module.css";
+import { GameRows } from "../../controls/GameRows";
+import type { ChangedGameFile } from "../../generated/ChangedGameFile";
+import type { CollectionEntry } from "../../generated/CollectionEntry";
+import type { CollectionRequest } from "../../generated/CollectionRequest";
+import type { FileCollection } from "../../generated/FileCollection";
+import type { GameRow } from "../../generated/GameRow";
+import type { PgnFile } from "../../generated/PgnFile";
+import type { PgnFileAnswer } from "../../generated/PgnFileAnswer";
+import type { PickerChoice } from "../../generated/PickerChoice";
+import type { RefusalReason } from "../../generated/RefusalReason";
+import { ask, errorText } from "../../ipc";
 import { EarlierStates, FileConfirmation } from "./EarlierStates";
-import type { ChangedGameFile } from "./generated/ChangedGameFile";
-import type { CollectionEntry } from "./generated/CollectionEntry";
-import type { CollectionRequest } from "./generated/CollectionRequest";
-import type { FileCollection } from "./generated/FileCollection";
-import type { GameRow } from "./generated/GameRow";
-import type { PgnFile } from "./generated/PgnFile";
-import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
-import type { PickerChoice } from "./generated/PickerChoice";
-import type { RefusalReason } from "./generated/RefusalReason";
-import { ask, errorText } from "./ipc";
-import { fileWasOpened, RecentFiles } from "./RecentFiles";
+import { fileWasOpened } from "./RecentFiles";
 
 const {
   toolbar,
@@ -704,32 +704,3 @@ export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
     </>
   );
 }
-
-export const files = {
-  name: "Files",
-  page: {
-    icon: Folder,
-    view: ({ app }) => (
-      <FilesPage
-        onOpenGame={(path, number) => openGame(path, number, app.openOnBoard)}
-        onGameFileChanged={(changed) => app.tell("gameFileChanged", changed)}
-      />
-    ),
-  },
-  home: ({ app }) => (
-    <RecentFiles
-      onOpen={(entry) => {
-        app.showPage();
-        void openListed(entry);
-      }}
-    />
-  ),
-  hears: {
-    gamesWritten: () => void readFileAgain(),
-    pathsDropped: (dropped, app) => {
-      app.showPage();
-      void openPgnPath(dropped);
-    },
-  },
-  saveTarget: fileOfThePage,
-} as const satisfies Component;

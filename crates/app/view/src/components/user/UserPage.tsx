@@ -1,13 +1,6 @@
-import {
-  ChessKnight,
-  ChessPawn,
-  ChevronDown,
-  Monitor,
-  User,
-} from "lucide-react";
+import { ChessKnight, ChessPawn, ChevronDown, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Component } from "./component";
-import { ask } from "./ipc";
+import { ask } from "../../ipc";
 import { LichessDownload } from "./LichessDownload";
 import styles from "./UserPage.module.css";
 
@@ -190,13 +183,3 @@ export function UserPage({
     </div>
   );
 }
-
-export const user = {
-  name: "User",
-  page: {
-    icon: User,
-    view: ({ app }) => (
-      <UserPage onGamesWritten={(path) => app.tell("gamesWritten", { path })} />
-    ),
-  },
-} as const satisfies Component;

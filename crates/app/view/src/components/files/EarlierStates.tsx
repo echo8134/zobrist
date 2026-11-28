@@ -6,9 +6,9 @@ import {
   useRef,
   useState,
 } from "react";
-import styles from "./controls/CollectionPage.module.css";
-import type { EarlierState } from "./generated/EarlierState";
-import { ask, errorText } from "./ipc";
+import styles from "../../controls/CollectionPage.module.css";
+import type { EarlierState } from "../../generated/EarlierState";
+import { ask, errorText } from "../../ipc";
 
 const {
   history,

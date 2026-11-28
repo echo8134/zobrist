@@ -1,9 +1,9 @@
 import { beforeEach, expect, test, vi } from "vitest";
+import type { GamePicture } from "../../generated/GamePicture";
+import { ask } from "../../ipc";
 import { openGame } from "./FilesPage";
-import type { GamePicture } from "./generated/GamePicture";
-import { ask } from "./ipc";
 
-vi.mock("./ipc", () => ({ ask: vi.fn(), errorText: vi.fn() }));
+vi.mock("../../ipc", () => ({ ask: vi.fn(), errorText: vi.fn() }));
 
 beforeEach(() => {
   vi.mocked(ask).mockReset();

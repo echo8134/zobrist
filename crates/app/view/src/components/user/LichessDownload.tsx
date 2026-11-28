@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import { ask, errorText } from "./ipc";
+import { ask, errorText } from "../../ipc";
 import styles from "./UserPage.module.css";
 
 const { nameForm, dateRange, actions, refusal } = styles;
