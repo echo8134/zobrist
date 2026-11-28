@@ -41,7 +41,7 @@ selected: number | null,
 /**
  * Where to find the original session if any part could not be restored.
  */
-warning?: string, } | { "type": "QuitWithBoards" } | { "type": "AddEngineVariation", 
+warning?: string, } | { "type": "CheckpointBoards" } | { "type": "QuitWithBoards" } | { "type": "AddEngineVariation", 
 /**
  * Whether anything changed in the game.
  */

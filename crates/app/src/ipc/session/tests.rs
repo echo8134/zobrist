@@ -263,6 +263,117 @@ fn empty_boards_and_closed_tabs_survive_repeated_restarts() -> io::Result<()> {
 }
 
 #[test]
+fn checkpoints_publish_only_changed_sessions_and_retry_a_failed_write() -> io::Result<()> {
+    let directory = directory("checkpoint")?;
+    let record = directory.join("boards.json");
+    let original = br#"{"selected":null, "boards": []}"#;
+    fs::write(&record, original)?;
+    let games = SharedGames::default();
+    restore(&games, &directory)?;
+    let empty = json!({"type":"CheckpointBoards","boards":[],"selected":null});
+    assert_eq!(
+        ask(&games, &directory, empty)?,
+        json!({"type":"CheckpointBoards"})
+    );
+    assert_eq!(fs::read(&record)?, original);
+
+    let send = |request| ask(&games, &directory, request);
+    let checkpoint = json!({"type":"CheckpointBoards","boards":[1],"selected":1});
+    send(json!({"type":"NewGame"}))?;
+    send(json!({"type":"PlayMove","game":1,"from":"e2","to":"e4","promotion":null}))?;
+    assert!(ask(&games, &record, checkpoint.clone()).is_err());
+    assert_eq!(fs::read(&record)?, original);
+    assert_eq!(
+        send(checkpoint.clone())?,
+        json!({"type":"CheckpointBoards"})
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&record)?)?,
+        json!({"boards":[{"game":"1. e4 *\n","place":[0],"origin":null}],"selected":0})
+    );
+
+    let saved = fs::File::options().write(true).open(&record)?;
+    saved.set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000))?;
+    let modified = saved.metadata()?.modified()?;
+    drop(saved);
+    send(json!({"type":"GoTo","game":1,"place":[0]}))?;
+    send(checkpoint)?;
+    assert_eq!(fs::metadata(&record)?.modified()?, modified);
+    quit(&games, &directory, &[1], Some(1))?;
+    assert_eq!(fs::metadata(&record)?.modified()?, modified);
+    fs::remove_dir_all(directory)
+}
+
+#[test]
+fn an_incomplete_write_keeps_the_previous_session_and_later_changes_win() -> io::Result<()> {
+    use std::future::Future as _;
+    use std::pin::pin;
+    use std::task::{Context, Waker};
+
+    for last_request in ["CheckpointBoards", "QuitWithBoards"] {
+        let directory = directory(last_request)?;
+        let games = SharedGames::default();
+        let send = |request| ask(&games, &directory, request);
+        let play = |from, to| {
+            send(json!({"type":"PlayMove","game":1,"from":from,"to":to,"promotion":null}))
+        };
+        send(json!({"type":"NewGame"}))?;
+        play("e2", "e4")?;
+        send(json!({"type":"CheckpointBoards","boards":[1],"selected":1}))?;
+        play("e7", "e5")?;
+
+        let mut writer = block_on(games.one_save.lock());
+        let older = block_on(games.games.lock()).snapshot(&[1], Some(1))?;
+        let staged = older.stage(&directory)?;
+        // Both close requests can answer before the staged session is published.
+        for abandon in [false, true] {
+            let request =
+                serde_json::from_value(json!({"type":"PrepareToClose","abandon":abandon}))?;
+            let mut close = pin!(games.answer_session(request, directory.clone()));
+            let answer = close.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+            let std::task::Poll::Ready(answer) = answer else {
+                return Err(io::Error::other(
+                    "the close request waited for the staged board write",
+                ));
+            };
+            assert_eq!(
+                serde_json::to_value(answer?)?,
+                json!({"type":"PrepareToClose","message":null})
+            );
+        }
+        let after_crash = restore(&SharedGames::default(), &directory)?;
+        let picture = &after_crash["boards"][0]["picture"];
+        assert_eq!(picture["notation"].as_array().unwrap().len(), 1);
+        assert_eq!(picture["notation"][0]["text"], "e4");
+        assert_eq!(picture["place"], json!([0]));
+
+        play("g1", "f3")?;
+        let request =
+            serde_json::from_value(json!({"type":last_request,"boards":[1],"selected":1}))?;
+        let mut newer_write = pin!(games.answer_session(request, directory.clone()));
+        assert!(
+            newer_write
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        fs::rename(staged, directory.join("boards.json"))?;
+        writer.published = Some(older);
+        drop(writer);
+        assert_eq!(
+            serde_json::to_value(block_on(newer_write)?)?,
+            json!({"type":last_request})
+        );
+        let after_crash = restore(&SharedGames::default(), &directory)?;
+        let picture = &after_crash["boards"][0]["picture"];
+        assert_eq!(picture["notation"][2]["text"], "Nf3");
+        assert_eq!(picture["place"], json!([0, 0, 0]));
+        fs::remove_dir_all(directory)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn a_truncated_session_keeps_its_bytes_beside_earlier_backups_and_allows_a_normal_quit()
 -> io::Result<()> {
     let directory = directory("truncated")?;
@@ -322,6 +433,10 @@ fn bad_boards_leave_readable_boards_in_order_with_the_saved_selection() -> io::R
         let boards = answer["boards"].as_array().unwrap();
         assert_eq!(boards[0]["picture"]["notation"][0]["text"], "d4");
         assert_eq!(boards[0]["picture"]["place"], json!([0]));
+        let after_crash = restore(&SharedGames::default(), &directory)?;
+        assert_eq!(after_crash["boards"], answer["boards"]);
+        assert_eq!(after_crash["selected"], answer["selected"]);
+        assert!(after_crash.get("warning").is_none());
         if number == 3 {
             assert_eq!(boards.len(), 2);
             assert_eq!(boards[1]["picture"]["notation"][0]["text"], "e4");
@@ -390,6 +505,14 @@ fn a_failed_backup_names_the_original_and_quit_retries_before_replacing_it() -> 
     );
     assert!(games.is_restored());
     ask(&games, &directory, json!({"type":"NewGame"}))?;
+    assert!(
+        ask(
+            &games,
+            &directory,
+            json!({"type":"CheckpointBoards","boards":[1],"selected":1})
+        )
+        .is_err()
+    );
     assert!(quit(&games, &directory, &[1], Some(1)).is_err());
     assert!(record.is_dir());
     assert!(!directory.join("boards-recovery-1.json").exists());

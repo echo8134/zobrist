@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { boardSession } from "./boardSession";
 import {
   type DroppedPaths,
   fileOfThePage,
@@ -7,7 +8,7 @@ import {
 } from "./FilesPage";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
-import { ask, prepareToClose } from "./ipc";
+import { ask } from "./ipc";
 import { PageArea } from "./PageArea";
 import { editSetup } from "./positionSetup";
 import { TabArea } from "./TabArea";
@@ -43,13 +44,23 @@ export function Frame() {
   const [shown, setShown] = useState<Shown>();
   const [problem, setProblem] = useState<string>();
   const [waiting, setWaiting] = useState<string | null>(null);
+  const [checkpointProblem, setCheckpointProblem] = useState<string>();
   const [iconBarOpen, setIconBarOpen] = useState(true);
   // A save or a close reads changes that React may not have drawn yet.
   const newest = useRef<Shown>({ tabs: [], page: "Home", shownTab: undefined });
-  const change = useCallback((next: Change) => {
-    newest.current = apply(newest.current, next);
-    setShown(newest.current);
-  }, []);
+  const session = useMemo(
+    () => boardSession(() => newest.current, setCheckpointProblem),
+    [],
+  );
+  const change = useCallback(
+    (next: Change) => {
+      const before = newest.current;
+      newest.current = apply(before, next);
+      setShown(newest.current);
+      session.changed(before, next);
+    },
+    [session],
+  );
   const restoring = useRef<Promise<boolean> | undefined>(undefined);
   const restore = useCallback(() => {
     if (restoring.current !== undefined) return;
@@ -98,13 +109,7 @@ export function Frame() {
       }
       try {
         if (await restoring.current) {
-          await prepareToClose(closing.signal, setWaiting);
-          const { tabs, shownTab } = newest.current;
-          await ask({
-            type: "QuitWithBoards",
-            boards: tabs.map(({ game }) => game),
-            selected: shownTab ?? null,
-          });
+          await session.quit(closing.signal, setWaiting);
           return;
         }
       } catch (error) {
@@ -121,8 +126,9 @@ export function Frame() {
     return () => {
       window.removeEventListener("zobrist-close-requested", close);
       window.removeEventListener("zobrist-file-drop", onDrop);
+      session.cancel();
     };
-  }, [change, restore]);
+  }, [change, restore, session]);
 
   if (shown === undefined) {
     return (
@@ -167,9 +173,9 @@ export function Frame() {
           </p>
         </dialog>
       )}
-      {problem && (
+      {(problem || checkpointProblem) && (
         <p role="alert" className={problemLine}>
-          {problem}
+          {[problem, checkpointProblem].filter(Boolean).join(" ")}
         </p>
       )}
       <TopBar

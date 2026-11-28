@@ -1,4 +1,6 @@
-import { browser } from "@wdio/globals";
+import { existsSync, readFileSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
+import { browser, expect } from "@wdio/globals";
 
 export const drawnBoard = (app: WebdriverIO.Browser = browser) =>
   app.execute(`
@@ -24,3 +26,41 @@ export const startPositionWithWhiteAtBottom = [
   "PPPPPPPP",
   "RNBQKBNR",
 ];
+
+export const expectMove = (app: WebdriverIO.Browser, move: string) =>
+  expect(app.$("main aside ol").$(`button=${move}`)).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+
+export async function play(
+  app: WebdriverIO.Browser,
+  from: string,
+  to: string,
+  move: string,
+) {
+  const board = app.$("main cg-board");
+  const side = (await board.getSize("width")) / 8;
+  for (const square of [from, to]) {
+    await board.click({
+      x: ("abcdefgh".indexOf(square.charAt(0)) - 3.5) * side,
+      y: (4.5 - Number(square.charAt(1))) * side,
+    });
+  }
+  await expectMove(app, move);
+}
+
+export async function waitForSession(
+  app: WebdriverIO.Browser,
+  path: string,
+  expected: { boards: unknown[]; selected: number | null },
+) {
+  await app.waitUntil(
+    () =>
+      existsSync(path) &&
+      isDeepStrictEqual(JSON.parse(readFileSync(path, "utf8")), expected),
+    {
+      timeoutMsg: `The board session did not reach ${JSON.stringify(expected)}`,
+    },
+  );
+}

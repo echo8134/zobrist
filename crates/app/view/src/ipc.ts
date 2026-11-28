@@ -29,54 +29,56 @@ export function ask<Asked extends Request>(
     return pending;
   }
   const game = "game" in request ? request.game : undefined;
-  // A game link only joins the open boards once its fetch has finished.
-  const opensOrChangesBoards =
-    request.type === "NewGame" ||
-    request.type === "OpenPgnText" ||
-    request.type === "OpenGame" ||
-    request.type === "OpenDatabaseGame" ||
-    request.type === "DeletePgnGame";
+  // A fetched link joins the session when its answer opens the tab.
+  const changesBoards =
+    game === undefined
+      ? request.type === "NewGame" ||
+        request.type === "OpenPgnText" ||
+        request.type === "OpenGame" ||
+        request.type === "OpenDatabaseGame" ||
+        request.type === "DeletePgnGame" ||
+        request.type === "CheckpointBoards"
+      : request.type !== "GamePgn" && request.type !== "Analysis";
   const handled: Promise<void> = Promise.allSettled([answer])
     // A sender handles its answer in the same turn of the event loop in which it came.
     .then(() => new Promise<void>((nextTurn) => setTimeout(nextTurn)))
     .then(() => {
       onTheirWay.delete(handled);
     });
-  onTheirWay.set(
-    handled,
-    game ?? (opensOrChangesBoards ? "boards" : "background"),
-  );
+  onTheirWay.set(handled, changesBoards ? (game ?? "boards") : "background");
   return answer;
 }
 
 /**
- * The answers about a game that are still on their way, or nothing when none is. The promise
- * resolves when Rust has answered every request about the game that was sent so far, and the
- * senders have handled those answers.
- *
- * Rust answers each request in a task of its own, so two requests that follow each other
- * closely can reach a game in the other order. A save waits here, or it could write the game
- * without the change that the player made right before it.
+ * A game save waits for edits to that game. A checkpoint waits for all board actions.
+ * The senders need a turn to apply their answers before the view can take its snapshot.
  */
 export function answersOnTheirWay(
-  scope: number | "boards",
+  scope: number | "boards" | "all",
 ): Promise<void> | undefined {
-  const pending = [];
+  const pending: Promise<unknown>[] = [];
+  if (scope === "all" && longRequests.size)
+    pending.push(Promise.allSettled(longRequests));
   for (const [answer, action] of onTheirWay) {
-    if (scope === action || (scope === "boards" && action !== "background"))
+    if (
+      scope === "all" ||
+      scope === action ||
+      (scope === "boards" && action !== "background")
+    ) {
       pending.push(answer);
+    }
   }
   return pending.length
     ? Promise.all(pending).then(() => undefined)
     : undefined;
 }
 
-/** Waits for pending actions, including requests that their answers start. */
-export async function finishBoardActions() {
+/** Include requests that the senders start when they handle their answers. */
+export async function finishRequests(scope: "boards" | "all") {
   // Chessground delivers a completed move in a timer after the mouse event.
   await new Promise<void>((resolve) => setTimeout(resolve, 1));
   for (;;) {
-    const pending = answersOnTheirWay("boards");
+    const pending = answersOnTheirWay(scope);
     if (!pending) return;
     await pending;
   }
@@ -116,6 +118,6 @@ export async function prepareToClose(
   if (secondClose.aborted) {
     await ask({ type: "PrepareToClose", abandon: true });
     longRequests.clear();
-    await finishBoardActions();
+    await finishRequests("boards");
   }
 }

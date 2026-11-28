@@ -7,13 +7,16 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
+import { play, waitForSession } from "./board";
 import {
   type DesktopWindow,
   visitPage,
@@ -163,6 +166,45 @@ describe("import a PGN into a local collection", () => {
     });
   });
 
+  it("keeps late imports stopped if a checkpoint fails after the second close request", async () => {
+    const destination = join(collections, "Late.zobrist");
+    await onDatabases(async (app) => {
+      const session = join(
+        directory,
+        "data",
+        "io.github.echo8134.zobrist",
+        "boards.json",
+      );
+      // A directory at the session file's path makes publishing the checkpoint fail.
+      mkdirSync(session);
+      try {
+        await app.$("header").$("aria/New board").click();
+        await expect(app.$('header [role="tab"]')).toHaveText("New game");
+        const replies = await app.execute(
+          `const [source, destination] = arguments;
+           const send = request => window.__TAURI_INTERNALS__.invoke("answer", {request});
+           return (async () => [
+             (await send({type: "PrepareToClose", abandon: true})).type,
+             await send({type: "CheckpointBoards", boards: [1], selected: 1})
+               .then(answer => answer.type, () => "checkpoint failed"),
+             await send({type: "ImportDatabase", source, destination})
+               .then(answer => answer.type, error => String(error))
+           ])();`,
+          clean,
+          destination,
+        );
+        expect(replies).toEqual([
+          "PrepareToClose",
+          "checkpoint failed",
+          "operation interrupted",
+        ]);
+      } finally {
+        rmdirSync(session);
+      }
+    });
+    expect(readdirSync(collections)).toEqual([]);
+  });
+
   it("selects the imported collection and reopens it after quitting", async () => {
     const study = join(collections, "Study.zobrist");
     await onDatabases(async (app) => {
@@ -198,18 +240,66 @@ describe("import a PGN into a local collection", () => {
     });
   });
 
+  it("waits for an import on quit and leaves only the finished collection", async () => {
+    const source = join(directory, "held.pgn");
+    const study = join(collections, "Study.zobrist");
+    execFileSync("mkfifo", [source]);
+    await withDesktopApp(
+      join(directory, "data"),
+      async (app) => {
+        await app.$("nav").$("aria/Databases").click();
+        const pipe = openSync(source, constants.O_RDWR);
+        try {
+          writeSync(pipe, readFileSync(clean));
+          await startImport(app, source, study);
+          // The importer has opened the pipe and created its staging folder. EOF releases it.
+          await app.waitUntil(() =>
+            readdirSync(collections, { withFileTypes: true }).some((entry) =>
+              entry.isDirectory(),
+            ),
+          );
+          expect(await app.closeWindow()).toEqual(["main"]);
+          await expect(app.$("button=Importing PGN…")).toBeDisplayed();
+        } finally {
+          closeSync(pipe);
+        }
+      },
+      {},
+      "wait for exit",
+    );
+    expect(readdirSync(collections)).toEqual(["Study.zobrist"]);
+    await onDatabases(async (app) => {
+      await app.$("button=Study.zobrist").click();
+      await expect(app.$("span=2 games")).toBeDisplayed();
+    });
+  });
+
   it("shows the completed import after the player returns from a board", async () => {
     await onDatabases(async (app) => {
       const release = await holdImport(
         app,
         join(collections, "Recovered.zobrist"),
       );
-      await app.$("header").$("aria/New board").click();
-      await expect(app.$('header [role="tab"]')).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-      await release();
+      try {
+        await app.$("header").$("aria/New board").click();
+        await expect(app.$('header [role="tab"]')).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+        await play(app, "e2", "e4", "e4");
+        const session = join(
+          directory,
+          "data",
+          "io.github.echo8134.zobrist",
+          "boards.json",
+        );
+        await waitForSession(app, session, {
+          boards: [{ game: "1. e4 *\n", place: [0], origin: null }],
+          selected: 0,
+        });
+      } finally {
+        await release();
+      }
       await app.$("nav").$("aria/Databases").click();
       await expect(app.$("button=Recovered.zobrist")).toHaveAttribute(
         "aria-current",

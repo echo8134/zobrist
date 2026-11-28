@@ -1,7 +1,8 @@
 import { beforeEach, expect, test, vi } from "vitest";
+import { boardSession } from "./boardSession";
 import type { GamePicture } from "./generated/GamePicture";
 import type { NotationMove } from "./generated/NotationMove";
-import { answersOnTheirWay, ask } from "./ipc";
+import { answersOnTheirWay, ask, finishRequests, prepareToClose } from "./ipc";
 import {
   annotate,
   apply,
@@ -25,11 +26,18 @@ import {
   toolForKey,
 } from "./tabs";
 
-vi.mock("./ipc", () => ({ ask: vi.fn(), answersOnTheirWay: vi.fn() }));
+vi.mock("./ipc", () => ({
+  ask: vi.fn(),
+  answersOnTheirWay: vi.fn(),
+  finishRequests: vi.fn(),
+  prepareToClose: vi.fn(),
+}));
 
 beforeEach(() => {
   vi.mocked(ask).mockReset();
   vi.mocked(answersOnTheirWay).mockReset();
+  vi.mocked(finishRequests).mockReset();
+  vi.mocked(prepareToClose).mockReset();
 });
 
 // The tab state hands a picture on and reads none of its fields. With one field here, a new
@@ -50,6 +58,93 @@ function tabState(atStart: Shown) {
     shown: () => shown,
   };
 }
+
+function sessionWindow() {
+  const view = tabState({ tabs: [], shownTab: undefined, page: "Home" });
+  const report = vi.fn();
+  const session = boardSession(view.shown, report);
+  const change = (next: Change) => {
+    const before = view.shown();
+    view.change(next);
+    session.changed(before, next);
+  };
+  change({
+    type: "RestoreBoards",
+    boards: [{ game: 7, picture: { ...picture, place: [] } }],
+    selected: 7,
+  });
+  return { change, session, report };
+}
+
+test("a burst of edits asks for one checkpoint and an idle board asks for none", async () => {
+  vi.useFakeTimers();
+  try {
+    const { change } = sessionWindow();
+    await vi.advanceTimersByTimeAsync(1000);
+    change({ type: "turnBoard", game: 7 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(ask).not.toHaveBeenCalled();
+
+    vi.mocked(ask).mockResolvedValueOnce({
+      type: "SetComment",
+      picture: { ...picture, place: [] },
+    });
+    await annotate(7, { type: "SetComment", text: "Final move" }, change);
+    await vi.advanceTimersByTimeAsync(200);
+    change({
+      type: "drawPlace",
+      game: 7,
+      picture: { ...pictureAfterE4, place: [0] },
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    change({
+      type: "drawPlace",
+      game: 7,
+      picture: { ...picture, place: [0, 0] },
+    });
+    expect(ask).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    change({ type: "showTab", game: 7 });
+    change({
+      type: "drawPlace",
+      game: 7,
+      picture: { ...picture, place: [0, 0] },
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vi.mocked(ask).mock.calls).toEqual([
+      [{ type: "SetComment", game: 7, text: "Final move" }],
+      [{ type: "CheckpointBoards", boards: [7], selected: 7 }],
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("closing waits for a pending board without sending a late checkpoint", async () => {
+  vi.useFakeTimers();
+  try {
+    const { change, session } = sessionWindow();
+    let finish = () => {};
+    const actions = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(finishRequests).mockReturnValue(actions);
+    vi.mocked(prepareToClose).mockReturnValue(actions);
+    change({ type: "showPage", page: "Home" });
+    await vi.advanceTimersByTimeAsync(1000);
+    const closed = session.quit(new AbortController().signal, vi.fn());
+    change({ type: "openTab", game: 8, picture });
+    expect(ask).not.toHaveBeenCalled();
+    finish();
+    await closed;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vi.mocked(ask).mock.calls).toEqual([
+      [{ type: "QuitWithBoards", boards: [7, 8], selected: 8 }],
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 test("a tab opens with the game that Rust answered and closes that game with itself", async () => {
   const { change, shown } = tabState({
