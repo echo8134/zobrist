@@ -53,7 +53,19 @@ name: string | null, } | { "type": "SaveLichessName",
 /**
  * The exact name now on disk.
  */
-name: string, } | { "type": "RemoveLichessName" } | { "type": "Version", 
+name: string, } | { "type": "RemoveLichessName" } | { "type": "DownloadLichessGames", 
+/**
+ * Number published, including zero for an empty export.
+ */
+added: number, 
+/**
+ * The local name of the destination file.
+ */
+file: string, 
+/**
+ * A history warning after a successful append.
+ */
+warning: string | null, } | { "type": "Version", 
 /**
  * The version of this crate.
  */

@@ -2,15 +2,15 @@
 
 use std::fs::{self, File};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::Response;
-use super::file_collection::{list_recovery, publish_collection, read_list};
+use super::file_collection::{history_at, list_recovery, publish_collection, read_list};
 
-/// Offline operations on the local account preference.
+/// Operations on the saved public Lichess username and its games.
 #[derive(Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum AccountRequest {
@@ -23,6 +23,17 @@ pub enum AccountRequest {
     },
     /// Forget the saved name.
     RemoveLichessName,
+    /// Append public games for the saved name and keep the previous PGN.
+    DownloadLichessGames {
+        /// The saved name shown when the player chose Download.
+        name: String,
+        /// First UTC date, inclusive.
+        from: String,
+        /// Last UTC date, inclusive.
+        to: String,
+        /// The local destination from the PGN picker.
+        path: PathBuf,
+    },
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -32,7 +43,7 @@ struct Accounts {
 }
 
 impl AccountRequest {
-    /// Reads or writes the preference in the app's local data directory.
+    /// Uses the app data directory for the saved name and PGN history.
     pub fn answer(self, directory: &Path) -> io::Result<Response> {
         match self {
             Self::GetLichessName => Ok(Response::GetLichessName {
@@ -49,6 +60,38 @@ impl AccountRequest {
                 save(directory, Some(name.to_owned()))?;
                 Ok(Response::SaveLichessName {
                     name: name.to_owned(),
+                })
+            }
+            Self::DownloadLichessGames {
+                name,
+                from,
+                to,
+                path,
+            } => {
+                if read(&directory.join("accounts.json"))?
+                    .lichess_username
+                    .as_deref()
+                    != Some(&name)
+                {
+                    return Err(io::Error::other(
+                        "The saved Lichess username changed. Reopen User to download games.",
+                    ));
+                }
+                let file_name = path
+                    .file_name()
+                    .ok_or_else(|| io::Error::other("Choose a PGN file."))?;
+                let (added, warning) = zobrist_online::download_player_games_with_history(
+                    &name,
+                    &from,
+                    &to,
+                    &path,
+                    Some(history_at(directory)),
+                )
+                .map_err(io::Error::other)?;
+                Ok(Response::DownloadLichessGames {
+                    added,
+                    file: file_name.to_string_lossy().into_owned(),
+                    warning,
                 })
             }
             Self::RemoveLichessName => {
