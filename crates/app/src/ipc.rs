@@ -522,6 +522,16 @@ pub enum Response {
     },
     /// The name has been removed from this device.
     RemoveLichessName,
+    /// Public games added to the chosen PGN.
+    DownloadLichessGames {
+        /// Number published, including zero for an empty export.
+        #[ts(type = "number")]
+        added: u64,
+        /// The local name of the destination file.
+        file: String,
+        /// A history warning after a successful append.
+        warning: Option<String>,
+    },
     /// The version of zobrist.
     Version {
         /// The version of this crate.
