@@ -248,7 +248,8 @@ export function PositionPanel({
       {controls}
       <EngineAnalysis
         game={game}
-        revision={tab.picture.revision}
+        origin={tab.picture}
+        change={change}
         hidden={panel !== undefined}
       />
       {panel === undefined && annotations}

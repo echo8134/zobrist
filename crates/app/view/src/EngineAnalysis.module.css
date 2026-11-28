@@ -47,6 +47,11 @@
   line-height: var(--move-line-height);
 }
 
+.panel li button {
+  flex: none;
+  margin-left: auto;
+}
+
 .panel ol {
   max-height: 25vh;
   overflow-y: auto;

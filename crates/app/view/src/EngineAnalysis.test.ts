@@ -17,7 +17,9 @@ test("a poll from the first visit cannot put its lines on the board after the pl
         answer = resolve;
       }),
   );
-  const search = followAnalysis(7, 10, (snapshot) => shown.push(snapshot));
+  const search = followAnalysis(7, { revision: 10, place: [] }, (snapshot) =>
+    shown.push(snapshot),
+  );
   try {
     const start = shown[0];
     if (!start) throw new Error("The board did not start the engine.");
@@ -28,10 +30,13 @@ test("a poll from the first visit cannot put its lines on the board after the pl
         snapshot: {
           game: 7,
           revision,
+          place: [],
           generation,
           state: {
             type: "Searching",
-            lines: [{ evaluation, notation: "1. e4 e5" }],
+            lines: [
+              { evaluation, notation: "1. e4 e5", moves: ["e2e4", "e7e5"] },
+            ],
           },
         },
       };
@@ -48,8 +53,8 @@ test("a poll from the first visit cannot put its lines on the board after the pl
       generation,
     });
 
-    search.follow(11);
-    search.follow(12);
+    search.follow({ revision: 11, place: [0] });
+    search.follow({ revision: 12, place: [] });
     expect(shown.at(-1)?.state).toEqual({ type: "Searching", lines: [] });
     expect(ask).toHaveBeenCalledTimes(2);
     answer(lines(10, "+9.99"));

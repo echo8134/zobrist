@@ -660,7 +660,7 @@ fn variation_edits_return_the_new_notation_and_place() -> serde_json::Result<()>
     assert_picture(&mut games, json!({"type": "Undo", "game": 1}), &variation)?;
 
     let mut promoted = after_c5_in_variation();
-    promoted["revision"] = json!(6);
+    promoted["revision"] = json!(7);
     promoted["inVariation"] = json!(false);
     promoted["place"] = json!([0, 0]);
     promoted["notation"] = json!(main_line("e4 c5"));
@@ -674,7 +674,7 @@ fn variation_edits_return_the_new_notation_and_place() -> serde_json::Result<()>
         &promoted,
     )?;
 
-    after_first_move["revision"] = json!(7);
+    after_first_move["revision"] = json!(8);
     after_first_move["notation"] = promoted["notation"].clone();
     assert_picture(
         &mut games,
@@ -682,7 +682,7 @@ fn variation_edits_return_the_new_notation_and_place() -> serde_json::Result<()>
         &after_first_move,
     )?;
     let mut shortened = after_e4();
-    shortened["revision"] = json!(7);
+    shortened["revision"] = json!(8);
     for kind in ["DeleteRest", "DeleteVariation"] {
         assert_picture(&mut games, json!({"type": kind, "game": 1}), &shortened)?;
     }

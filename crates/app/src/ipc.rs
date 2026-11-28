@@ -12,7 +12,7 @@ mod game_file;
 mod pgn_file;
 
 pub use accounts::AccountRequest;
-pub use analysis::{AnalysisRequest, AnalysisSnapshot};
+pub use analysis::{AnalysisRequest, AnalysisSnapshot, VariationAnswer};
 pub use board_appearance::{AppearanceRequest, BoardAppearance};
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
@@ -475,6 +475,11 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// The result of adding the engine row selected on the board.
+    AddEngineVariation {
+        /// Whether anything changed in the game.
+        answer: VariationAnswer,
+    },
     /// The state of one search at one position.
     Analysis {
         /// Tagged with the game, revision and search generation.
@@ -1166,7 +1171,7 @@ impl FirstStep {
 /// The open games behind their lock, as the requests of the view share them.
 #[derive(Default)]
 pub struct SharedGames {
-    games: Mutex<Games>,
+    games: std::sync::Arc<Mutex<Games>>,
     one_save: Mutex<()>,
 }
 
