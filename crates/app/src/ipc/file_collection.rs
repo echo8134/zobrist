@@ -9,23 +9,7 @@ use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
 
-use super::{
-    AccountRequest, EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Request, Response,
-    pgn_file,
-};
-
-/// The command routes game, file and account requests to their owners.
-#[derive(Deserialize, TS)]
-#[serde(untagged)]
-#[ts(export)]
-pub enum DesktopRequest {
-    /// Requests answered by the games and PGN editor.
-    Editor(Request),
-    /// Requests about the player's collection or the system picker.
-    Collection(CollectionRequest),
-    /// Requests about the name saved on this device.
-    Account(AccountRequest),
-}
+use super::{EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Response, pgn_file};
 
 /// A request about a desktop collection or its file picker.
 #[derive(Deserialize, TS)]
@@ -45,6 +29,8 @@ pub enum CollectionRequest {
         /// The selected folder, when choosing a new file.
         folder: Option<PathBuf>,
     },
+    /// Choose a native database to add to the Databases page.
+    PickDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Recover the collection after the player chooses its last good copy.
@@ -182,9 +168,7 @@ impl CollectionRequest {
                         dialog.blocking_save_file()
                     }
                 };
-                let path = selected
-                    .map(|file| file.into_path().map_err(io::Error::other))
-                    .transpose()?;
+                let path = picker_path(selected)?;
                 if matches!(choice, PickerChoice::File)
                     && path.as_deref().is_some_and(|file| !is_pgn(file))
                 {
@@ -194,6 +178,17 @@ impl CollectionRequest {
                     ));
                 }
                 Ok(Response::PickPgnPath { path })
+            }
+            Self::PickDatabasePath => {
+                let selected = window
+                    .dialog()
+                    .file()
+                    .set_parent(window)
+                    .add_filter("zobrist databases", &["zobrist"])
+                    .blocking_pick_file();
+                Ok(Response::PickDatabasePath {
+                    path: picker_path(selected)?,
+                })
             }
             Self::GetFileCollection | Self::RecoverFileCollection => {
                 let directory = window
@@ -352,6 +347,12 @@ fn add(
     })
 }
 
+fn picker_path(selected: Option<tauri_plugin_dialog::FilePath>) -> io::Result<Option<PathBuf>> {
+    selected
+        .map(|file| file.into_path().map_err(io::Error::other))
+        .transpose()
+}
+
 fn suggested_folder(documents: Option<&Path>) -> Option<PathBuf> {
     let directory = documents?.join("zobrist");
     match fs::create_dir(&directory) {
@@ -407,40 +408,43 @@ fn read_collection(
 ) -> Result<Vec<CollectionEntry>, (io::Error, bool)> {
     let list = directory.join("files.json");
     let backup = directory.join("files.last-good.json");
-    let live = fs::read(&list);
-    let kind = match &live {
-        Ok(bytes) => match parse_collection(bytes) {
-            Ok(entries) => {
-                if lock.is_some() {
-                    refresh_backup(&backup, bytes);
-                }
-                return Ok(entries);
+    let untouched = "Your existing PGN files are untouched.";
+    let mut damaged = None;
+    let problem = match read_list(&list, "the file collection", untouched, |bytes| {
+        let entries = parse_collection(bytes).inspect_err(|_| {
+            if recover {
+                damaged = Some(bytes.to_vec());
             }
-            Err(error) => error.kind(),
-        },
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => error.kind(),
+        })?;
+        if lock.is_some() {
+            refresh_backup(&backup, bytes);
+        }
+        Ok(entries)
+    }) {
+        Ok(entries) => return Ok(entries),
+        Err(error) => error,
     };
-    let problem = format!(
-        "Could not read the file collection at {}. Your existing PGN files are untouched.",
-        list.display()
-    );
-    let (entries, bytes) = fs::read(&backup)
-        .and_then(|bytes| Ok((parse_collection(&bytes)?, bytes)))
-        .map_err(|error| {
+    let kind = problem.kind();
+    let copy = read_list(&backup, "the last good copy", untouched, |bytes| {
+        Ok(Some((parse_collection(bytes)?, bytes.to_vec())))
+    });
+    let (entries, bytes) = match copy {
+        Ok(Some(copy)) => copy,
+        unavailable => {
             let manual = format!(
                 "{problem} Restore the list from a backup or move it aside, then reopen Files."
             );
-            let message = if error.kind() == ErrorKind::NotFound {
-                manual
-            } else {
+            let message = if unavailable.is_err() {
                 format!(
                     "{manual} The last good copy at {} could not be read.",
                     backup.display()
                 )
+            } else {
+                manual
             };
-            (io::Error::new(kind, message), false)
-        })?;
+            return Err((io::Error::new(kind, message), false));
+        }
+    };
     if !recover {
         return Err((
             io::Error::new(
@@ -466,7 +470,8 @@ fn read_collection(
     if lock.is_none() {
         return Err(preserve_error(ErrorKind::PermissionDenied.into()));
     }
-    preserve_damaged(directory, &live.map_err(preserve_error)?).map_err(preserve_error)?;
+    let damaged = damaged.ok_or_else(|| preserve_error(problem))?;
+    preserve_damaged(directory, &damaged).map_err(preserve_error)?;
     publish_bytes(&list, &bytes)
         .map_err(|error| recovery_error(error, "restore the file collection"))?;
     Ok(entries)
@@ -519,6 +524,34 @@ fn remember(directory: &Path, entry: &CollectionEntry) -> io::Result<Vec<Collect
     publish_bytes(&directory.join("files.json"), &bytes)?;
     refresh_backup(&directory.join("files.last-good.json"), &bytes);
     Ok(entries)
+}
+
+pub(super) fn list_recovery(untouched: &str, page: &str) -> String {
+    format!(
+        "Your {untouched} are untouched. Restore the list from a backup or move it aside, then reopen {page}."
+    )
+}
+
+pub(super) fn read_list<T: Default>(
+    path: &Path,
+    description: &str,
+    recovery: &str,
+    parse: impl FnOnce(&[u8]) -> io::Result<T>,
+) -> io::Result<T> {
+    let result = match fs::read(path) {
+        Ok(bytes) => parse(&bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(T::default()),
+        Err(error) => Err(error),
+    };
+    result.map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "Could not read {description} at {}. {recovery}",
+                path.display()
+            ),
+        )
+    })
 }
 
 pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<File> {
