@@ -2,7 +2,9 @@
 
 use std::{mem, ops::Deref};
 
-use shakmaty::{Chess, Color, EnPassantMode, Outcome, Position, Role, Square, fen::Fen};
+use shakmaty::{
+    Chess, Color, EnPassantMode, Outcome, Position, Role, Square, fen::Fen, uci::UciMove,
+};
 
 use crate::game::{
     AnnotationSymbol, Game, GameBuilder, Line, MAX_VARIATION_DEPTH, MainLine, Move, Node, Step,
@@ -420,7 +422,35 @@ impl GameEditor {
         to: Square,
         promotion: Option<Role>,
     ) -> Result<(), PlayError> {
-        self.change(|state| state.play(from, to, promotion))
+        let chess_move = self
+            .current
+            .position
+            .legal_moves()
+            .into_iter()
+            .find(|candidate| {
+                candidate.from() == Some(from)
+                    && candidate.promotion() == promotion
+                    && (candidate.to() == to
+                        || board_target(*candidate, self.current.position.turn()) == to)
+            })
+            .ok_or(PlayError::IllegalMove)?;
+
+        self.change(|state| state.play(chess_move))
+    }
+
+    /// Adds a line from the current place as one undoable edit, keeping the board at that place.
+    /// Returns false if every move already exists. A refusal leaves the game and history intact.
+    pub fn add_variation(&mut self, moves: &[UciMove]) -> Result<bool, PlayError> {
+        let mut next = self.current.clone();
+        for coordinates in moves {
+            let chess_move = coordinates
+                .to_move(&next.position)
+                .map_err(|_| PlayError::IllegalMove)?;
+            next.play(chess_move)?;
+        }
+        next.place.clone_from(&self.current.place);
+        next.position.clone_from(&self.current.position);
+        Ok(self.replace_state(next))
     }
 
     /// Starts a new line from a legal position with standard castling rules. Clears the moves
@@ -560,14 +590,21 @@ impl GameEditor {
     }
 
     fn change<T>(&mut self, change: impl FnOnce(&mut EditorState) -> T) -> T {
-        let before = self.current.clone();
-        let result = change(&mut self.current);
+        let mut next = self.current.clone();
+        let result = change(&mut next);
+        self.replace_state(next);
+        result
+    }
+
+    fn replace_state(&mut self, next: EditorState) -> bool {
+        let before = mem::replace(&mut self.current, next);
         // Playing a move already in the game advances the place and preserves both histories.
-        if self.current.game != before.game {
+        let changed = self.current.game != before.game;
+        if changed {
             self.previous.push(before);
             self.undone.clear();
         }
-        result
+        changed
     }
 }
 
@@ -580,19 +617,7 @@ impl EditorState {
         }
     }
 
-    fn play(&mut self, from: Square, to: Square, promotion: Option<Role>) -> Result<(), PlayError> {
-        let chess_move = self
-            .position
-            .legal_moves()
-            .into_iter()
-            .find(|candidate| {
-                candidate.from() == Some(from)
-                    && candidate.promotion() == promotion
-                    && (candidate.to() == to
-                        || board_target(*candidate, self.position.turn()) == to)
-            })
-            .ok_or(PlayError::IllegalMove)?;
-
+    fn play(&mut self, chess_move: shakmaty::Move) -> Result<(), PlayError> {
         let choice = match &mut self.game.main_line {
             MainLine::Empty { comments } => {
                 let node = Node::legal(chess_move, mem::take(comments));

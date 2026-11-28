@@ -97,9 +97,9 @@ describe("the default engine on the board", () => {
       ];
       await expectLines(opening);
       await expect(named("Save")).not.toBeEnabled();
-      await expect(browser.$$("main aside ol button")).toBeElementsArrayOfSize(
-        0,
-      );
+      await expect(
+        browser.$$("main aside ol li span > button"),
+      ).toBeElementsArrayOfSize(0);
       const picture = await browser.saveScreenshot(
         join(screenshots, "engine-analysis.png"),
       );

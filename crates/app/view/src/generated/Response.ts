@@ -13,11 +13,16 @@ import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
 import type { PositionDraft } from "./PositionDraft";
 import type { SaveGameAnswer } from "./SaveGameAnswer";
+import type { VariationAnswer } from "./VariationAnswer";
 
 /**
  * What Rust answers. Each case has the name of its request.
  */
-export type Response = { "type": "Analysis", 
+export type Response = { "type": "AddEngineVariation", 
+/**
+ * Whether anything changed in the game.
+ */
+answer: VariationAnswer, } | { "type": "Analysis", 
 /**
  * Tagged with the game, revision and search generation.
  */

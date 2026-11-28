@@ -567,6 +567,20 @@ function oneTab(ofTheTab: GamePicture) {
   return { ...state, tabNow };
 }
 
+test("a delayed engine edit cannot move the board back after navigation", () => {
+  const start = { ...savedInFile, revision: 4, place: [] };
+  const afterMove = { ...start, revision: 5, place: [0] };
+  const { change, tabNow } = oneTab(start);
+  change({ type: "drawPlace", game: 7, picture: afterMove });
+  change({
+    type: "drawPicture",
+    game: 7,
+    picture: { ...start, unsaved: true },
+    from: start,
+  });
+  expect(tabNow(7)?.picture).toBe(afterMove);
+});
+
 test("Save writes a game from a file back into its place", async () => {
   const { change, shown, tabNow } = oneTab(changedFromFile);
   vi.mocked(ask).mockResolvedValueOnce({

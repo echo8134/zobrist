@@ -10,10 +10,13 @@ use shakmaty::{
 };
 use tauri::async_runtime::spawn_blocking;
 use ts_rs::TS;
-use zobrist_core::{editor::GameEditor, game::Move};
+use zobrist_core::{
+    editor::{GameEditor, Place},
+    game::Move,
+};
 use zobrist_engine::{Engine, Line, Position as EnginePosition, Score};
 
-use super::{Response, SharedGames, engines::default_program};
+use super::{GamePicture, Response, SharedGames, engines::default_program};
 
 /// A request about a board's engine, answered through the desktop command.
 #[derive(Deserialize, TS)]
@@ -28,6 +31,33 @@ pub enum AnalysisRequest {
         /// The operation for this run.
         action: AnalysisAction,
     },
+    /// Keep the exact continuation selected in the engine panel.
+    AddEngineVariation(EngineVariation),
+}
+
+/// A clicked row and the board position and search that produced it.
+#[derive(Deserialize, TS)]
+pub struct EngineVariation {
+    game: usize,
+    revision: usize,
+    generation: usize,
+    place: Vec<usize>,
+    moves: Vec<String>,
+}
+
+/// What inserting one displayed engine line did to the current game.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "type")]
+pub enum VariationAnswer {
+    /// All new moves became one undoable edit.
+    Added {
+        /// The game with the new moves and the cursor still at the origin.
+        picture: Box<GamePicture>,
+    },
+    /// Every selected move was already present at the origin.
+    Present,
+    /// The search is obsolete or the continuation could not be applied in full.
+    Refused,
 }
 
 /// An action for one run of the default engine.
@@ -45,6 +75,7 @@ pub enum AnalysisAction {
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
 pub struct AnalysisSnapshot {
     game: usize,
+    place: Vec<usize>,
     revision: usize,
     generation: usize,
     state: AnalysisState,
@@ -60,6 +91,7 @@ enum AnalysisState {
 
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
 struct AnalysisLine {
+    moves: Vec<String>,
     evaluation: String,
     notation: String,
 }
@@ -81,7 +113,7 @@ impl AnalysisLine {
         };
         let mut position = root.clone();
         let mut notation = String::new();
-        for coordinates in line.moves {
+        for coordinates in &line.moves {
             let chess_move = coordinates
                 .parse::<UciMove>()
                 .ok()?
@@ -103,6 +135,7 @@ impl AnalysisLine {
             .ok()?;
         }
         Some(Self {
+            moves: line.moves,
             evaluation,
             notation,
         })
@@ -110,6 +143,7 @@ impl AnalysisLine {
 }
 
 pub(super) struct BoardPosition {
+    place: Place,
     pub(super) revision: usize,
     search: EnginePosition,
 }
@@ -118,13 +152,15 @@ impl BoardPosition {
     pub(super) fn new(editor: &GameEditor) -> Self {
         Self {
             revision: 0,
+            place: editor.place().clone(),
             search: search_position(editor),
         }
     }
 
     pub(super) fn follow(&mut self, editor: &GameEditor) {
         let search = search_position(editor);
-        if self.search != search {
+        if self.search != search || self.place != *editor.place() {
+            self.place.clone_from(editor.place());
             self.revision = self.revision.strict_add(1);
             self.search = search;
         }
@@ -180,23 +216,32 @@ pub(super) fn close(analysis: &Mutex<BoardAnalysis>) {
 impl AnalysisRequest {
     /// Snapshot the editor before doing file or process work on a blocking thread.
     pub async fn answer(self, games: &SharedGames, directory: PathBuf) -> tauri::Result<Response> {
-        let Self::Analysis {
-            game,
-            generation,
-            action,
-        } = self;
+        let (game, generation, action) = match self {
+            Self::Analysis {
+                game,
+                generation,
+                action,
+            } => (game, generation, action),
+            Self::AddEngineVariation(row) => {
+                let games = games.games.clone();
+                let answer = spawn_blocking(move || row.insert(&games)).await?;
+                return Ok(Response::AddEngineVariation { answer });
+            }
+        };
         let target = games.games.lock().await.open_games.get(&game).map(|open| {
             (
                 open.analysis.clone(),
                 open.position.revision,
+                open.position.place.0.clone(),
                 open.position.search.clone(),
                 open.editor.position().clone(),
             )
         });
-        let Some((owner, revision, command, position)) = target else {
+        let Some((owner, revision, place, command, position)) = target else {
             return Ok(Response::Analysis {
                 snapshot: AnalysisSnapshot {
                     game,
+                    place: Vec::new(),
                     revision: 0,
                     generation,
                     state: AnalysisState::Stopped,
@@ -256,11 +301,63 @@ impl AnalysisRequest {
         Ok(Response::Analysis {
             snapshot: AnalysisSnapshot {
                 game,
+                place,
                 revision,
                 generation,
                 state,
             },
         })
+    }
+}
+
+impl EngineVariation {
+    fn insert(self, games: &tauri::async_runtime::Mutex<super::Games>) -> VariationAnswer {
+        let Ok(moves) = self
+            .moves
+            .iter()
+            .map(|text| text.parse::<UciMove>())
+            .collect::<Result<Vec<_>, _>>()
+        else {
+            return VariationAnswer::Refused;
+        };
+        let owner = games
+            .blocking_lock()
+            .open_games
+            .get(&self.game)
+            .map(|open| open.analysis.clone());
+        let Some(owner) = owner else {
+            return VariationAnswer::Refused;
+        };
+        // Wait for start or stop outside the game lock. Keep both locks through the edit
+        // so a restart or a move cannot invalidate this check before the new branch is in.
+        let analysis = owner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(Ok(engine)) = &analysis.run else {
+            return VariationAnswer::Refused;
+        };
+        if moves.is_empty()
+            || analysis.generation != self.generation
+            || !engine
+                .snapshot()
+                .is_ok_and(|(revision, _)| revision == self.revision)
+        {
+            return VariationAnswer::Refused;
+        }
+        let mut games = games.blocking_lock();
+        let Some(open) = games.open_games.get_mut(&self.game) else {
+            return VariationAnswer::Refused;
+        };
+        if open.position.revision != self.revision || open.editor.place().0 != self.place {
+            return VariationAnswer::Refused;
+        }
+        match open.edit(|editor| editor.add_variation(&moves)) {
+            Ok(true) => VariationAnswer::Added {
+                picture: Box::new(open.picture()),
+            },
+            Ok(false) => VariationAnswer::Present,
+            Err(_) => VariationAnswer::Refused,
+        }
     }
 }
 
@@ -284,6 +381,83 @@ impl SharedGames {
 mod tests {
     use super::*;
     use crate::ipc::{Games, Request};
+
+    #[cfg(unix)]
+    #[test]
+    fn a_late_illegal_move_in_a_current_search_preserves_the_game_and_its_history()
+    -> std::io::Result<()> {
+        use crate::ipc::EngineAction;
+        use serde_json::json;
+        use std::{fs, io, os::unix::fs::PermissionsExt as _};
+        use tauri::async_runtime::block_on;
+
+        let directory =
+            std::env::temp_dir().join(format!("zobrist-engine-variation-{}", std::process::id()));
+        fs::create_dir_all(&directory)?;
+        let program = directory.join("test-uci");
+        fs::write(
+            &program,
+            include_bytes!("../../view/e2e/analysis-engine.sh"),
+        )?;
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))?;
+        EngineAction::Register { path: program }.apply(&directory)?;
+
+        let games = SharedGames::default();
+        let ask = |value| -> io::Result<Response> {
+            let request: AnalysisRequest = serde_json::from_value(value)?;
+            block_on(request.answer(&games, directory.clone())).map_err(io::Error::other)
+        };
+        let edit = |request| block_on(games.answer(request)).map_err(io::Error::other);
+        let Response::NewGame { game, .. } = edit(Request::NewGame)? else {
+            unreachable!()
+        };
+        edit(Request::SetComment {
+            game,
+            text: "Keep me".into(),
+        })?;
+        edit(Request::SetComment {
+            game,
+            text: "Redo me".into(),
+        })?;
+        let Response::Undo {
+            picture: Some(before),
+        } = edit(Request::Undo { game })?
+        else {
+            unreachable!()
+        };
+        assert!(before.can_undo && before.can_redo);
+        let start = ask(json!({"type":"Analysis","game":game,"generation":1,"action":"Start"}))?;
+        assert!(matches!(
+            start,
+            Response::Analysis {
+                snapshot: AnalysisSnapshot {
+                    state: AnalysisState::Searching { .. },
+                    ..
+                }
+            }
+        ));
+        assert_eq!(
+            ask(
+                json!({"type":"AddEngineVariation", "game":game, "revision":0, "generation":1, "place":[], "moves":["e2e4","c7c5","e2e5"]})
+            )?,
+            Response::AddEngineVariation {
+                answer: VariationAnswer::Refused
+            }
+        );
+        assert_eq!(
+            games.games.blocking_lock().open_games[&game].picture(),
+            before
+        );
+        let Response::Redo {
+            picture: Some(redone),
+        } = edit(Request::Redo { game })?
+        else {
+            unreachable!()
+        };
+        assert_eq!(redone.start_comments, ["Redo me"]);
+        edit(Request::CloseGame { game })?;
+        fs::remove_dir_all(directory)
+    }
 
     #[test]
     fn a_variation_supplies_its_own_history_and_a_revisit_gets_a_new_revision() {

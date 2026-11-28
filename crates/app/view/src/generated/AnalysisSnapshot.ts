@@ -4,4 +4,4 @@ import type { AnalysisState } from "./AnalysisState";
 /**
  * The complete analysis answer for one board position and one run.
  */
-export type AnalysisSnapshot = { game: number, revision: number, generation: number, state: AnalysisState, };
+export type AnalysisSnapshot = { game: number, place: Array<number>, revision: number, generation: number, state: AnalysisState, };
