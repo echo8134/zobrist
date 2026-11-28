@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DesktopRequest as Request } from "./generated/DesktopRequest";
 import type { Response } from "./generated/Response";
 
-// Requests without a game include the ones that open a new board.
 const onTheirWay = new Map<number | undefined, Promise<void>>();
 
 export function errorText(error: unknown) {
@@ -17,6 +16,16 @@ export function ask<Asked extends Request>(
     request,
   });
   const game = "game" in request ? request.game : undefined;
+  // A fetched link joins the session when its answer opens the tab.
+  const changesBoards =
+    game === undefined
+      ? request.type === "NewGame" ||
+        request.type === "OpenPgnText" ||
+        request.type === "OpenGame" ||
+        request.type === "DeletePgnGame" ||
+        request.type === "CheckpointBoards"
+      : request.type !== "GamePgn" && request.type !== "Analysis";
+  if (!changesBoards) return answer;
   const handled: Promise<void> = Promise.allSettled([
     onTheirWay.get(game),
     answer,
@@ -33,8 +42,8 @@ export function ask<Asked extends Request>(
 }
 
 /**
- * The answers about a game that are still on their way, or nothing when none is. The promise
- * resolves when Rust has answered every request about the game that was sent so far, and the
+ * The board changes for a game that are still on their way, or nothing when none is. The promise
+ * resolves when Rust has answered every board change for the game that was sent so far, and the
  * senders have handled those answers.
  *
  * Rust answers each request in a task of its own, so two requests that follow each other
@@ -45,7 +54,7 @@ export function answersOnTheirWay(game: number) {
   return onTheirWay.get(game);
 }
 
-/** Waits for pending actions, including requests that their answers start. */
+/** Waits for pending board changes and session writes, including those their answers start. */
 export async function finishBoardActions() {
   // Chessground delivers a completed move in a timer after the mouse event.
   await new Promise<void>((resolve) => setTimeout(resolve, 1));

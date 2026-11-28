@@ -27,6 +27,12 @@ export const startPositionWithWhiteAtBottom = [
   "RNBQKBNR",
 ];
 
+export const expectMove = (app: WebdriverIO.Browser, move: string) =>
+  expect(app.$("main aside ol").$(`button=${move}`)).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+
 export async function play(
   app: WebdriverIO.Browser,
   from: string,
@@ -41,10 +47,7 @@ export async function play(
       y: (4.5 - Number(square.charAt(1))) * side,
     });
   }
-  await expect(app.$("main aside ol").$(`button=${move}`)).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
+  await expectMove(app, move);
 }
 
 export async function waitForSession(

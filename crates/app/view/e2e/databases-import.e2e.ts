@@ -144,7 +144,12 @@ describe("import a PGN into a local collection", () => {
           "true",
         );
         await play(app, "e2", "e4", "e4");
-        const session = join(directory, "data", "io.github.echo8134.zobrist", "boards.json");
+        const session = join(
+          directory,
+          "data",
+          "io.github.echo8134.zobrist",
+          "boards.json",
+        );
         await waitForSession(app, session, {
           boards: [{ game: "1. e4 *\n", place: [0], origin: null }],
           selected: 0,
