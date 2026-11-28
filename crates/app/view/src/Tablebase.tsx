@@ -4,6 +4,8 @@ import type { TablebaseAnswer } from "./generated/TablebaseAnswer";
 import { ask } from "./ipc";
 import styles from "./Tablebase.module.css";
 
+const { panel, controls, refusal, summary, moveList } = styles;
+
 export function Tablebase({
   game,
   picture,
@@ -35,8 +37,8 @@ export function Tablebase({
   }
 
   return (
-    <section aria-label="Lichess endgame tablebase" className={styles.panel}>
-      <div className={styles.controls}>
+    <section aria-label="Lichess endgame tablebase" className={panel}>
+      <div className={controls}>
         <button
           type="button"
           disabled={tooMany || state.type === "Pending"}
@@ -52,16 +54,16 @@ export function Tablebase({
         </span>
       </div>
       {state.type === "Refused" && (
-        <p role="alert" className={styles.refusal}>
+        <p role="alert" className={refusal}>
           {state.reason}
         </p>
       )}
       {state.type === "Evaluated" && (
         <>
-          <p role="status" className={styles.summary}>
+          <p role="status" className={summary}>
             {side} to move: {state.outcome}
           </p>
-          <div className={styles.moveList}>
+          <div className={moveList}>
             <table>
               <thead>
                 <tr>

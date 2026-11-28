@@ -12,6 +12,7 @@ mod file_collection;
 mod game_file;
 mod pgn_file;
 mod session;
+mod tablebase;
 
 pub use accounts::AccountRequest;
 pub use analysis::{AnalysisRequest, AnalysisSnapshot, VariationAnswer};
@@ -26,6 +27,7 @@ pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SaveHistory, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
 pub use session::{BoardPicture, SessionRequest};
+pub use tablebase::{TablebaseAnswer, TablebaseMove};
 
 use std::collections::BTreeMap;
 use std::io;
@@ -101,6 +103,13 @@ pub enum Request {
     OpenGameLink {
         /// The link entered by the player.
         link: String,
+    },
+    /// Look up the board position the player selected.
+    LookupTablebase {
+        /// The open game on the board.
+        game: usize,
+        /// The position revision the board displayed at the click.
+        revision: usize,
     },
     /// Get the current game as PGN text.
     GamePgn {
@@ -554,6 +563,11 @@ pub enum Response {
         /// The outcome of the fetch.
         answer: OpenGameLinkAnswer,
     },
+    /// The outcomes for the position and its moves, or a refusal.
+    LookupTablebase {
+        /// The answer to this board's lookup.
+        answer: TablebaseAnswer,
+    },
     /// The PGN text or the reason it could not be written.
     GamePgn(PgnExport),
     /// The game after the editor accepts or refuses the tag edit.
@@ -820,6 +834,7 @@ impl PgnExport {
 #[serde(rename_all = "camelCase")]
 pub struct GamePicture {
     revision: usize,
+    piece_count: usize,
     tags: Vec<Tag>,
     result: GameResult,
     fen: String,
@@ -1045,6 +1060,7 @@ impl GamePicture {
             fen: Fen::from_position(position, EnPassantMode::Legal).to_string(),
             turn: position.turn().into(),
             in_check: position.is_check(),
+            piece_count: position.board().occupied().count(),
             legal_moves,
             current,
             shapes: BoardShapes::from(&shapes),
@@ -1168,10 +1184,10 @@ impl Games {
                 opened: self.open_pgn(&text),
             },
             Request::OpenGameLink { link } => return open_game_link(link),
-            Request::GamePgn { game } => {
-                let open = self.open_games.get(&game);
-                Response::GamePgn(PgnExport::from_editor(open.map(|open| &open.editor)))
-            }
+            Request::LookupTablebase { game, revision } => return self.tablebase(game, revision),
+            Request::GamePgn { game } => Response::GamePgn(PgnExport::from_editor(
+                self.open_games.get(&game).map(|open| &open.editor),
+            )),
             Request::SetTag { game, tag, text } => Response::SetTag {
                 picture: self.edit(game, |editor| editor.set_tag(tag.into(), &text)),
             },
