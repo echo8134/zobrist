@@ -9,7 +9,7 @@ use ts_rs::TS;
 use zobrist_store::{GameColumn, GameQuery};
 
 use super::database_collection::{database_error, open_database};
-use super::{FirstStep, GameFileRefusal, Games, OpenGameAnswer, Response};
+use super::{FirstStep, GameFileRefusal, GameSource, Games, OpenGameAnswer, Response};
 
 /// A filtered and sorted page of a collection, numbered from one.
 #[derive(Deserialize, TS)]
@@ -68,7 +68,7 @@ pub(super) fn open_database_game(path: PathBuf, number: NonZeroU64) -> FirstStep
         move |games: &mut Games| Response::OpenDatabaseGame {
             answer: match read {
                 Ok(Some(stored)) => {
-                    let (game, picture) = games.open(stored, None);
+                    let (game, picture) = games.open(stored, GameSource::New);
                     OpenGameAnswer::Game {
                         game,
                         picture: Box::new(picture),

@@ -5,6 +5,7 @@ import type { BoardAppearance } from "./BoardAppearance";
 import type { BoardPicture } from "./BoardPicture";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
+import type { DeletePgnGameAnswer } from "./DeletePgnGameAnswer";
 import type { EarlierState } from "./EarlierState";
 import type { EngineEntry } from "./EngineEntry";
 import type { FileCollection } from "./FileCollection";
@@ -18,6 +19,7 @@ import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
 import type { PositionDraft } from "./PositionDraft";
 import type { SaveGameAnswer } from "./SaveGameAnswer";
+import type { TablebaseAnswer } from "./TablebaseAnswer";
 import type { VariationAnswer } from "./VariationAnswer";
 
 /**
@@ -83,7 +85,11 @@ answer: OpenGameLinkAnswer, } | { "type": "OpenDatabaseGame",
 /**
  * Opening a native game never attaches a PGN save target.
  */
-answer: OpenGameAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
+answer: OpenGameAnswer, } | { "type": "LookupTablebase", 
+/**
+ * The answer to this board's lookup.
+ */
+answer: TablebaseAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
 /**
  * Absent when the game is no longer open.
  */
@@ -251,7 +257,11 @@ answer: PgnFileAnswer, } | { "type": "CreatePgnFile",
 /**
  * What the page Files shows next.
  */
-answer: PgnFileAnswer, } | { "type": "OpenGame", 
+answer: PgnFileAnswer, } | { "type": "DeletePgnGame", 
+/**
+ * The result of confirming deletion.
+ */
+answer: DeletePgnGameAnswer, } | { "type": "OpenGame", 
 /**
  * The game and its picture, or why there is none.
  */

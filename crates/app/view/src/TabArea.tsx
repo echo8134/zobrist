@@ -11,6 +11,7 @@ import { NotationTools } from "./NotationTools";
 import { PositionPanel, PositionTools } from "./PositionTools";
 import type { SetupEdit } from "./positionSetup";
 import styles from "./TabArea.module.css";
+import { Tablebase } from "./Tablebase";
 import {
   type Annotation,
   type Change,
@@ -28,6 +29,7 @@ import {
 const {
   area,
   boardPart,
+  boardStage,
   boardColumn,
   buttonRow,
   notationArea,
@@ -129,33 +131,38 @@ export function TabArea({
   return (
     <main className={area}>
       <div className={boardPart}>
-        <div className={boardColumn}>
-          <Board
-            key={panel?.type === "setup" ? "setup" : "game"}
-            inert={panel?.type !== "paste" && panel?.status === "pending"}
-            setup={
-              panel?.type === "setup"
-                ? {
-                    draft: panel.draft,
-                    onPieces: (pieces) =>
-                      onEditSetup({ type: "Fields", fields: { pieces } }),
-                  }
-                : undefined
-            }
-            picture={picture}
-            bottomSide={tab.bottomSide}
-            onMove={onMove}
-            onShapes={onShapes}
-          />
-          <div className={buttonRow}>
-            <IconButton
-              name="Turn the board"
-              icon={ArrowUpDown}
-              onClick={onTurnBoard}
+        <div className={boardStage}>
+          <div className={boardColumn}>
+            <Board
+              key={panel?.type === "setup" ? "setup" : "game"}
+              inert={panel?.type !== "paste" && panel?.status === "pending"}
+              setup={
+                panel?.type === "setup"
+                  ? {
+                      draft: panel.draft,
+                      onPieces: (pieces) =>
+                        onEditSetup({ type: "Fields", fields: { pieces } }),
+                    }
+                  : undefined
+              }
+              picture={picture}
+              bottomSide={tab.bottomSide}
+              onMove={onMove}
+              onShapes={onShapes}
             />
-            <PositionTools tab={tab} change={change} />
+            <div className={buttonRow}>
+              <IconButton
+                name="Turn the board"
+                icon={ArrowUpDown}
+                onClick={onTurnBoard}
+              />
+              <PositionTools tab={tab} change={change} />
+            </div>
           </div>
         </div>
+        {panel === undefined && (
+          <Tablebase key={picture.revision} game={tab.game} picture={picture} />
+        )}
       </div>
       <PositionPanel
         onEditSetup={onEditSetup}

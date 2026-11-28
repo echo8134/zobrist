@@ -55,12 +55,13 @@ mod query;
 
 pub use import::{ImportError, PgnReport, import_pgn, problem_line, read_pgn_entries};
 pub use pgn_file::{
-    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, read_pgn_game,
-    replace_pgn_game,
+    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, list_pgn_games,
+    read_pgn_game, replace_pgn_game,
 };
 
 pub use pgn_history::{
-    PgnHistory, PgnState, PgnStateDetails, pgn_states, prepare_pgn_restore, restore_pgn_state,
+    PgnHistory, PgnState, PgnStateDetails, delete_pgn_game, pgn_states, prepare_pgn_restore,
+    restore_pgn_state,
 };
 
 pub use query::{GameColumn, GameList, GameQuery};
