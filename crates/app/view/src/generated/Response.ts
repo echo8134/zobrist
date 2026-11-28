@@ -249,6 +249,10 @@ stamp: string, } | { "type": "RestorePgnState" } | { "type": "AddPgnPath",
 /**
  * The new selection or the reason the file operation was refused.
  */
+answer: AddedPgnPath, } | { "type": "DropPgnPaths", 
+/**
+ * The same selection as opening a PGN from the picker.
+ */
 answer: AddedPgnPath, } | { "type": "ReadPgnFolder", 
 /**
  * Folders first, then files, in name order.

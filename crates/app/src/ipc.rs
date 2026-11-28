@@ -782,6 +782,11 @@ pub enum Response {
         /// The new selection or the reason the file operation was refused.
         answer: AddedPgnPath,
     },
+    /// The file dropped on the window or the reason the drop was refused.
+    DropPgnPaths {
+        /// The same selection as opening a PGN from the picker.
+        answer: AddedPgnPath,
+    },
     /// The immediate PGN files and subfolders of a folder.
     ReadPgnFolder {
         /// Folders first, then files, in name order.
