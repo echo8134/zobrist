@@ -9,11 +9,20 @@ import {
   rmSync,
   statSync,
   utimesSync,
+  watch,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { drawnBoard, play, startPositionWithWhiteAtBottom, waitForSession } from "./board";
+import {
+  drawnBoard,
+  expectMove,
+  play,
+  startPositionWithWhiteAtBottom,
+  waitForSession,
+} from "./board";
 import { freePort, withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
 
@@ -25,11 +34,6 @@ const fixture = fileURLToPath(
 const tabs = (app: WebdriverIO.Browser) => app.$$('header [role="tab"]');
 const selected = (app: WebdriverIO.Browser) =>
   app.$('header [role="tab"][aria-selected="true"]');
-const expectMove = (app: WebdriverIO.Browser, move: string) =>
-  expect(app.$("main aside ol").$(`button=${move}`)).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
 const comment = (app: WebdriverIO.Browser) =>
   app.$("main aside").$("aria/Comment");
 const newBoard = (app: WebdriverIO.Browser) =>
@@ -291,6 +295,92 @@ describe("boards after quitting and starting zobrist", function () {
     );
 
     await withDesktopApp(work, expectHome);
+  });
+
+  it("publishes one session for an applied comment and two moves on a controlled clock", async () => {
+    const directory = `${work}/io.github.echo8134.zobrist`;
+    mkdirSync(directory);
+    const path = `${directory}/boards.json`;
+    const held = "1. e4 e5 2. Nf3 *\n";
+    writeFileSync(file, held);
+    const origin = { path: file, number: 1, held };
+    writeFileSync(
+      path,
+      JSON.stringify({
+        boards: [{ game: held, place: [0], origin }],
+        selected: 0,
+      }),
+    );
+    const writes: unknown[] = [];
+    const watcher = watch(directory, (event, name) => {
+      if (event === "rename" && name === "boards.json")
+        writes.push(JSON.parse(readFileSync(path, "utf8")));
+    });
+    try {
+      await withDesktopApp(
+        work,
+        async (app) => {
+          await expectMove(app, "e4");
+          // The embedded driver has no BiDi clock command. Install WebdriverIO's bundled clock in this window.
+          const webdriver = createRequire(
+            import.meta.resolve("@wdio/globals"),
+          ).resolve("webdriverio");
+          const timers = readFileSync(
+            resolve(dirname(webdriver), "../third_party/fake-timers.js"),
+            "utf8",
+          );
+          await app.execute(
+            timers +
+              "\nFakeTimers(); window.boardClock = window.__wdio_sinon.install({ toFake: ['setTimeout', 'clearTimeout'] });",
+          );
+          const advance = (milliseconds: number) =>
+            app
+              .executeAsync(
+                "const done = arguments[1]; window.boardClock.tickAsync(arguments[0]).then(() => done(true), error => done(String(error)));",
+                milliseconds,
+              )
+              .then((result) => expect(result).toBe(true));
+
+          await advance(1000);
+          expect(writes).toEqual([]);
+          await comment(app).setValue("Final move");
+          await advance(1000);
+          expect(writes).toEqual([]);
+
+          await app.execute("document.activeElement.blur()");
+          await expect(selected(app)).toHaveAttribute(
+            "aria-label",
+            "New game, not saved",
+          );
+          for (const move of ["e5", "Nf3"]) {
+            await app.$("main aside ol").$(`button=${move}`).click();
+            await expectMove(app, move);
+          }
+          expect(writes).toEqual([]);
+          await advance(1000);
+          await app.waitUntil(() => writes.length > 0);
+          const saved = {
+            boards: [
+              {
+                game: "1. e4 {Final move} 1... e5 2. Nf3 *\n",
+                place: [0, 0, 0],
+                origin,
+              },
+            ],
+            selected: 0,
+          };
+          expect(writes).toEqual([saved]);
+          await advance(1000);
+          await app.$("main aside ol").$("button=Nf3").click();
+          await advance(1000);
+          expect(writes).toEqual([saved]);
+        },
+        {},
+        "terminate process",
+      );
+    } finally {
+      watcher.close();
+    }
   });
 
   it("reopens the recovered board after an immediate termination", async () => {
