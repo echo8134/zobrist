@@ -31,7 +31,10 @@ export function boardSession(
           const previous = before.tabs.find(({ game }) => game === change.game);
           if (previous?.picture.place.join() === change.picture.place.join())
             return;
-        } else if (change.type !== "drawPicture") {
+        } else if (
+          change.type !== "drawPicture" &&
+          change.type !== "updateGameFile"
+        ) {
           return;
         }
       }
