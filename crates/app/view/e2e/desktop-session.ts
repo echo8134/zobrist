@@ -5,7 +5,7 @@ import { cleanupWdioSession, startWdioSession } from "@wdio/tauri-service";
 
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
 
-async function freePort() {
+export async function freePort() {
   const socket = createServer();
   await new Promise<void>((ready, reject) => {
     socket.once("error", reject).listen(0, "127.0.0.1", ready);
@@ -39,6 +39,7 @@ export async function withDesktopApp(
   data: string,
   visit: (session: WebdriverIO.Browser) => Promise<void>,
   env: Record<string, string> = {},
+  exit: "close window" | "terminate process" = "close window",
 ) {
   const port = await freePort();
   const session = await startWdioSession(
@@ -58,15 +59,17 @@ export async function withDesktopApp(
     await visit(session);
   } finally {
     try {
-      const endpoint = `http://127.0.0.1:${port}`;
-      await requestDriver(
-        `${endpoint}/session/${session.sessionId}/window`,
-        "DELETE",
-      );
-      await session.waitUntil(
-        async () => !(await requestDriver(`${endpoint}/status`, "GET")),
-        { timeoutMsg: "The app is still running after closing its window" },
-      );
+      if (exit === "close window") {
+        const endpoint = `http://127.0.0.1:${port}`;
+        await requestDriver(
+          `${endpoint}/session/${session.sessionId}/window`,
+          "DELETE",
+        );
+        await session.waitUntil(
+          async () => !(await requestDriver(`${endpoint}/status`, "GET")),
+          { timeoutMsg: "The app is still running after closing its window" },
+        );
+      }
     } finally {
       await cleanupWdioSession(session);
     }
