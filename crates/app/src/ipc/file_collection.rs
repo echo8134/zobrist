@@ -170,7 +170,7 @@ impl CollectionRequest {
                 entries: recent_files::list(&data_directory()?)?,
             }),
             Self::OpenListedPgnFile { path } => Ok(Response::OpenListedPgnFile {
-                answer: open_listed(&data_directory()?, path)?,
+                answer: open_listed(data_directory(), path)?,
             }),
             Self::AddPgnPath {
                 choice,
@@ -306,11 +306,13 @@ fn add(
     })
 }
 
-fn open_listed(directory: &Path, path: PathBuf) -> io::Result<PgnFileAnswer> {
+fn open_listed(directory: io::Result<PathBuf>, path: PathBuf) -> io::Result<PgnFileAnswer> {
     let entry = CollectionEntry::new(EntryKind::File, path)?;
     let answer = pgn_file::opened(&entry.path);
-    if matches!(answer, PgnFileAnswer::File(_)) {
-        recent_files::record(directory, &entry.path);
+    if matches!(answer, PgnFileAnswer::File(_))
+        && let Ok(directory) = directory
+    {
+        recent_files::record(&directory, &entry.path);
     }
     Ok(answer)
 }
@@ -410,16 +412,20 @@ pub(super) fn read_or_default<T: Default>(
 }
 
 pub(super) fn lock_collection(directory: &Path, filename: &str) -> io::Result<File> {
+    let lock = collection_lock_file(directory, filename)?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+fn collection_lock_file(directory: &Path, filename: &str) -> io::Result<File> {
     fs::create_dir_all(directory)?;
     // Separate app windows and processes may add to the same collection.
-    let lock = File::options()
+    File::options()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(directory.join(filename))?;
-    lock.lock()?;
-    Ok(lock)
+        .open(directory.join(filename))
 }
 
 pub(super) fn publish_collection(path: &Path, contents: &impl Serialize) -> io::Result<()> {

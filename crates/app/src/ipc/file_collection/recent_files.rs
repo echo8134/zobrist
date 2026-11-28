@@ -1,12 +1,17 @@
 //! PGN files opened on this device, in the order Home displays them.
 
 use std::collections::HashSet;
+use std::fs::TryLockError;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use super::{CollectionEntry, EntryKind, lock_collection, publish_collection, read_or_default};
+use super::{
+    CollectionEntry, EntryKind, collection_lock_file, publish_collection, read_or_default,
+};
 
 const LIMIT: usize = 10;
+const LOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub(super) fn list(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
     read_or_default(
@@ -31,10 +36,21 @@ pub(super) fn list(directory: &Path) -> io::Result<Vec<CollectionEntry>> {
 }
 
 pub(super) fn record(directory: &Path, path: &Path) {
-    // Failure to save the history must not prevent the player from opening a PGN.
-    let Ok(_lock) = lock_collection(directory, "recent-files.lock") else {
+    let Ok(lock) = collection_lock_file(directory, "recent-files.lock") else {
         return;
     };
+    // A busy history may skip this open so the player can still see the games.
+    let deadline = Instant::now() + LOCK_TIMEOUT;
+    while let Err(error) = lock.try_lock() {
+        if !matches!(error, TryLockError::WouldBlock) {
+            return;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(Duration::from_millis(10)));
+        if Instant::now() >= deadline {
+            return;
+        }
+    }
     let Ok(entries) = list(directory) else {
         return;
     };
@@ -57,9 +73,57 @@ mod tests {
 
     use serde_json::json;
 
-    use super::super::{AddedPgnPath, PickerChoice, add, open_listed};
+    use super::super::{AddedPgnPath, PickerChoice, add, lock_collection, open_listed};
     use super::*;
     use crate::ipc::{Games, PgnFileAnswer, Request, Response};
+
+    #[test]
+    fn opens_the_game_when_the_data_directory_cannot_be_resolved() -> io::Result<()> {
+        let game =
+            env::temp_dir().join(format!("zobrist-recent-no-directory-{}.pgn", process::id()));
+        fs::write(&game, "[White \"Ada\"]\n[Black \"Bo\"]\n\n1. e4 1-0\n")?;
+        let directory = Err(io::Error::other("No local data directory"));
+        let answer = open_listed(directory, game.clone())?;
+        assert_eq!(
+            json!(answer),
+            json!({"type":"File","path":game, "problems":0, "rows":[
+                {"number":1,"white":"Ada","black":"Bo","result":"1-0","date":"?","event":"?"}
+            ]})
+        );
+        fs::remove_file(game)
+    }
+
+    #[test]
+    fn opens_the_game_while_another_handle_holds_the_history_lock() -> io::Result<()> {
+        let work = env::temp_dir().join(format!("zobrist-recent-locked-{}", process::id()));
+        fs::create_dir(&work)?;
+        let first = work.join("first.pgn");
+        let next = work.join("next.pgn");
+        fs::write(&first, "")?;
+        fs::write(&next, "[White \"Ada\"]\n[Black \"Bo\"]\n\n1. e4 1-0\n")?;
+        open_listed(Ok(work.clone()), first.clone())?;
+
+        let lock = lock_collection(&work, "recent-files.lock")?;
+        let (send, receive) = std::sync::mpsc::channel();
+        let answer = std::thread::scope(|scope| {
+            scope.spawn(|| send.send(open_listed(Ok(work.clone()), next.clone())));
+            // Allow the one-second lock wait plus time to read the fixture and schedule the thread.
+            let result = receive.recv_timeout(std::time::Duration::from_millis(1250));
+            drop(lock);
+            result
+        })
+        .expect("opening a PGN must finish while the history lock is held")?;
+        assert_eq!(
+            json!(answer)["rows"],
+            json!([{"number":1,"white":"Ada","black":"Bo","result":"1-0","date":"?","event":"?"}])
+        );
+        let first_entry = json!({"kind":"File","name":"first.pgn","path":first});
+        let next_entry = json!({"kind":"File","name":"next.pgn","path":next});
+        assert_eq!(json!(list(&work)?), json!([first_entry]));
+        open_listed(Ok(work.clone()), next)?;
+        assert_eq!(json!(list(&work)?), json!([next_entry, first_entry]));
+        fs::remove_dir_all(work)
+    }
 
     #[test]
     fn only_successful_opens_change_the_recent_files_order() -> io::Result<()> {
@@ -74,13 +138,13 @@ mod tests {
         fs::write(&picked, b"1. d4 *\n")?;
 
         add(&data, PickerChoice::Folder, &folder, None)?;
-        open_listed(&data, child.clone())?;
+        open_listed(Ok(data.clone()), child.clone())?;
         add(&data, PickerChoice::File, &picked, None)?;
         let picked_entry = json!({"kind": "File", "name": "Final.pgn", "path": picked});
         let child_entry = json!({"kind": "File", "name": "Final.pgn", "path": child});
         assert_eq!(json!(list(&data)?), json!([picked_entry, child_entry]));
 
-        open_listed(&data, child.clone())?;
+        open_listed(Ok(data.clone()), child.clone())?;
         assert_eq!(json!(list(&data)?), json!([child_entry, picked_entry]));
 
         add(&data, PickerChoice::Folder, &folder, None)?;
@@ -95,7 +159,7 @@ mod tests {
         ));
         fs::remove_file(&picked)?;
         assert!(matches!(
-            open_listed(&data, picked.clone())?,
+            open_listed(Ok(data.clone()), picked.clone())?,
             PgnFileAnswer::Refusal { .. }
         ));
         assert!(matches!(
@@ -118,7 +182,7 @@ mod tests {
         for number in 1..=11 {
             let path = work.join(format!("{number:02}.pgn"));
             fs::write(&path, b"")?;
-            open_listed(&work, path)?;
+            open_listed(Ok(work.clone()), path)?;
         }
         let names: Vec<_> = list(&work)?.into_iter().map(|entry| entry.name).collect();
         assert_eq!(
@@ -160,7 +224,7 @@ mod tests {
                 AddedPgnPath::File { .. }
             ));
             assert!(matches!(
-                open_listed(&work, path.clone())?,
+                open_listed(Ok(work.clone()), path.clone())?,
                 PgnFileAnswer::File(_)
             ));
             assert_eq!(fs::read(&history)?, bytes);
