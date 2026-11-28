@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
 import {
+  closeSync,
+  constants,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -10,7 +14,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { visitPage } from "./desktop-session";
+import {
+  type DesktopWindow,
+  visitPage,
+  withDesktopApp,
+} from "./desktop-session";
 import { answerNextPicker } from "./file-picker";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -94,6 +102,96 @@ describe("import a PGN into a local collection", () => {
       await check(app);
     });
   }
+
+  async function closeDuringImport(
+    check: (
+      app: WebdriverIO.Browser,
+      window: DesktopWindow,
+      release: () => void,
+    ) => Promise<void>,
+  ) {
+    const pipePath = join(directory, "held.pgn");
+    execFileSync("mkfifo", [pipePath]);
+    await withDesktopApp(join(directory, "data"), async (app, window) => {
+      await app.$("header").$("aria/New board").click();
+      await expect(app.$('header [role="tab"]')).toHaveText("New game");
+      await app.$("nav").$("aria/Databases").click();
+      const destination = join(collections, "Held.zobrist");
+      await startImport(app, pipePath, destination);
+      // A writer can open the pipe only once Rust has opened the read end.
+      let writer: number | undefined = await app.waitUntil(async () => {
+        try {
+          return openSync(pipePath, constants.O_WRONLY | constants.O_NONBLOCK);
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "ENXIO"
+          )
+            return false;
+          throw error;
+        }
+      });
+      const release = () => {
+        if (writer !== undefined) {
+          closeSync(writer);
+          writer = undefined;
+        }
+      };
+      try {
+        writeFileSync(writer, readFileSync(clean));
+        await window.close();
+        await expect(
+          app.$(
+            "p=An import is still running. zobrist closes when it finishes. Close again to stop it and quit.",
+          ),
+        ).toBeDisplayed();
+        await check(app, window, release);
+      } finally {
+        release();
+      }
+    });
+  }
+
+  it("waits for an import, blocks input, then quits and reopens the board and collection", async () => {
+    await closeDuringImport(async (app, window, release) => {
+      const home = app.$("nav").$("button=Home");
+      await app
+        .action("pointer")
+        .move({ origin: await home.getElement() })
+        .down({ button: 0 })
+        .up({ button: 0 })
+        .perform();
+      await expect(app.$("main h1")).toHaveText("Databases");
+      const picture = await app.saveScreenshot(
+        join(root, "target/e2e/close-during-import.png"),
+      );
+      expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
+        1280, 800,
+      ]);
+      release();
+      await window.waitForExit();
+    });
+    await onDatabases(async (app) => {
+      await expect(app.$('header [role="tab"]')).toHaveText("New game");
+      await app.$("button=Held.zobrist").click();
+      await expect(app.$("span=2 games")).toBeDisplayed();
+    });
+  });
+
+  it("quits on a second close during an import and reopens only the board", async () => {
+    await closeDuringImport(async (_app, window) => {
+      const start = performance.now();
+      await window.close();
+      await window.waitForExit(2000);
+      expect(performance.now() - start).toBeLessThan(2000);
+    });
+    expect(readdirSync(collections)).toEqual([]);
+    await onDatabases(async (app) => {
+      await expect(app.$('header [role="tab"]')).toHaveText("New game");
+      await expect(app.$("p=No collections yet.")).toBeDisplayed();
+    });
+  });
 
   it("selects the imported collection and reopens it after quitting", async () => {
     const study = join(collections, "Study.zobrist");

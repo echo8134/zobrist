@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,9 +36,16 @@ async function requestDriver(url: string, method: "GET" | "DELETE") {
   }
 }
 
+export type DesktopWindow = {
+  close(): Promise<void>;
+  waitForExit(timeout?: number): Promise<void>;
+};
+
+type Visit = (app: WebdriverIO.Browser, window: DesktopWindow) => Promise<void>;
+
 export async function withDesktopApp(
   data: string,
-  visit: (session: WebdriverIO.Browser) => Promise<void>,
+  visit: Visit,
   env: Record<string, string> = {},
   exit: "close window" | "terminate process" = "close window",
 ) {
@@ -54,21 +62,43 @@ export async function withDesktopApp(
     },
   );
   session.options.connectionRetryCount = 0;
+  const endpoint = `http://127.0.0.1:${port}`;
+  const window: DesktopWindow = {
+    async close() {
+      await requestDriver(
+        `${endpoint}/session/${session.sessionId}/window`,
+        "DELETE",
+      );
+    },
+    async waitForExit(timeout = 5000) {
+      await session.waitUntil(
+        async () => {
+          if (await requestDriver(`${endpoint}/status`, "GET")) return false;
+          // The app holds this lock until exit, including after its last window closes.
+          const lock = spawnSync("flock", [
+            "--nonblock",
+            join(data, "io.github.echo8134.zobrist", "app.lock"),
+            "true",
+          ]);
+          if (lock.error) throw lock.error;
+          return lock.status === 0;
+        },
+        {
+          timeout,
+          interval: 25,
+          timeoutMsg: "The app is still running after closing its window",
+        },
+      );
+    },
+  };
   try {
     await session.switchToWindow("main");
-    await visit(session);
+    await visit(session, window);
   } finally {
     try {
       if (exit === "close window") {
-        const endpoint = `http://127.0.0.1:${port}`;
-        await requestDriver(
-          `${endpoint}/session/${session.sessionId}/window`,
-          "DELETE",
-        );
-        await session.waitUntil(
-          async () => !(await requestDriver(`${endpoint}/status`, "GET")),
-          { timeoutMsg: "The app is still running after closing its window" },
-        );
+        await window.close();
+        await window.waitForExit();
       }
     } finally {
       await cleanupWdioSession(session);
@@ -79,14 +109,14 @@ export async function withDesktopApp(
 export function visitPage(
   work: string,
   page: string,
-  visit: (session: WebdriverIO.Browser) => Promise<void>,
+  visit: Visit,
   env: Record<string, string> = {},
 ) {
   return withDesktopApp(
     join(work, "data"),
-    async (session) => {
+    async (session, window) => {
       await session.$("nav").$(`aria/${page}`).click();
-      await visit(session);
+      await visit(session, window);
     },
     { ...env, XDG_CACHE_HOME: join(work, "cache") },
   );
