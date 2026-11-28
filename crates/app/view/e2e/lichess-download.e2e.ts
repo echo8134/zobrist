@@ -162,4 +162,68 @@ describe("downloading public games from User", () => {
       rmSync(work, { recursive: true, force: true });
     }
   });
+
+  it("gives up a held download on a second close and keeps the original PGN", async () => {
+    mkdirSync(screenshots, { recursive: true });
+    const work = mkdtempSync(join(screenshots, "close-download-"));
+    const study = join(work, "study.pgn");
+    writeFileSync(study, original);
+    try {
+      await replyWithPlayerGames("hold");
+      await visitPage(
+        work,
+        "User",
+        async (app, window) => {
+          try {
+            await app.$("header").$("aria/New board").click();
+            await expect(app.$('header [role="tab"]')).toHaveText("New game");
+            await app.$("nav").$("aria/User").click();
+            await app.$("main summary").click();
+            await app.$("aria/Lichess username").setValue("RookExample");
+            await app.$("button=Save").click();
+            const form = app.$('form[aria-label="Public Lichess games"]');
+            await form.$("aria/From").setValue("2026-01-01");
+            await form.$("aria/To").setValue("2026-01-31");
+            const download = form.$("button=Download games");
+            await expect(download).toBeEnabled();
+            await answerNextPicker("PickPgnPath", study, app);
+            await download.click();
+            await app.waitUntil(async () =>
+              (await exportPaths()).includes(january),
+            );
+
+            await window.close();
+            await expect(
+              app.$(
+                "p=A download is still running. zobrist closes when it finishes. Close again to stop it and quit.",
+              ),
+            ).toBeDisplayed();
+            const started = performance.now();
+            await window.close();
+            await window.waitForExit(2000);
+            expect(performance.now() - started).toBeLessThan(2000);
+          } finally {
+            await replyWithPlayerGames("games");
+          }
+        },
+        { ZOBRIST_TEST_EXPORT_PORT: exportOrigin().port },
+      );
+      expect(readFileSync(study)).toEqual(Buffer.from(original));
+      await visitPage(work, "Files", async (app) => {
+        await expect(app.$('header [role="tab"]')).toHaveText("New game");
+        await pick("File", study, app);
+        await expect(
+          app.$('section[aria-label="Selection"]').$(`p=${study}`),
+        ).toBeDisplayed();
+        await app.$("button=Earlier states").click();
+        await expect(
+          app
+            .$('section[aria-label="Earlier states"]')
+            .$("p=No earlier states."),
+        ).toBeDisplayed();
+      });
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
 });
