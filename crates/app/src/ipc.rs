@@ -522,6 +522,8 @@ pub enum Response {
         #[ts(optional)]
         warning: Option<String>,
     },
+    /// The settled session is ready for the next start.
+    CheckpointBoards,
     /// The session was written and the window can close.
     QuitWithBoards,
     /// The result of adding the engine row selected on the board.
@@ -1368,8 +1370,7 @@ impl FirstStep {
 #[derive(Default)]
 pub struct SharedGames {
     games: std::sync::Arc<Mutex<Games>>,
-    // A failed recovery must preserve this original before the next save of the boards.
-    one_save: Mutex<Option<PathBuf>>,
+    one_save: Mutex<session::SessionFile>,
     restored_selection: OnceLock<Option<usize>>,
     file_rows: RwLock<()>,
     history: SaveHistory,

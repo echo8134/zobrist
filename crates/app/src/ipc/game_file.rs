@@ -40,7 +40,7 @@ pub(super) struct OpenGame {
     pub(super) file: GameSource,
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub(super) enum GameSource {
     #[serde(rename = "deleted")]
     Deleted,
@@ -53,7 +53,7 @@ pub(super) enum GameSource {
 }
 
 /// Where an open game came from, with the game as that file holds it.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub(super) struct InFile {
     /// The file with every symbolic link followed, so that two paths to one file are equal.
     pub(super) path: PathBuf,

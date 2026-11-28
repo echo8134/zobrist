@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test, vi } from "vitest";
-import { answersOnTheirWay, ask, finishBoardActions } from "./ipc";
+import { answersOnTheirWay, ask, finishRequests } from "./ipc";
 
 // The stand-in for Rust. Only the module under test imports the real function.
 const invoke = vi.hoisted(() => vi.fn());
@@ -91,7 +91,7 @@ test("quitting waits for a new board and a save that was waiting for a field", a
     steps.push("saved");
   });
 
-  const quit = finishBoardActions().then(() => steps.push("quit"));
+  const quit = finishRequests("all").then(() => steps.push("quit"));
   finishTag();
   await answersOnTheirWay(7);
   expect(steps).toEqual([]);
@@ -114,7 +114,37 @@ test("a game can be saved while the tablebase is still answering", async () => {
   );
   const lookup = ask({ type: "LookupTablebase", game: 4, revision: 2 });
   expect(answersOnTheirWay(4)).toBeUndefined();
-  await finishBoardActions();
+  await finishRequests("boards");
+  await finishRequests("all");
   refuse(new Error("offline"));
   await expect(lookup).rejects.toThrow("offline");
+});
+
+test("a checkpoint waits for a game opening from a collection", async () => {
+  vi.useFakeTimers();
+  let finishOpen = () => {};
+  invoke.mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      finishOpen = resolve;
+    }),
+  );
+  try {
+    const steps: string[] = [];
+    const opening = ask({
+      type: "OpenDatabaseGame",
+      path: "Study.zobrist",
+      number: 2,
+    }).then(() => steps.push("opened"));
+    const checkpoint = finishRequests("boards").then(() =>
+      steps.push("checkpoint"),
+    );
+    await vi.runAllTimersAsync();
+    finishOpen();
+    await opening;
+    await vi.runAllTimersAsync();
+    await checkpoint;
+    expect(steps).toEqual(["opened", "checkpoint"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -7,11 +7,22 @@ import {
   readFileSync,
   rmdirSync,
   rmSync,
+  statSync,
+  utimesSync,
+  watch,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
+import {
+  drawnBoard,
+  expectMove,
+  play,
+  startPositionWithWhiteAtBottom,
+  waitForSession,
+} from "./board";
 import { freePort, withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
 
@@ -23,11 +34,6 @@ const fixture = fileURLToPath(
 const tabs = (app: WebdriverIO.Browser) => app.$$('header [role="tab"]');
 const selected = (app: WebdriverIO.Browser) =>
   app.$('header [role="tab"][aria-selected="true"]');
-const expectMove = (app: WebdriverIO.Browser, move: string) =>
-  expect(app.$("main aside ol").$(`button=${move}`)).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
 const comment = (app: WebdriverIO.Browser) =>
   app.$("main aside").$("aria/Comment");
 async function newBoard(app: WebdriverIO.Browser) {
@@ -69,21 +75,32 @@ async function addComment(app: WebdriverIO.Browser) {
   );
 }
 
-async function play(
-  app: WebdriverIO.Browser,
-  from: string,
-  to: string,
-  move: string,
-) {
-  const board = app.$("main cg-board");
-  const side = (await board.getSize("width")) / 8;
-  for (const square of [from, to]) {
-    await board.click({
-      x: ("abcdefgh".indexOf(square.charAt(0)) - 3.5) * side,
-      y: (4.5 - Number(square.charAt(1))) * side,
-    });
-  }
-  await expectMove(app, move);
+async function openBoardWithVariation(app: WebdriverIO.Browser) {
+  await newBoard(app);
+  await play(app, "d2", "d4", "d4");
+  await play(app, "d7", "d5", "d5");
+  await app.keys("ArrowLeft");
+  await expectMove(app, "d4");
+  await play(app, "g8", "f6", "Nf6");
+}
+
+async function expectSelectedVariation(app: WebdriverIO.Browser) {
+  await expect(selected(app)).toHaveText("New game");
+  await expect(
+    app.$('main aside ol ol button[aria-current="true"]'),
+  ).toHaveText("Nf6");
+  expect(
+    await app
+      .$$("main aside div > ol > li > span > button")
+      .map((button) => button.getText()),
+  ).toEqual(["d4", "d5"]);
+}
+
+async function captureWindow(app: WebdriverIO.Browser, filename: string) {
+  const picture = await app.saveScreenshot(`${target}/e2e/${filename}`);
+  expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
+    1280, 800,
+  ]);
 }
 
 describe("boards after quitting and starting zobrist", function () {
@@ -105,9 +122,14 @@ describe("boards after quitting and starting zobrist", function () {
       await newBoard(app);
       await play(app, "e2", "e4", "e4");
 
+      const session = `${directory}/boards.json`;
+      await waitForSession(app, session, {
+        boards: [{ game: "1. e4 *\n", place: [0], origin: null }],
+        selected: 0,
+      });
+      const settled = readFileSync(session);
       // Recovery would move this file if another window tried to restore the session.
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(`${directory}/boards.json`, '{"boards":[');
+      writeFileSync(session, '{"boards":[');
       writeFileSync(`${directory}/files.json`, "[]");
       const entries = readdirSync(directory).sort();
       for (const display of [{}, { DISPLAY: "", WAYLAND_DISPLAY: "" }]) {
@@ -133,16 +155,12 @@ describe("boards after quitting and starting zobrist", function () {
       expect(readFileSync(`${directory}/boards.json`, "utf8")).toBe(
         '{"boards":[',
       );
+      writeFileSync(session, settled);
       expect(readFileSync(`${directory}/files.json`, "utf8")).toBe("[]");
       expect(readFileSync(`${directory}/app.lock`)).toHaveLength(0);
       await withDesktopApp(`${work}/other`, expectHome);
       await expectMove(app, "e4");
-      const picture = await app.saveScreenshot(
-        `${target}/e2e/one-running-copy.png`,
-      );
-      expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
-        1280, 800,
-      ]);
+      await captureWindow(app, "one-running-copy.png");
     });
     await withDesktopApp(
       work,
@@ -197,17 +215,222 @@ describe("boards after quitting and starting zobrist", function () {
     expect(readFileSync(secondBackup, "utf8")).toBe(mixed);
   });
 
+  it("restores settled games, the selected tab and a closed session after termination", async () => {
+    const session = `${work}/io.github.echo8134.zobrist/boards.json`;
+    const original = readFileSync(fixture);
+    const held = original.subarray(original.lastIndexOf("[Event ")).toString();
+    const boards = [
+      {
+        game: held.replace("Qh4# 0-1", "Qh4# {Final move} 0-1"),
+        place: [0, 0, 0, 0],
+        origin: { path: file, number: 2, held },
+      },
+      { game: "1. d4 d5 (1... Nf6) *\n", place: [0, 1], origin: null },
+    ];
+    await withDesktopApp(
+      work,
+      async (app) => {
+        await openGameTwo(app, file, false);
+        await waitForSession(app, session, {
+          boards: [
+            {
+              game: held,
+              place: [0, 0, 0, 0],
+              origin: { path: file, number: 2, held },
+            },
+          ],
+          selected: 0,
+        });
+        utimesSync(session, 1000, 1000);
+        await comment(app).setValue("Final move");
+        // Leave the field focused through two quiet periods to catch writes from typing.
+        await app.pause(1000);
+        expect(statSync(session).mtimeMs).toBe(1_000_000);
+        await expect(selected(app).$("span:empty")).not.toExist();
+        await app.$("main aside").$("button=Qh4#").click();
+        await expect(selected(app)).toHaveAttribute(
+          "aria-label",
+          "Gamma - Delta, not saved",
+        );
+        await openBoardWithVariation(app);
+        await waitForSession(app, session, { boards, selected: 1 });
+        // A normal quit would apply this draft when the comment field loses focus.
+        await comment(app).setValue("Still typing");
+        await expect(comment(app)).toBeFocused();
+      },
+      {},
+      "terminate process",
+    );
+
+    await withDesktopApp(
+      work,
+      async (app) => {
+        await expect(tabs(app)).toBeElementsArrayOfSize(2);
+        expect(
+          await tabs(app).map((tab) => tab.getAttribute("aria-label")),
+        ).toEqual(["Gamma - Delta, not saved", "New game, not saved"]);
+        await expectSelectedVariation(app);
+        await expect(comment(app)).toHaveValue("");
+        await captureWindow(app, "boards-after-crash.png");
+        await app.$("header").$("button=Gamma - Delta").click();
+        await expectMove(app, "Qh4#");
+        await expect(comment(app)).toHaveValue("Final move");
+        expect(readFileSync(file)).toEqual(original);
+        await waitForSession(app, session, { boards, selected: 0 });
+      },
+      {},
+      "terminate process",
+    );
+
+    await withDesktopApp(
+      work,
+      async (app) => {
+        await expect(selected(app)).toHaveText("Gamma - Delta");
+        const header = app.$("header");
+        for (const name of ["New game", "Gamma - Delta"]) {
+          await header.$(`aria/Close ${name}`).click();
+          await header.$("button=Close").click();
+        }
+        await expectHome(app);
+        await waitForSession(app, session, { boards: [], selected: null });
+      },
+      {},
+      "terminate process",
+    );
+
+    await withDesktopApp(work, expectHome);
+  });
+
+  it("publishes one session for an applied comment and two moves on a controlled clock", async () => {
+    const directory = `${work}/io.github.echo8134.zobrist`;
+    mkdirSync(directory);
+    const path = `${directory}/boards.json`;
+    const held = "1. e4 e5 2. Nf3 *\n";
+    writeFileSync(file, held);
+    const origin = { path: file, number: 1, held };
+    writeFileSync(
+      path,
+      JSON.stringify({
+        boards: [{ game: held, place: [0], origin }],
+        selected: 0,
+      }),
+    );
+    const writes: unknown[] = [];
+    const watcher = watch(directory, (event, name) => {
+      if (event === "rename" && name === "boards.json")
+        writes.push(JSON.parse(readFileSync(path, "utf8")));
+    });
+    try {
+      await withDesktopApp(
+        work,
+        async (app) => {
+          await expectMove(app, "e4");
+          // The embedded driver has no BiDi clock command. Install WebdriverIO's bundled clock in this window.
+          const webdriver = createRequire(
+            import.meta.resolve("@wdio/globals"),
+          ).resolve("webdriverio");
+          const timers = readFileSync(
+            resolve(dirname(webdriver), "../third_party/fake-timers.js"),
+            "utf8",
+          );
+          await app.execute(
+            timers +
+              "\nFakeTimers(); window.boardClock = window.__wdio_sinon.install({ toFake: ['setTimeout', 'clearTimeout'] });",
+          );
+          const advance = (milliseconds: number) =>
+            app
+              .executeAsync(
+                "const done = arguments[1]; window.boardClock.tickAsync(arguments[0]).then(() => done(true), error => done(String(error)));",
+                milliseconds,
+              )
+              .then((result) => expect(result).toBe(true));
+
+          await advance(1000);
+          expect(writes).toEqual([]);
+          await comment(app).setValue("Final move");
+          await advance(1000);
+          expect(writes).toEqual([]);
+
+          await app.execute("document.activeElement.blur()");
+          await expect(selected(app)).toHaveAttribute(
+            "aria-label",
+            "New game, not saved",
+          );
+          for (const move of ["e5", "Nf3"]) {
+            await app.$("main aside ol").$(`button=${move}`).click();
+            await expectMove(app, move);
+          }
+          expect(writes).toEqual([]);
+          await advance(1000);
+          await app.waitUntil(() => writes.length > 0);
+          const saved = {
+            boards: [
+              {
+                game: "1. e4 {Final move} 1... e5 2. Nf3 *\n",
+                place: [0, 0, 0],
+                origin,
+              },
+            ],
+            selected: 0,
+          };
+          expect(writes).toEqual([saved]);
+          await advance(1000);
+          await app.$("main aside ol").$("button=Nf3").click();
+          await advance(1000);
+          expect(writes).toEqual([saved]);
+        },
+        {},
+        "terminate process",
+      );
+    } finally {
+      watcher.close();
+    }
+  });
+
+  it("reopens the recovered board after an immediate termination", async () => {
+    const directory = `${work}/io.github.echo8134.zobrist`;
+    mkdirSync(directory);
+    const original = JSON.stringify({
+      boards: [
+        { game: "1. d4 *\n", place: [0], origin: null },
+        { game: "1. e4 e5 2. e5 *\n", place: [], origin: null },
+      ],
+      selected: 0,
+    });
+    writeFileSync(`${directory}/boards.json`, original);
+    const backup = `${directory}/boards-recovery-1.json`;
+    await withDesktopApp(
+      work,
+      async (app) => {
+        await expectMove(app, "d4");
+        await expect(app.$('[role="alert"]')).toHaveText(
+          `1 board could not be reopened. The original file was kept at ${backup}. Your PGN files are untouched. You can open a board and keep playing.`,
+        );
+        expect(
+          JSON.parse(readFileSync(`${directory}/boards.json`, "utf8")),
+        ).toEqual({
+          boards: [{ game: "1. d4 *\n", place: [0], origin: null }],
+          selected: 0,
+        });
+      },
+      {},
+      "terminate process",
+    );
+
+    await withDesktopApp(work, async (app) => {
+      await expect(tabs(app)).toBeElementsArrayOfSize(1);
+      await expectMove(app, "d4");
+      await expect(app.$('[role="alert"]')).not.toExist();
+    });
+    expect(readFileSync(backup, "utf8")).toBe(original);
+  });
+
   it("restores all three boards, saves game two in place and remembers the last closed tab", async () => {
     await withDesktopApp(work, async (app) => {
       await expectHome(app);
       await openGameTwo(app, file, true);
       await addComment(app);
-      await newBoard(app);
-      await play(app, "d2", "d4", "d4");
-      await play(app, "d7", "d5", "d5");
-      await app.keys("ArrowLeft");
-      await expectMove(app, "d4");
-      await play(app, "g8", "f6", "Nf6");
+      await openBoardWithVariation(app);
     });
 
     const original = readFileSync(fixture);
@@ -221,22 +444,9 @@ describe("boards after quitting and starting zobrist", function () {
       expect(await tabs(app).map((tab) => tab.$$("span:empty").length)).toEqual(
         [0, 1, 1],
       );
-      await expect(selected(app)).toHaveText("New game");
-      await expect(
-        app.$('main aside ol ol button[aria-current="true"]'),
-      ).toHaveText("Nf6");
-      expect(
-        await app
-          .$$("main aside div > ol > li > span > button")
-          .map((button) => button.getText()),
-      ).toEqual(["d4", "d5"]);
+      await expectSelectedVariation(app);
       expect(readFileSync(file)).toEqual(original);
-      const picture = await app.saveScreenshot(
-        `${target}/e2e/restored-boards.png`,
-      );
-      expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
-        1280, 800,
-      ]);
+      await captureWindow(app, "restored-boards.png");
 
       await app.$("header").$("button=Gamma - Delta").click();
       await expectMove(app, "Qh4#");
@@ -279,9 +489,14 @@ describe("boards after quitting and starting zobrist", function () {
   it("keeps the unsaved comment and an outside edit to game two", async () => {
     await withDesktopApp(work, async (app) => {
       await expectHome(app);
-      await openGameTwo(app, file, false);
       const blocked = `${work}/io.github.echo8134.zobrist/boards.json`;
       mkdirSync(blocked);
+      await openGameTwo(app, file, false);
+      await expect(app.$('[role="alert"]')).toHaveText(
+        expect.stringContaining(
+          "Could not save your latest board changes for restart.",
+        ),
+      );
       expect(await app.closeWindow()).toEqual(["main"]);
       await expect(app.$('[role="alert"]')).toHaveText(
         expect.stringContaining("Cannot save your boards before quitting."),

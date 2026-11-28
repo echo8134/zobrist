@@ -2,8 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DesktopRequest as Request } from "./generated/DesktopRequest";
 import type { Response } from "./generated/Response";
 
-// Requests without a game include the ones that open a new board.
-const onTheirWay = new Map<number | undefined, Promise<void>>();
+const onTheirWay = new Map<Promise<void>, number | "boards" | "background">();
 
 export function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -19,39 +18,56 @@ export function ask<Asked extends Request>(
   // A read-only lookup can outlive a save or the board that requested it.
   if (request.type === "LookupTablebase") return answer;
   const game = "game" in request ? request.game : undefined;
-  const handled: Promise<void> = Promise.allSettled([
-    onTheirWay.get(game),
-    answer,
-  ])
+  // A fetched link joins the session when its answer opens the tab.
+  const changesBoards =
+    game === undefined
+      ? request.type === "NewGame" ||
+        request.type === "OpenPgnText" ||
+        request.type === "OpenGame" ||
+        request.type === "OpenDatabaseGame" ||
+        request.type === "DeletePgnGame" ||
+        request.type === "CheckpointBoards"
+      : request.type !== "GamePgn" && request.type !== "Analysis";
+  const handled: Promise<void> = Promise.allSettled([answer])
     // A sender handles its answer in the same turn of the event loop in which it came.
     .then(() => new Promise<void>((nextTurn) => setTimeout(nextTurn)))
     .then(() => {
-      if (onTheirWay.get(game) === handled) {
-        onTheirWay.delete(game);
-      }
+      onTheirWay.delete(handled);
     });
-  onTheirWay.set(game, handled);
+  onTheirWay.set(handled, changesBoards ? (game ?? "boards") : "background");
   return answer;
 }
 
 /**
- * The answers about a game that are still on their way, or nothing when none is. The promise
- * resolves when Rust has answered every request about the game that was sent so far, and the
- * senders have handled those answers.
- *
- * Rust answers each request in a task of its own, so two requests that follow each other
- * closely can reach a game in the other order. A save waits here, or it could write the game
- * without the change that the player made right before it.
+ * A game save waits for edits to that game. A checkpoint waits for all board actions.
+ * A quit also waits for unrelated work such as an import. In each case the senders need
+ * a turn to apply their answers before the view can take its snapshot.
  */
-export function answersOnTheirWay(game: number) {
-  return onTheirWay.get(game);
+export function answersOnTheirWay(
+  scope: number | "boards" | "all",
+): Promise<void> | undefined {
+  const pending = [];
+  for (const [answer, action] of onTheirWay) {
+    if (
+      scope === "all" ||
+      scope === action ||
+      (scope === "boards" && action !== "background")
+    ) {
+      pending.push(answer);
+    }
+  }
+  return pending.length
+    ? Promise.all(pending).then(() => undefined)
+    : undefined;
 }
 
-/** Waits for pending actions, including requests that their answers start. */
-export async function finishBoardActions() {
+/** Include requests that the senders start when they handle their answers. */
+export async function finishRequests(scope: "boards" | "all") {
   // Chessground delivers a completed move in a timer after the mouse event.
   await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  while (onTheirWay.size > 0) {
-    await Promise.all(onTheirWay.values());
+  for (;;) {
+    const pending = answersOnTheirWay(scope);
+    if (!pending) return;
+    await pending;
   }
 }
