@@ -834,7 +834,7 @@ impl PgnExport {
 #[serde(rename_all = "camelCase")]
 pub struct GamePicture {
     revision: usize,
-    piece_count: usize,
+    tablebase_unavailable_reason: Option<String>,
     tags: Vec<Tag>,
     result: GameResult,
     fen: String,
@@ -1060,7 +1060,7 @@ impl GamePicture {
             fen: Fen::from_position(position, EnPassantMode::Legal).to_string(),
             turn: position.turn().into(),
             in_check: position.is_check(),
-            piece_count: position.board().occupied().count(),
+            tablebase_unavailable_reason: tablebase::unavailable_reason(position),
             legal_moves,
             current,
             shapes: BoardShapes::from(&shapes),

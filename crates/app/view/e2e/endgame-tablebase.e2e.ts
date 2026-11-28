@@ -165,6 +165,16 @@ describe("asking the Lichess endgame tablebase", () => {
     expect(await requests()).toHaveLength(2);
   });
 
+  it("lets the player move after a refusal without another lookup", async () => {
+    await openPosition(position);
+    const refuse = await clickAndHold();
+    await refuse(503);
+    await expect(panel()).toHaveText(expect.stringContaining(refusal));
+    await playKingToF8();
+    await expectIdle();
+    expect(await requests()).toHaveLength(1);
+  });
+
   it("ignores a reply after moving away and returning to the same position", async () => {
     await openPosition(position);
     const release = await clickAndHold();

@@ -17,7 +17,6 @@ export function Tablebase({
     TablebaseAnswer | { type: "Idle" | "Pending" }
   >({ type: "Idle" });
   const side = picture.turn === "black" ? "Black" : "White";
-  const tooMany = picture.pieceCount > 7;
 
   async function lookup() {
     setState({ type: "Pending" });
@@ -41,16 +40,18 @@ export function Tablebase({
       <div className={controls}>
         <button
           type="button"
-          disabled={tooMany || state.type === "Pending"}
+          disabled={
+            picture.tablebaseUnavailableReason !== null ||
+            state.type === "Pending"
+          }
           aria-describedby="tablebase-disclosure"
           onClick={lookup}
         >
           Ask Lichess
         </button>
         <span id="tablebase-disclosure">
-          {tooMany
-            ? `This lookup supports at most 7 pieces (${picture.pieceCount} on the board).`
-            : "Sends this position to the Lichess endgame tablebase."}
+          {picture.tablebaseUnavailableReason ??
+            "Sends this position to the Lichess endgame tablebase."}
         </span>
       </div>
       {state.type === "Refused" && (

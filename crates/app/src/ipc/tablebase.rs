@@ -1,8 +1,10 @@
 use serde::Serialize;
-use shakmaty::{EnPassantMode, Position, fen::Fen};
+use shakmaty::{Chess, EnPassantMode, Position, fen::Fen};
 use ts_rs::TS;
 
 use super::{FirstStep, Games, Response};
+
+const MAX_PIECES: usize = 7;
 
 /// The tablebase result for one legal move, from the moving side's perspective.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -29,6 +31,13 @@ pub enum TablebaseAnswer {
     },
 }
 
+pub(super) fn unavailable_reason(position: &Chess) -> Option<String> {
+    let count = position.board().occupied().count();
+    (count > MAX_PIECES).then(|| {
+        format!("This lookup supports at most {MAX_PIECES} pieces ({count} on the board).")
+    })
+}
+
 impl Games {
     pub(super) fn tablebase(&self, game: usize, revision: usize) -> FirstStep {
         let refused = |reason| {
@@ -44,11 +53,8 @@ impl Games {
             return refused("The board position has changed.".to_owned());
         };
         let position = open.editor.position();
-        let count = position.board().occupied().count();
-        if count > 7 {
-            return refused(format!(
-                "This lookup supports at most 7 pieces ({count} on the board)."
-            ));
+        if let Some(reason) = unavailable_reason(position) {
+            return refused(reason);
         }
         let fen = Fen::from_position(position, EnPassantMode::Legal).to_string();
         FirstStep::blocking_work(move || {
