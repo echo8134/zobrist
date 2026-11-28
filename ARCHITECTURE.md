@@ -16,7 +16,7 @@ The chess domain model. Pure. No IO and no framework dependencies.
 
 ### `crates/store` (zobrist-store)
 
-Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. The CLI and the app use the same streaming PGN import to create a new database and report problems in source order. It also reads one game of a PGN file by its number, adds games to a PGN file, and replaces one game of a PGN file. Adding and replacing keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Search over games and positions is planned.
+Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. The CLI and the app use the same streaming PGN import to create a new database and report problems in source order. It also reads one game of a PGN file by its number, adds games to a PGN file, and replaces one game of a PGN file. Adding and replacing keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Native collection queries filter and sort game headers before paging. Each result keeps its original game number. Position search is planned.
 
 ### `crates/engine` (zobrist-engine)
 
@@ -24,7 +24,7 @@ Runs a local UCI program and collects the lines it reports for each search. It u
 
 ### `crates/online` (zobrist-online)
 
-Owns outgoing connections to chess sites. It can open one finished standard game from a Lichess link or download a player's public games for an inclusive range of UTC dates. For a player download, it gives the exported PGNs to `store` and appends them as a batch after the download finishes.
+Owns outgoing connections to chess sites. It can open one finished standard game from a Lichess link or download a player's public games for an inclusive range of UTC dates. For a player download, it gives the exported PGNs to `store` and appends them as a batch after the download finishes. When a player asks from the board, it sends the current FEN to the Lichess endgame tablebase and returns the position and move outcomes from the moving side's perspective.
 
 ### `crates/cli` (zobrist-cli)
 
@@ -32,7 +32,7 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify and count a selected collection.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify, count and browse a selected collection. Opening a native game puts a copy in a board tab with no PGN save target.
 
 Before starting the window toolkit, the shell takes an exclusive OS lock on app.lock in its local data directory. It resolves this folder with `dirs` and the identifier from Tauri's app configuration. It holds the lock until exit so only one process can use the boards and file collection in that directory.
 

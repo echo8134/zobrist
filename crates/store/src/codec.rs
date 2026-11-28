@@ -9,7 +9,7 @@ use shakmaty::{
 };
 use zobrist_core::game::{AnnotationSymbol, Game, GameBuilder, Line, MainLine, Move, Tag};
 
-use crate::read_bytes;
+use crate::{PgnGameRow, read_bytes};
 
 pub(super) const GAME_WIDTH: u64 = 18;
 
@@ -178,11 +178,20 @@ impl<R: BufRead> Decoder<R> {
         })
     }
 
-    pub(super) fn next_game(&mut self) -> io::Result<Option<Game>> {
+    pub(super) fn next_row(&mut self, number: u64) -> io::Result<Option<PgnGameRow>> {
         if self.remaining == 0 {
-            self.check_end()?;
+            if !self.games.fill_buf()?.is_empty() || !self.tags.fill_buf()?.is_empty() {
+                return Err(damaged());
+            }
             return Ok(None);
         }
+        let (_, result, _) = self.header()?;
+        let tags = self.read_tags()?;
+        self.remaining -= 1;
+        Ok(Some(PgnGameRow::from_tags(number, &tags, result)))
+    }
+
+    fn header(&mut self) -> io::Result<(u64, Outcome, u8)> {
         if u64::from_le_bytes(read_bytes(&mut self.games)?) != self.move_index {
             return Err(damaged());
         }
@@ -205,6 +214,26 @@ impl<R: BufRead> Decoder<R> {
         if flags > 3 {
             return Err(damaged());
         }
+        Ok((count, result, flags))
+    }
+
+    fn read_tags(&mut self) -> io::Result<Vec<Tag>> {
+        let mut tags = Vec::new();
+        for _ in 0..u64::from_le_bytes(read_bytes(&mut self.tags)?) {
+            tags.push(Tag {
+                name: read_reference(&mut self.tags, &self.names)?,
+                value: read_reference(&mut self.tags, &self.values)?,
+            });
+        }
+        Ok(tags)
+    }
+
+    pub(super) fn next_game(&mut self) -> io::Result<Option<Game>> {
+        if self.remaining == 0 {
+            self.check_end()?;
+            return Ok(None);
+        }
+        let (count, result, flags) = self.header()?;
         let start = if flags & 1 == 0 {
             Chess::new()
         } else {
@@ -223,13 +252,7 @@ impl<R: BufRead> Decoder<R> {
                 .map_err(|_| damaged())?
         };
 
-        let mut tags = Vec::new();
-        for _ in 0..u64::from_le_bytes(read_bytes(&mut self.tags)?) {
-            tags.push(Tag {
-                name: read_reference(&mut self.tags, &self.names)?,
-                value: read_reference(&mut self.tags, &self.values)?,
-            });
-        }
+        let tags = self.read_tags()?;
         let mut builder = GameBuilder::new(tags, start);
         if flags & 2 == 0 {
             for _ in 0..count {

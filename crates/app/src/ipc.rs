@@ -7,16 +7,20 @@ mod accounts;
 mod analysis;
 mod board_appearance;
 mod database_collection;
+mod database_games;
 mod engines;
 mod file_collection;
 mod game_file;
 mod pgn_file;
 mod session;
+mod tablebase;
 
 pub use accounts::AccountRequest;
 pub use analysis::{AnalysisRequest, AnalysisSnapshot, VariationAnswer};
 pub use board_appearance::{AppearanceRequest, BoardAppearance};
 pub use database_collection::{DatabaseEntry, DatabaseRequest};
+pub use database_games::DatabaseGameQuery;
+use database_games::open_database_game;
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, EarlierState, EntryKind, FileCollection,
@@ -28,6 +32,7 @@ pub use game_file::{
 use game_file::{GameSource, OpenGame, SaveHistory, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
 pub use session::{BoardPicture, SessionRequest};
+pub use tablebase::{TablebaseAnswer, TablebaseMove};
 
 use std::collections::BTreeMap;
 use std::io;
@@ -103,6 +108,21 @@ pub enum Request {
     OpenGameLink {
         /// The link entered by the player.
         link: String,
+    },
+    /// Open a copy of a stored game in a board tab.
+    OpenDatabaseGame {
+        /// The native collection selected on this device.
+        path: std::path::PathBuf,
+        /// The game's original one-based number in the collection.
+        #[ts(type = "number")]
+        number: std::num::NonZeroU64,
+    },
+    /// Look up the board position the player selected.
+    LookupTablebase {
+        /// The open game on the board.
+        game: usize,
+        /// The position revision the board displayed at the click.
+        revision: usize,
     },
     /// Get the current game as PGN text.
     GamePgn {
@@ -558,6 +578,16 @@ pub enum Response {
         /// The outcome of the fetch.
         answer: OpenGameLinkAnswer,
     },
+    /// The new board tab, or the reason the collection game could not open.
+    OpenDatabaseGame {
+        /// Opening a native game never attaches a PGN save target.
+        answer: OpenGameAnswer,
+    },
+    /// The outcomes for the position and its moves, or a refusal.
+    LookupTablebase {
+        /// The answer to this board's lookup.
+        answer: TablebaseAnswer,
+    },
     /// The PGN text or the reason it could not be written.
     GamePgn(PgnExport),
     /// The game after the editor accepts or refuses the tag edit.
@@ -666,6 +696,13 @@ pub enum Response {
     ListDatabases {
         /// Names and locations of the registered collections.
         entries: Vec<DatabaseEntry>,
+    },
+    /// One page of the selected collection's matching games.
+    ListDatabaseGames {
+        /// Rows in the requested order, with their original game numbers.
+        rows: Vec<GameRow>,
+        /// Number of matches across all pages.
+        total: usize,
     },
     /// The updated list and count from the selected database.
     AddDatabase {
@@ -830,8 +867,8 @@ fn pgn_text(game: &Game) -> io::Result<String> {
     String::from_utf8(bytes).map_err(io::Error::other)
 }
 
-impl PgnExport {
-    fn from_board(board: Option<&OpenGame>) -> Self {
+impl From<Option<&OpenGame>> for PgnExport {
+    fn from(board: Option<&OpenGame>) -> Self {
         let Some(board) = board else {
             return Self::Text { text: None };
         };
@@ -849,6 +886,7 @@ impl PgnExport {
 #[serde(rename_all = "camelCase")]
 pub struct GamePicture {
     revision: usize,
+    tablebase_unavailable_reason: Option<String>,
     tags: Vec<Tag>,
     result: GameResult,
     fen: String,
@@ -1074,6 +1112,7 @@ impl GamePicture {
             fen: Fen::from_position(position, EnPassantMode::Legal).to_string(),
             turn: position.turn().into(),
             in_check: position.is_check(),
+            tablebase_unavailable_reason: tablebase::unavailable_reason(position),
             legal_moves,
             current,
             shapes: BoardShapes::from(&shapes),
@@ -1197,9 +1236,9 @@ impl Games {
                 opened: self.open_pgn(&text),
             },
             Request::OpenGameLink { link } => return open_game_link(link),
-            Request::GamePgn { game } => {
-                Response::GamePgn(PgnExport::from_board(self.open_games.get(&game)))
-            }
+            Request::OpenDatabaseGame { path, number } => return open_database_game(path, number),
+            Request::LookupTablebase { game, revision } => return self.tablebase(game, revision),
+            Request::GamePgn { game } => Response::GamePgn(self.open_games.get(&game).into()),
             Request::SetTag { game, tag, text } => Response::SetTag {
                 picture: self.edit(game, |editor| editor.set_tag(tag.into(), &text)),
             },

@@ -16,6 +16,7 @@ import {
 } from "react";
 import { EarlierStates, FileConfirmation } from "./EarlierStates";
 import styles from "./FilesPage.module.css";
+import { GameRows } from "./GameRows";
 import type { ChangedGameFile } from "./generated/ChangedGameFile";
 import type { CollectionEntry } from "./generated/CollectionEntry";
 import type { FileCollection } from "./generated/FileCollection";
@@ -604,52 +605,35 @@ export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
                     <th scope="col">Event</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {file.rows.map((row) => (
-                    <tr
-                      key={row.number}
-                      onClick={() => void open(file.path, row.number)}
-                    >
-                      <td>
+                <GameRows
+                  rows={file.rows}
+                  open={(number) => void open(file.path, number)}
+                  renderEvent={(row) => (
+                    <div className={gameActions}>
+                      <span>{row.event}</span>
+                      {version !== undefined && (
                         <button
                           type="button"
-                          aria-label={`Open game ${row.number}`}
+                          className={deleteGame}
+                          aria-label={`Delete game ${row.number}`}
+                          title={`Delete game ${row.number}`}
+                          disabled={deletion === "pending"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeletion({
+                              path: file.path,
+                              version,
+                              row,
+                              selectionRequest,
+                            });
+                          }}
                         >
-                          {row.number}
+                          <Trash2 aria-hidden="true" />
                         </button>
-                      </td>
-                      <td>{row.white}</td>
-                      <td>{row.black}</td>
-                      <td>{row.result}</td>
-                      <td>{row.date}</td>
-                      <td>
-                        <div className={gameActions}>
-                          <span>{row.event}</span>
-                          {version !== undefined && (
-                            <button
-                              type="button"
-                              className={deleteGame}
-                              aria-label={`Delete game ${row.number}`}
-                              title={`Delete game ${row.number}`}
-                              disabled={deletion === "pending"}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setDeletion({
-                                  path: file.path,
-                                  version,
-                                  row,
-                                  selectionRequest,
-                                });
-                              }}
-                            >
-                              <Trash2 aria-hidden="true" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+                      )}
+                    </div>
+                  )}
+                />
               </table>
               {deletion &&
                 deletion !== "pending" &&
