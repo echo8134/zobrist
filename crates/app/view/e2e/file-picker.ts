@@ -3,12 +3,11 @@ import { browser, expect } from "@wdio/globals";
 type Choice = "File" | "Folder" | "New" | "Engine";
 
 /** WebDriver cannot drive the system dialog. Only its next answer is supplied by the test. */
-export async function pick(
-  choice: Choice,
+export async function answerNextPicker(
+  type: "PickPgnPath" | "PickDatabasePath" | "PickEnginePath",
   path: string | null,
   session: WebdriverIO.Browser = browser,
 ) {
-  const requestType = choice === "Engine" ? "PickEnginePath" : "PickPgnPath";
   await session.execute(
     `
       const [type, path] = arguments;
@@ -29,9 +28,18 @@ export async function pick(
       };
       delete window.pickerRequest;
     `,
-    requestType,
+    type,
     path,
   );
+}
+
+export async function pick(
+  choice: Choice,
+  path: string | null,
+  session: WebdriverIO.Browser = browser,
+) {
+  const requestType = choice === "Engine" ? "PickEnginePath" : "PickPgnPath";
+  await answerNextPicker(requestType, path, session);
   if (choice === "Engine") {
     await session.$("main").$("aria/Add engine…").click();
   } else if (choice === "New") {

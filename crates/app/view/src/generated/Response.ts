@@ -3,6 +3,7 @@ import type { AddedPgnPath } from "./AddedPgnPath";
 import type { AnalysisSnapshot } from "./AnalysisSnapshot";
 import type { BoardAppearance } from "./BoardAppearance";
 import type { CollectionEntry } from "./CollectionEntry";
+import type { DatabaseEntry } from "./DatabaseEntry";
 import type { EngineEntry } from "./EngineEntry";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
@@ -134,7 +135,31 @@ entries: Array<EngineEntry>, } | { "type": "PickPgnPath",
 /**
  * The absolute path returned by the system.
  */
-path: string | null, } | { "type": "GetFileCollection", 
+path: string | null, } | { "type": "PickDatabasePath", 
+/**
+ * The absolute path returned by the system.
+ */
+path: string | null, } | { "type": "ListDatabases", 
+/**
+ * Names and locations of the registered collections.
+ */
+entries: Array<DatabaseEntry>, } | { "type": "AddDatabase", 
+/**
+ * Names and locations after registration.
+ */
+entries: Array<DatabaseEntry>, 
+/**
+ * The verified number of games in the database.
+ */
+games: number, } | { "type": "InspectDatabase", 
+/**
+ * The verified number of games in the database.
+ */
+games: number, } | { "type": "RemoveDatabase", 
+/**
+ * Names and locations after removal.
+ */
+entries: Array<DatabaseEntry>, } | { "type": "GetFileCollection", 
 /**
  * The root entries of the collection.
  */

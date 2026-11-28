@@ -29,6 +29,8 @@ pub enum CollectionRequest {
         /// The selected folder, when choosing a new file.
         folder: Option<PathBuf>,
     },
+    /// Choose a native database to add to the Databases page.
+    PickDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Open or create the chosen item and keep it in the collection.
@@ -146,9 +148,7 @@ impl CollectionRequest {
                         dialog.blocking_save_file()
                     }
                 };
-                let path = selected
-                    .map(|file| file.into_path().map_err(io::Error::other))
-                    .transpose()?;
+                let path = picker_path(selected)?;
                 if matches!(choice, PickerChoice::File)
                     && path.as_deref().is_some_and(|file| !is_pgn(file))
                 {
@@ -158,6 +158,17 @@ impl CollectionRequest {
                     ));
                 }
                 Ok(Response::PickPgnPath { path })
+            }
+            Self::PickDatabasePath => {
+                let selected = window
+                    .dialog()
+                    .file()
+                    .set_parent(window)
+                    .add_filter("zobrist databases", &["zobrist"])
+                    .blocking_pick_file();
+                Ok(Response::PickDatabasePath {
+                    path: picker_path(selected)?,
+                })
             }
             Self::GetFileCollection => {
                 let directory = window
@@ -303,6 +314,12 @@ fn add(
         parent,
         file,
     })
+}
+
+fn picker_path(selected: Option<tauri_plugin_dialog::FilePath>) -> io::Result<Option<PathBuf>> {
+    selected
+        .map(|file| file.into_path().map_err(io::Error::other))
+        .transpose()
 }
 
 fn suggested_folder(documents: Option<&Path>) -> Option<PathBuf> {

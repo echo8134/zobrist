@@ -30,6 +30,7 @@ async fn answer(
                 .map_err(|error| error.to_string());
         }
         DesktopRequest::Collection(request) => spawn_blocking(move || request.answer(&window)),
+        DesktopRequest::Databases(request) => spawn_blocking(move || request.answer(&window)),
         DesktopRequest::Account(request) => {
             spawn_blocking(move || request.answer(&data_directory(&window)?))
         }

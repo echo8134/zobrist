@@ -6,6 +6,7 @@
 mod accounts;
 mod analysis;
 mod board_appearance;
+mod database_collection;
 mod engines;
 mod file_collection;
 mod game_file;
@@ -14,6 +15,7 @@ mod pgn_file;
 pub use accounts::AccountRequest;
 pub use analysis::{AnalysisRequest, AnalysisSnapshot, VariationAnswer};
 pub use board_appearance::{AppearanceRequest, BoardAppearance};
+pub use database_collection::{DatabaseEntry, DatabaseRequest};
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, EntryKind, PickerChoice,
@@ -55,6 +57,8 @@ pub enum DesktopRequest {
     Account(AccountRequest),
     /// Read or save the board preferences for this device.
     Appearance(AppearanceRequest),
+    /// Requests about native databases registered on this device.
+    Databases(DatabaseRequest),
 }
 
 /// What the view can ask for.
@@ -622,6 +626,35 @@ pub enum Response {
     PickPgnPath {
         /// The absolute path returned by the system.
         path: Option<std::path::PathBuf>,
+    },
+    /// The chosen native database, or nothing after cancellation.
+    PickDatabasePath {
+        /// The absolute path returned by the system.
+        path: Option<std::path::PathBuf>,
+    },
+    /// The native databases registered on this device.
+    ListDatabases {
+        /// Names and locations of the registered collections.
+        entries: Vec<DatabaseEntry>,
+    },
+    /// The updated list and count from the selected database.
+    AddDatabase {
+        /// Names and locations after registration.
+        entries: Vec<DatabaseEntry>,
+        /// The verified number of games in the database.
+        #[ts(type = "number")]
+        games: u64,
+    },
+    /// The result of opening the selected native database.
+    InspectDatabase {
+        /// The verified number of games in the database.
+        #[ts(type = "number")]
+        games: u64,
+    },
+    /// The remaining databases after forgetting an entry.
+    RemoveDatabase {
+        /// Names and locations after removal.
+        entries: Vec<DatabaseEntry>,
     },
     /// The saved references.
     GetFileCollection {
