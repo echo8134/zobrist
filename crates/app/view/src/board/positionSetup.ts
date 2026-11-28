@@ -1,7 +1,7 @@
-import type { PositionDraft } from "./generated/PositionDraft";
-import type { PositionFields } from "./generated/PositionFields";
-import type { Side } from "./generated/Side";
-import { ask } from "./ipc";
+import type { PositionDraft } from "../generated/PositionDraft";
+import type { PositionFields } from "../generated/PositionFields";
+import type { Side } from "../generated/Side";
+import { ask } from "../ipc";
 import type { Change, Tab } from "./tabs";
 
 export const roles = [

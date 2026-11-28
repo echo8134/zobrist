@@ -1,6 +1,6 @@
 import { createElement, useEffect } from "react";
-import type { Promotion } from "./generated/Promotion";
-import type { Side } from "./generated/Side";
+import type { Promotion } from "../generated/Promotion";
+import type { Side } from "../generated/Side";
 import styles from "./PromotionChooser.module.css";
 
 const { promotionChooser, fromBottom, choice, choicePiece } = styles;

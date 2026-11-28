@@ -22,7 +22,7 @@
                   "@lichess-org/chessground",
                   "@lichess-org/chessground/**"
                 ],
-                "message": "Draw a board through src/Board.tsx. No other file of the view imports the board component."
+                "message": "Draw a board through src/board/Board.tsx. No other file of the view imports the board component."
               }
             ]
           }
@@ -45,7 +45,7 @@
                       "@lichess-org/chessground",
                       "@lichess-org/chessground/**"
                     ],
-                    "message": "Draw a board through src/Board.tsx. No other file of the view imports the board component."
+                    "message": "Draw a board through src/board/Board.tsx. No other file of the view imports the board component."
                   }
                 ]
               }
@@ -55,7 +55,7 @@
       }
     },
     {
-      "includes": ["src/Board.tsx"],
+      "includes": ["src/board/Board.tsx"],
       "linter": {
         "rules": {
           "style": {

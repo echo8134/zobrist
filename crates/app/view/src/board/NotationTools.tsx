@@ -10,8 +10,8 @@ import {
   Trash2,
   Undo,
 } from "lucide-react";
-import type { GamePicture } from "./generated/GamePicture";
-import { IconButton } from "./IconButton";
+import { IconButton } from "../controls/IconButton";
+import type { GamePicture } from "../generated/GamePicture";
 import styles from "./NotationTools.module.css";
 import type { NotationTool, SaveTool } from "./tabs";
 

@@ -1,10 +1,10 @@
 import { expect, test, vi } from "vitest";
-import type { PositionDraft } from "./generated/PositionDraft";
-import { ask } from "./ipc";
+import type { PositionDraft } from "../generated/PositionDraft";
+import { ask } from "../ipc";
 import { editSetup } from "./positionSetup";
 import type { Change, Tab } from "./tabs";
 
-vi.mock("./ipc", () => ({ ask: vi.fn() }));
+vi.mock("../ipc", () => ({ ask: vi.fn() }));
 
 const position: PositionDraft = {
   fen: "4k3/8/8/8/8/8/8/4K3 w - - 0 1",

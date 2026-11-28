@@ -1,8 +1,8 @@
 import { beforeEach, expect, test, vi } from "vitest";
+import type { GamePicture } from "../generated/GamePicture";
+import type { NotationMove } from "../generated/NotationMove";
+import { answersOnTheirWay, ask, finishRequests, prepareToClose } from "../ipc";
 import { boardSession } from "./boardSession";
-import type { GamePicture } from "./generated/GamePicture";
-import type { NotationMove } from "./generated/NotationMove";
-import { answersOnTheirWay, ask, finishRequests, prepareToClose } from "./ipc";
 import {
   annotate,
   apply,
@@ -26,7 +26,7 @@ import {
   toolForKey,
 } from "./tabs";
 
-vi.mock("./ipc", () => ({
+vi.mock("../ipc", () => ({
   ask: vi.fn(),
   answersOnTheirWay: vi.fn(),
   finishRequests: vi.fn(),

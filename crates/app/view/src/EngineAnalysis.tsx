@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { type BoardPlace, type Change, sameBoardPlace } from "./board/tabs";
 import styles from "./EngineAnalysis.module.css";
 import type { Response } from "./generated/Response";
 import { ask } from "./ipc";
-import { type BoardPlace, type Change, sameBoardPlace } from "./tabs";
 
 type Snapshot = Extract<Response, { type: "Analysis" }>["snapshot"];
 const { panel } = styles;

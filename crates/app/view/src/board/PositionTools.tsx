@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
-import { EngineAnalysis } from "./EngineAnalysis";
-import { answersOnTheirWay, ask } from "./ipc";
+import { EngineAnalysis } from "../EngineAnalysis";
+import { answersOnTheirWay, ask } from "../ipc";
 import { PositionSetupPanel } from "./PositionSetupPanel";
 import styles from "./PositionTools.module.css";
 import type { SetupEdit } from "./positionSetup";
