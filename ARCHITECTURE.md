@@ -120,6 +120,10 @@ The app keeps a verified copy of that list in files.last-good.json. If the live 
 
 When creating a PGN, the native save dialog starts in the selected folder. Without a selected folder, it suggests a folder named `zobrist` inside the personal Documents directory reported by the operating system. When the system has no Documents directory, the player chooses the destination in the dialog. The player can change the suggested location before saving.
 
+Desktop saves keep the 20 most recent pre-change states of each PGN under pgn-history in the app's local data directory. Each resolved absolute PGN path owns its own folder. Moving or removing the PGN leaves its states at the original path. Keeping each state's raw bytes, capture time, size and checksum in a separate file lets a player restore annotated or damaged PGNs exactly and keeps the other states usable if one is damaged.
+
+A board save can succeed when recording history fails and tells the player why. If another change holds the PGN's history lock, saves and restores wait up to five seconds. If the lock is still held, the app refuses the change so the player can retry. Restoring requires a verified state and a durable copy of the current bytes so the player can undo the restore. Both operations publish through the store's staged PGN write. The desktop supplies the history root and the command line currently supplies none. Revisit path ownership if players need history to follow a file to a new location.
+
 A single managed folder would require players to move or copy existing collections. Resolving a new name against the app's launch directory made its location depend on how the player started the app. The desktop shell uses `tauri-plugin-dialog` to offer the system's file, folder and save dialogs. Revisit the storage choice if players need a collection that travels between computers.
 
 ### Releases from release-plz

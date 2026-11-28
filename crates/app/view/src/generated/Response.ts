@@ -5,6 +5,7 @@ import type { BoardAppearance } from "./BoardAppearance";
 import type { BoardPicture } from "./BoardPicture";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
+import type { EarlierState } from "./EarlierState";
 import type { EngineEntry } from "./EngineEntry";
 import type { FileCollection } from "./FileCollection";
 import type { GamePicture } from "./GamePicture";
@@ -181,7 +182,15 @@ collection: FileCollection, } | { "type": "RecoverFileCollection",
 /**
  * The recovered entries or the reason recovery could not complete.
  */
-collection: FileCollection, } | { "type": "AddPgnPath", 
+collection: FileCollection, } | { "type": "ListPgnStates", 
+/**
+ * A damaged state still has its number.
+ */
+states: Array<EarlierState>, } | { "type": "PreparePgnRestore", 
+/**
+ * Identifies the bytes the player is about to replace.
+ */
+stamp: string, } | { "type": "RestorePgnState" } | { "type": "AddPgnPath", 
 /**
  * The new selection or the reason the file operation was refused.
  */

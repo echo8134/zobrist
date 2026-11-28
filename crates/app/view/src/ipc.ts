@@ -5,6 +5,10 @@ import type { Response } from "./generated/Response";
 // Requests without a game include the ones that open a new board.
 const onTheirWay = new Map<number | undefined, Promise<void>>();
 
+export function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Asks Rust. The answer has the type of the response case that is named like the request. */
 export function ask<Asked extends Request>(
   request: Asked,

@@ -371,7 +371,7 @@ fn list_games(path: &Path) -> Result<usize, Failure> {
 fn add_games(target: &Path, source: &Path) -> Result<usize, Failure> {
     let file = File::open(source).map_err(Failure::Read)?;
     let mut problems = 0;
-    let added = add_pgn_games(target, |append| {
+    let (added, _) = add_pgn_games(target, None, |append| {
         problems = for_each_game(file, append)?;
         Ok(())
     })
@@ -405,7 +405,7 @@ fn replace_game(target: &Path, number: NonZeroU64, source: &Path) -> Result<usiz
             )));
         }
     };
-    replace_pgn_game(target, number, &game)
+    replace_pgn_game(target, number, &game, None, None)
         .map_err(|error| Failure::Replace(target.to_owned(), error))?;
     writeln!(io::stdout().lock(), "game replaced: {number}").map_err(Failure::Write)?;
     Ok(0)

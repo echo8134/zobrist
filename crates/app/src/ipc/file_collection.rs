@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager as _, Window};
 use tauri_plugin_dialog::DialogExt as _;
 use ts_rs::TS;
+use zobrist_store::{PgnHistory, pgn_states, prepare_pgn_restore, restore_pgn_state};
 
 use super::{EngineAction, PgnFile, PgnFileAnswer, RefusalReason, Response, pgn_file};
 
@@ -35,6 +36,29 @@ pub enum CollectionRequest {
     GetFileCollection,
     /// Recover the collection after the player chooses its last good copy.
     RecoverFileCollection,
+    /// List the states retained for one PGN.
+    ListPgnStates {
+        /// The selected PGN.
+        path: PathBuf,
+    },
+    /// Verify the chosen state and identify the current bytes for confirmation.
+    PreparePgnRestore {
+        /// The selected PGN.
+        path: PathBuf,
+        /// The stable number of the chosen state.
+        #[ts(type = "number")]
+        number: u64,
+    },
+    /// Restore a state the player confirmed.
+    RestorePgnState {
+        /// The selected PGN.
+        path: PathBuf,
+        /// The stable number of the chosen state.
+        #[ts(type = "number")]
+        number: u64,
+        /// The stamp returned for the confirmation.
+        stamp: String,
+    },
     /// Open or create the chosen item and keep it in the collection.
     AddPgnPath {
         /// Which picker supplied the path.
@@ -49,6 +73,40 @@ pub enum CollectionRequest {
         /// The folder to list.
         path: PathBuf,
     },
+}
+
+/// A durable state of the selected PGN.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+pub struct EarlierState {
+    #[ts(type = "number")]
+    number: u64,
+    details: Option<StateDetails>,
+}
+
+/// Capture time and size from a readable state header.
+#[derive(Debug, PartialEq, Eq, Serialize, TS)]
+struct StateDetails {
+    #[ts(type = "number")]
+    seconds: u64,
+    #[ts(type = "number")]
+    bytes: u64,
+}
+
+pub(super) fn history_at(root: &Path) -> PgnHistory<'_> {
+    #[cfg(feature = "webdriver")]
+    if let Some(captured_at) = std::env::var("ZOBRIST_TEST_HISTORY_TIME")
+        .ok()
+        .and_then(|value| value.parse().ok())
+    {
+        return PgnHistory { root, captured_at };
+    }
+    PgnHistory {
+        root,
+        captured_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    }
 }
 
 /// The kind of system dialog the player asked for.
@@ -129,28 +187,17 @@ impl CollectionEntry {
 impl CollectionRequest {
     /// Answers on a blocking thread. A dialog or a folder read never takes the game lock.
     pub fn answer(self, window: &Window) -> io::Result<Response> {
+        let data_directory = || window.path().app_local_data_dir().map_err(io::Error::other);
+        let file_dialog = || window.dialog().file().set_parent(window);
         match self {
-            Self::PickEnginePath => {
-                let path = window
-                    .dialog()
-                    .file()
-                    .set_parent(window)
-                    .blocking_pick_file()
-                    .map(|file| file.into_path().map_err(io::Error::other))
-                    .transpose()?;
-                Ok(Response::PickEnginePath { path })
-            }
-            Self::EngineInventory { action } => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                Ok(Response::EngineInventory {
-                    entries: action.apply(&directory)?,
-                })
-            }
+            Self::PickEnginePath => Ok(Response::PickEnginePath {
+                path: picker_path(file_dialog().blocking_pick_file())?,
+            }),
+            Self::EngineInventory { action } => Ok(Response::EngineInventory {
+                entries: action.apply(&data_directory()?)?,
+            }),
             Self::PickPgnPath { choice, folder } => {
-                let dialog = window.dialog().file().set_parent(window);
+                let dialog = file_dialog();
                 let selected = match choice {
                     PickerChoice::Folder => dialog.blocking_pick_folder(),
                     PickerChoice::File => dialog
@@ -180,10 +227,7 @@ impl CollectionRequest {
                 Ok(Response::PickPgnPath { path })
             }
             Self::PickDatabasePath => {
-                let selected = window
-                    .dialog()
-                    .file()
-                    .set_parent(window)
+                let selected = file_dialog()
                     .add_filter("zobrist databases", &["zobrist"])
                     .blocking_pick_file();
                 Ok(Response::PickDatabasePath {
@@ -191,10 +235,7 @@ impl CollectionRequest {
                 })
             }
             Self::GetFileCollection | Self::RecoverFileCollection => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
+                let directory = data_directory()?;
                 let recover = matches!(self, Self::RecoverFileCollection);
                 let lock = lock_collection(&directory, "files.lock").ok();
                 let collection = match read_collection(&directory, lock.as_ref(), recover) {
@@ -210,19 +251,37 @@ impl CollectionRequest {
                     Response::GetFileCollection { collection }
                 })
             }
+            Self::ListPgnStates { path } => {
+                let states = pgn_states(&path, &data_directory()?)?
+                    .into_iter()
+                    .map(|state| EarlierState {
+                        number: state.number,
+                        details: state.details.map(|details| StateDetails {
+                            seconds: details.captured_at,
+                            bytes: details.length,
+                        }),
+                    })
+                    .collect();
+                Ok(Response::ListPgnStates { states })
+            }
+            Self::PreparePgnRestore { path, number } => Ok(Response::PreparePgnRestore {
+                stamp: prepare_pgn_restore(&path, &data_directory()?, number)?,
+            }),
+            Self::RestorePgnState {
+                path,
+                number,
+                stamp,
+            } => {
+                restore_pgn_state(&path, history_at(&data_directory()?), number, &stamp)?;
+                Ok(Response::RestorePgnState)
+            }
             Self::AddPgnPath {
                 choice,
                 path,
                 folder,
-            } => {
-                let directory = window
-                    .path()
-                    .app_local_data_dir()
-                    .map_err(io::Error::other)?;
-                Ok(Response::AddPgnPath {
-                    answer: add(&directory, choice, &path, folder.as_deref())?,
-                })
-            }
+            } => Ok(Response::AddPgnPath {
+                answer: add(&data_directory()?, choice, &path, folder.as_deref())?,
+            }),
             Self::ReadPgnFolder { path } => Ok(Response::ReadPgnFolder {
                 entries: children(&path)?,
             }),
