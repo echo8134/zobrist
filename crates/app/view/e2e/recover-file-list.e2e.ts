@@ -128,6 +128,10 @@ describe("recovery of the Files collection", () => {
     writeFileSync(live, original);
     expect(existsSync(backup)).toBe(false);
     await visitPage(work, "Files", checkEntries);
+    expect(JSON.parse(contents(join(data, "boards.json")))).toEqual({
+      boards: [],
+      selected: null,
+    });
     expect(contents(live)).toBe(original);
     expect(contents(backup)).toBe(original);
   });
