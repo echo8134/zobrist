@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use ts_rs::TS;
-use zobrist_core::pgn::{self, Entry};
-use zobrist_store::PgnGameRow;
+use zobrist_store::{PgnGameRow, list_pgn_games};
 
 use super::{FirstStep, Games, Response};
 
@@ -48,6 +47,10 @@ pub struct PgnFile {
     pub(super) path: String,
     rows: Vec<GameRow>,
     problems: usize,
+    /// Binds rows eligible for deletion to the bytes read from their source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    version: Option<String>,
 }
 
 /// Why Rust did not open or create a PGN file.
@@ -60,6 +63,12 @@ pub enum RefusalReason {
     ExistsAlready,
     /// The file cannot be created.
     CannotCreate,
+    /// A drop must contain exactly one file.
+    OneFileAtATime,
+    /// The dropped item is a directory.
+    DroppedFolder,
+    /// The dropped file has a different extension.
+    NotPgn,
 }
 
 /// One game in the list of a file. A missing tag is the text `?`.
@@ -89,10 +98,11 @@ impl From<PgnGameRow> for GameRow {
 }
 
 pub(super) fn opened(path: &Path) -> PgnFileAnswer {
-    match list(path) {
-        Ok((rows, problems)) => PgnFileAnswer::File(PgnFile {
+    match list_pgn_games(path) {
+        Ok((rows, problems, version)) => PgnFileAnswer::File(PgnFile {
             path: path.to_string_lossy().into_owned(),
-            rows,
+            version: (!rows.is_empty()).then_some(version),
+            rows: rows.into_iter().map(GameRow::from).collect(),
             problems,
         }),
         Err(error) => PgnFileAnswer::Refusal {
@@ -107,6 +117,7 @@ pub(super) fn created(path: &Path) -> PgnFileAnswer {
     match File::create_new(path) {
         Ok(_) => PgnFileAnswer::File(PgnFile {
             path: path.to_string_lossy().into_owned(),
+            version: None,
             rows: Vec::new(),
             problems: 0,
         }),
@@ -119,20 +130,6 @@ pub(super) fn created(path: &Path) -> PgnFileAnswer {
             system: Some(error.to_string()),
         },
     }
-}
-
-fn list(path: &Path) -> io::Result<(Vec<GameRow>, usize)> {
-    let mut rows = Vec::new();
-    let mut number = 0;
-    let mut problems = 0;
-    pgn::read_games(File::open(path)?, |entry| {
-        if let Entry::Game { game, problem, .. } = entry {
-            number += 1;
-            rows.push(PgnGameRow::new(number, &game).into());
-            problems += usize::from(problem.is_some());
-        }
-    })?;
-    Ok((rows, problems))
 }
 
 /// The path as the maintainer typed it, without white space at its ends. `~/` at its start is

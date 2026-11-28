@@ -187,6 +187,11 @@
   background: var(--top-bar-background-color);
 }
 
+.gameActions span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .stateRow span + span {
   color: var(--file-line-color);
 }
@@ -211,7 +216,7 @@
   margin-top: var(--list-gap-above);
 }
 
-.button.restore {
+.button.confirmButton {
   background: var(--text-color);
   color: var(--background-color);
 }
@@ -263,4 +268,32 @@
   background: none;
   color: inherit;
   font: inherit;
+}
+
+.gameActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--files-toolbar-gap);
+}
+
+.list .deleteGame {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--close-button-size);
+  height: var(--close-button-size);
+  border-radius: var(--close-button-corner-radius);
+  color: var(--file-line-color);
+}
+
+.deleteGame svg {
+  width: var(--icon-button-icon-size);
+  height: var(--icon-button-icon-size);
+  stroke-width: var(--icon-button-icon-stroke);
+}
+
+.list .deleteGame:hover,
+.list .deleteGame:focus-visible {
+  color: var(--refusal-color);
 }

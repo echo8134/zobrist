@@ -7,7 +7,10 @@ use std::{
     process::ExitCode,
 };
 
-use tauri::{Manager as _, RunEvent, State, Window, WindowEvent, async_runtime::spawn_blocking};
+use tauri::{
+    DragDropEvent, Manager as _, RunEvent, State, Window, WindowEvent,
+    async_runtime::spawn_blocking,
+};
 use tauri_plugin_dialog::DialogExt as _;
 use zobrist_app::ipc::{DesktopRequest, Response, SharedGames};
 
@@ -108,6 +111,15 @@ fn main() -> tauri::Result<ExitCode> {
                         .message(format!("Could not close the boards: {error}"))
                         .show(|_| {});
                 }
+            }
+            if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event
+                && let Some(view) = window.get_webview_window(window.label())
+            {
+                let paths: Vec<_> = paths.iter().map(|path| path.to_str()).collect();
+                let detail = serde_json::json!({ "paths": paths });
+                drop(view.eval(format!(
+                    "window.dispatchEvent(new CustomEvent('zobrist-file-drop', {{detail: {detail}}}));"
+                )));
             }
         })
         .invoke_handler(tauri::generate_handler![answer]);

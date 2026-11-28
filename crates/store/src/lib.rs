@@ -51,16 +51,20 @@ mod codec;
 mod import;
 mod pgn_file;
 mod pgn_history;
+mod query;
 
 pub use import::{ImportError, PgnReport, import_pgn, problem_line, read_pgn_entries};
 pub use pgn_file::{
-    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, read_pgn_game,
-    replace_pgn_game,
+    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, list_pgn_games,
+    read_pgn_game, replace_pgn_game,
 };
 
 pub use pgn_history::{
-    PgnHistory, PgnState, PgnStateDetails, pgn_states, prepare_pgn_restore, restore_pgn_state,
+    PgnHistory, PgnState, PgnStateDetails, delete_pgn_game, pgn_states, prepare_pgn_restore,
+    restore_pgn_state,
 };
+
+pub use query::{GameColumn, GameList, GameQuery};
 
 use std::error::Error;
 use std::fmt;
@@ -218,14 +222,7 @@ impl Database {
     pub fn games(
         &mut self,
     ) -> Result<impl Iterator<Item = Result<Game, OpenError>> + '_, OpenError> {
-        let readers = self.parts.map(|part| {
-            BufReader::new(PartReader {
-                file: &self.file,
-                next: part.offset,
-                end: part.offset + part.length,
-            })
-        });
-        let mut decoder = codec::Decoder::new(readers, self.game_count())?;
+        let mut decoder = self.decoder()?;
         let mut finished = false;
         Ok(iter::from_fn(move || {
             if finished {
@@ -235,6 +232,17 @@ impl Database {
             finished = !matches!(next, Ok(Some(_)));
             next.map_err(OpenError::from).transpose()
         }))
+    }
+
+    fn decoder(&self) -> Result<codec::Decoder<BufReader<PartReader<'_>>>, OpenError> {
+        let readers = self.parts.map(|part| {
+            BufReader::new(PartReader {
+                file: &self.file,
+                next: part.offset,
+                end: part.offset + part.length,
+            })
+        });
+        Ok(codec::Decoder::new(readers, self.game_count())?)
     }
 }
 

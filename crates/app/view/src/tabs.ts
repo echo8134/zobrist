@@ -1,3 +1,4 @@
+import type { ChangedGameFile } from "./generated/ChangedGameFile";
 import type { EditableTag } from "./generated/EditableTag";
 import type { GameFileRefusal } from "./generated/GameFileRefusal";
 import type { GamePicture } from "./generated/GamePicture";
@@ -87,6 +88,7 @@ export type Change =
       from?: BoardPlace;
     }
   | { type: "drawPlace"; game: number; picture: GamePicture }
+  | ({ type: "updateGameFile" } & ChangedGameFile)
   | { type: "refuseSave"; game: number; refusal: SaveRefusal }
   | { type: "askToClose"; game: number }
   | { type: "keepTab" }
@@ -177,6 +179,24 @@ export function apply(shown: Shown, change: Change): Shown {
         ...tab,
         picture: change.picture,
       }));
+    case "updateGameFile":
+      return withChangedTab(shown, change.game, (tab) => {
+        const { file } = tab.picture;
+        if (
+          file?.path !== change.previous.path ||
+          file.number !== change.previous.number
+        )
+          return tab;
+        return {
+          ...tab,
+          picture: {
+            ...tab.picture,
+            file: change.file,
+            unsaved:
+              change.file === null ? change.unsaved : tab.picture.unsaved,
+          },
+        };
+      });
     case "refuseSave":
       return withChangedTab(shown, change.game, (tab) => ({
         ...tab,

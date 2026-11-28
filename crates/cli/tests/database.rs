@@ -238,3 +238,124 @@ fn reads_the_input_once_and_reports_stray_text_in_order() {
     assert_eq!(export(&database).unwrap().stdout, b"1. e4 *\n\n1. d4 *\n");
     assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
 }
+
+#[test]
+fn lists_all_columns_and_filters_across_both_colours() {
+    let directory = Directory::new("browse").unwrap();
+    let database = directory.0.join("Browse.zobrist");
+    assert!(
+        create(Path::new("tests/fixtures/browse.pgn"), &database)
+            .unwrap()
+            .status
+            .success()
+    );
+    let list = |arguments: &[&str]| {
+        let output = command()
+            .args(["database", "list"])
+            .arg(&database)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stderr, b"");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let first = "1\tAda\tBen\t1-0\t2024.03.01\tHarbor Open\n";
+    let second = "2\tCora\tAda\t0-1\t2025.03.02\tHarbor Open\n";
+    let third = "3\tBen\tCora\t1/2-1/2\t2025.04.03\tSpring Cup\n";
+    let fourth = "4\tAda\tDan\t*\t?\tSpring Cup\n";
+    assert_eq!(list(&[]), [first, second, third, fourth].concat());
+    assert_eq!(list(&["--player", "ADa"]), [first, second, fourth].concat());
+    assert_eq!(
+        list(&["--player", "ADa", "--event", "arBOR"]),
+        [first, second].concat()
+    );
+    assert_eq!(
+        list(&[
+            "--player", "ADa", "--event", "arbor", "--year", "2025", "--result", "0-1"
+        ]),
+        second
+    );
+    assert_eq!(
+        list(&[
+            "--player", "ADa", "--event", "arbor", "--year", "2025", "--result", "1-0"
+        ]),
+        ""
+    );
+    assert_eq!(list(&["--result", "*"]), fourth);
+    assert_eq!(list(&["--year", "202"]), "");
+    assert_eq!(list(&["--year", "?"]), "");
+
+    for (column, ascending, descending) in [
+        (
+            "number",
+            [first, second, third, fourth],
+            [fourth, third, second, first],
+        ),
+        (
+            "white",
+            [first, fourth, third, second],
+            [second, third, first, fourth],
+        ),
+        (
+            "black",
+            [second, first, third, fourth],
+            [fourth, third, first, second],
+        ),
+        (
+            "result",
+            [fourth, second, first, third],
+            [third, first, second, fourth],
+        ),
+        (
+            "date",
+            [first, second, third, fourth],
+            [fourth, third, second, first],
+        ),
+        (
+            "event",
+            [first, second, third, fourth],
+            [third, fourth, first, second],
+        ),
+    ] {
+        assert_eq!(list(&["--sort", column]), ascending.concat());
+        assert_eq!(
+            list(&["--sort", column, "--descending"]),
+            descending.concat()
+        );
+    }
+}
+
+#[test]
+fn lists_every_match_by_default_and_accepts_a_one_based_page() {
+    let directory = Directory::new("list-pages").unwrap();
+    let database = directory.0.join("games.zobrist");
+    let source = directory.0.join("games.pgn");
+    fs::write(
+        &source,
+        format!("{}[White \"Vega\"]\n\n1. c4 *\n", "1. e4 *\n\n".repeat(100)),
+    )
+    .unwrap();
+    assert!(create(&source, &database).unwrap().status.success());
+    for (args, count, last) in [
+        (vec![], 101, "101\tVega\t?\t*\t?\t?"),
+        (vec!["--page", "1"], 100, "100\t?\t?\t*\t?\t?"),
+        (vec!["--page", "2"], 1, "101\tVega\t?\t*\t?\t?"),
+        (
+            vec!["--page", "1", "--player", "ega"],
+            1,
+            "101\tVega\t?\t*\t?\t?",
+        ),
+    ] {
+        let output = command()
+            .args(["database", "list"])
+            .arg(&database)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(text.lines().count(), count);
+        assert_eq!(text.lines().last(), Some(last));
+    }
+}

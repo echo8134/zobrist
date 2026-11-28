@@ -64,3 +64,33 @@ export async function pick(
   );
   return session.execute("return window.pickerRequest.folder");
 }
+
+export async function startImport(
+  app: WebdriverIO.Browser,
+  source: string | null,
+  destination: string | null,
+) {
+  // The second dialog opens immediately after the first answer. Arm its reply first.
+  if (source !== null) {
+    await answerNextPicker("PickNewDatabasePath", destination, app);
+  }
+  await answerNextPicker("PickPgnPath", source, app);
+  const button = app.$("button=Import PGN…");
+  await button.click();
+  const lastPicker = source === null ? "PickPgnPath" : "PickNewDatabasePath";
+  await app.waitUntil(() =>
+    app.execute<boolean, [string]>(
+      "return window.pickerRequest?.type === arguments[0]",
+      lastPicker,
+    ),
+  );
+}
+
+export async function importPgn(
+  app: WebdriverIO.Browser,
+  source: string | null,
+  destination: string | null,
+) {
+  await startImport(app, source, destination);
+  await expect(app.$("button=Import PGN…")).toBeEnabled();
+}

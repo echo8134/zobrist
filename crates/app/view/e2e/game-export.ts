@@ -26,9 +26,20 @@ export async function startGameExports() {
   let status = 503;
   let pgn = "";
   let playerReply = "refused";
+  let releaseTablebase: ((status: number) => void) | undefined;
   const requests: string[] = [];
   const server = createServer(async (request, response) => {
     if (request.method === "PUT") {
+      if (request.url === "/release-tablebase") {
+        if (releaseTablebase === undefined) {
+          response.writeHead(409).end();
+          return;
+        }
+        releaseTablebase(Number(await text(request)));
+        releaseTablebase = undefined;
+        response.writeHead(204).end();
+        return;
+      }
       if (request.url === "/reply") {
         status = Number(request.headers["x-export-status"]);
         pgn = await text(request);
@@ -53,7 +64,34 @@ export async function startGameExports() {
     const path = request.url ?? "/";
     const url = new URL(path, "http://127.0.0.1");
     requests.push(path);
-    if (
+    if (url.pathname === "/standard") {
+      const body = text(request);
+      if (
+        request.method !== "GET" ||
+        request.headers.authorization !== undefined ||
+        request.headers.cookie !== undefined ||
+        releaseTablebase !== undefined
+      ) {
+        response.writeHead(400).end();
+        return;
+      }
+      const status = await new Promise<number>((resolve) => {
+        releaseTablebase = resolve;
+      });
+      if ((await body) !== "") {
+        response.writeHead(400).end();
+        return;
+      }
+      response.writeHead(status, { "Content-Type": "application/json" }).end(
+        JSON.stringify({
+          category: "draw",
+          moves: [
+            { uci: "e8d7", san: "Kxd7", category: "draw" },
+            { uci: "e8f8", san: "Kf8", category: "win" },
+          ],
+        }),
+      );
+    } else if (
       request.method === "GET" &&
       request.url === "/game/export/Ab12Cd34" &&
       request.headers.accept === "application/x-chess-pgn"
@@ -123,6 +161,10 @@ export function replyWith(status: number, pgn = "") {
 
 export function replyWithPlayerGames(reply: PlayerReply) {
   return setReply("/player-reply", reply);
+}
+
+export function releaseTablebase(status: 200 | 503) {
+  return setReply("/release-tablebase", String(status));
 }
 
 export async function exportPaths(): Promise<string[]> {
