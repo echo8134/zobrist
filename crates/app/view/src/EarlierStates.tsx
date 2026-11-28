@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import styles from "./FilesPage.module.css";
 import type { EarlierState } from "./generated/EarlierState";
 import { ask, errorText } from "./ipc";
@@ -15,8 +22,56 @@ const {
   pathText,
   confirmationActions,
   button,
-  restore: restoreButton,
+  confirmButton,
 } = styles;
+
+export function FileConfirmation({
+  question,
+  action,
+  children,
+  onCancel,
+  onConfirm,
+}: {
+  question: string;
+  action: "Restore" | "Delete";
+  children?: ReactNode;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const heading = useId();
+  const dialog = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+  return (
+    <dialog
+      className={confirmation}
+      aria-labelledby={heading}
+      ref={dialog}
+      onClose={({ currentTarget }) => {
+        if (currentTarget.returnValue === "confirm") onConfirm();
+        else onCancel();
+      }}
+    >
+      <h2 id={heading} className={title}>
+        {question}
+      </h2>
+      {children}
+      <form method="dialog" className={confirmationActions}>
+        <button type="submit" value="cancel" className={button}>
+          Cancel
+        </button>
+        <button
+          type="submit"
+          value="confirm"
+          className={`${button} ${confirmButton}`}
+        >
+          {action}
+        </button>
+      </form>
+    </dialog>
+  );
+}
 
 type Action =
   | { kind: "Busy" }
@@ -125,36 +180,15 @@ export function EarlierStates({ file, onRestored }: Props) {
         </p>
       )}
       {action?.kind === "Confirm" && (
-        <dialog
-          className={confirmation}
-          aria-labelledby="restore-state-heading"
-          ref={(element) => {
-            if (element && !element.open) element.showModal();
-          }}
+        <FileConfirmation
+          question={`Restore State ${action.number}?`}
+          action="Restore"
           onCancel={() => setAction(null)}
+          onConfirm={() => void restore(action.number, action.stamp)}
         >
-          <h2 id="restore-state-heading" className={title}>
-            Restore State {action.number}?
-          </h2>
           <p className={pathText}>{file.path}</p>
           <p>The current contents will be kept as an earlier state.</p>
-          <div className={confirmationActions}>
-            <button
-              type="button"
-              className={button}
-              onClick={() => setAction(null)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={`${button} ${restoreButton}`}
-              onClick={() => void restore(action.number, action.stamp)}
-            >
-              Restore
-            </button>
-          </div>
-        </dialog>
+        </FileConfirmation>
       )}
     </section>
   );

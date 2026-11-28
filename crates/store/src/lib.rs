@@ -58,12 +58,13 @@ pub use import::{
 };
 pub use pending_write::PendingWrite;
 pub use pgn_file::{
-    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, read_pgn_game,
-    replace_pgn_game,
+    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, list_pgn_games,
+    read_pgn_game, replace_pgn_game,
 };
 
 pub use pgn_history::{
-    PgnHistory, PgnState, PgnStateDetails, pgn_states, prepare_pgn_restore, restore_pgn_state,
+    PgnHistory, PgnState, PgnStateDetails, delete_pgn_game, pgn_states, prepare_pgn_restore,
+    restore_pgn_state,
 };
 
 use std::error::Error;

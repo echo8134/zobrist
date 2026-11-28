@@ -1,4 +1,4 @@
-//! Adding and replacing games through the public PGN file API.
+//! Editing games through the public PGN file API.
 
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -9,8 +9,8 @@ use zobrist_core::game::{Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
 use zobrist_store::{
     PendingWrite, PgnBatch, PgnGameRow, PgnHistory, PgnState, PgnStateDetails, add_pgn_game,
-    add_pgn_games, pgn_states, prepare_pgn_restore, read_pgn_game, replace_pgn_game,
-    restore_pgn_state,
+    add_pgn_games, delete_pgn_game, list_pgn_games, pgn_states, prepare_pgn_restore, read_pgn_game,
+    replace_pgn_game, restore_pgn_state,
 };
 
 const OLD_GAME: &[u8] = b"[White \"Old\"]\n\n1. e4 e5 1-0";
@@ -438,6 +438,297 @@ fn history(root: &Path) -> PgnHistory<'_> {
     }
 }
 
+const ADA: &[u8] = b"[White \"Ada\"]\r\n\r\n1. e4 {keep  this} *\r\n";
+const BEA: &[u8] = b"[White \"Bea\"]\n[Black \"Bo\"]\n\n1. d4 *\n";
+const CY: &[u8] = b"[White \"Cy\"]\n\n1. c4 *";
+const BOM: &[u8] = b"\xef\xbb\xbf";
+
+#[test]
+fn deletes_one_listed_game_and_restores_every_original_byte() -> io::Result<()> {
+    let root = target("delete-positions");
+    fs::create_dir(&root)?;
+    let three = [ADA, b"\r\n", BEA, b"\n", CY].concat();
+    let cases = [
+        (three.clone(), 1, [BEA, b"\n", CY].concat()),
+        (three.clone(), 2, [ADA, b"\r\n", CY].concat()),
+        (three, 3, [ADA, b"\r\n", BEA].concat()),
+        (BEA.to_vec(), 1, Vec::new()),
+        ([BEA, b"\n", BEA].concat(), 1, BEA.to_vec()),
+        ([BOM, BEA].concat(), 1, BOM.to_vec()),
+        (
+            [BOM, ADA, b"\r\n", BEA, b"\n", BOM, CY].concat(),
+            2,
+            [BOM, ADA, b"\r\n", BOM, CY].concat(),
+        ),
+        ([ADA, b"\r\n", BOM, CY].concat(), 2, [ADA, BOM].concat()),
+        (
+            [ADA, b"\r\nnot a game\n\n", BEA, b"\n", CY].concat(),
+            2,
+            [ADA, b"\r\nnot a game\n\n", CY].concat(),
+        ),
+    ];
+    for (case, (original, row, remaining)) in cases.into_iter().enumerate() {
+        let file = root.join(format!("Club-{case}.pgn"));
+        fs::write(&file, &original)?;
+        let (_, _, version) = list_pgn_games(&file)?;
+        assert_eq!(pgn_states(&file, &root)?, []);
+        assert_eq!(
+            delete_pgn_game(&file, number(row)?, &version, history(&root))?,
+            file.canonicalize()?
+        );
+        assert_eq!(fs::read(&file)?, remaining, "case {case}");
+        let stamp = prepare_pgn_restore(&file, &root, 1)?;
+        restore_pgn_state(&file, history(&root), 1, &stamp)?;
+        assert_eq!(fs::read(&file)?, original);
+        let stamp = prepare_pgn_restore(&file, &root, 2)?;
+        restore_pgn_state(&file, history(&root), 2, &stamp)?;
+        assert_eq!(fs::read(&file)?, remaining);
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn deleting_a_game_preserves_unowned_escape_lines() -> io::Result<()> {
+    let root = target("delete-escape-lines");
+    fs::create_dir(&root)?;
+    let cases = [
+        (
+            2,
+            "[White \"A\"]\n\n1. e4 *\n\n[White \"B\"]\n\n1. d4 *\n\n% note for the next game\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+            "[White \"A\"]\n\n1. e4 *\n\n% note for the next game\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+        ),
+        (
+            1,
+            "[White \"A\"]\n\n1. e4 *\n\n% note for the next game\n[White \"B\"]\n\n1. d4 *\n",
+            "% note for the next game\n[White \"B\"]\n\n1. d4 *\n",
+        ),
+        (
+            2,
+            "[White \"A\"]\n\n1. e4 *\n\n% note before the last game\n[White \"B\"]\n\n1. d4 *\n",
+            "[White \"A\"]\n\n1. e4 *\n\n% note before the last game\n",
+        ),
+        (
+            2,
+            "[White \"A\"]\n\n1. e4 *\n\n[White \"B\"]\n\n1. d4 *\n\n% end of the file \t\n",
+            "[White \"A\"]\n\n1. e4 *\n% end of the file \t\n",
+        ),
+    ];
+    for (index, (row, original, remaining)) in cases.into_iter().enumerate() {
+        for (name, ending) in [("LF", "\n"), ("CRLF", "\r\n")] {
+            let file = root.join(format!("{index}-{name}.pgn"));
+            fs::write(&file, original.replace('\n', ending))?;
+            let (_, _, version) = list_pgn_games(&file)?;
+            delete_pgn_game(&file, number(row)?, &version, history(&root))?;
+            assert_eq!(
+                fs::read_to_string(&file)?,
+                remaining.replace('\n', ending),
+                "case {index}, {name}"
+            );
+        }
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn refuses_deletion_that_would_join_an_escape_line_to_a_surviving_game() -> io::Result<()> {
+    let root = target("delete-escape-after-byte-order-mark");
+    fs::create_dir(&root)?;
+    let file = root.join("Club.pgn");
+    let originals: &[&[u8]] = &[
+        b"1. e4 *\xef\xbb\xbf[White \"B\"]\n\n1. d4 *\n\n% {comment}\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+        b"1. e4 *\xef\xbb\xbf[White \"B\"]\n\n1. d4 *\n\n% note for the next game\n[White \"C\"]\n[Black \"D\"]\n\n1. c4 *\n",
+    ];
+    for &original in originals {
+        fs::write(&file, original)?;
+        let (_, _, version) = list_pgn_games(&file)?;
+        let error = delete_pgn_game(&file, number(2)?, &version, history(&root)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Could not locate game 2 safely in {}. Your PGN file is untouched.",
+                file.display()
+            )
+        );
+        assert_eq!(fs::read(&file)?, original);
+        assert_eq!(pgn_states(&file, &root)?, []);
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn refuses_to_guess_an_unknown_game_boundary_and_discards_the_capture() -> io::Result<()> {
+    let root = target("delete-unknown");
+    fs::create_dir(&root)?;
+    let file = root.join("Club.pgn");
+    let original = b"[White \"A\"]\n\n[White \"B\"]\n\n1. e4 *\n";
+    fs::write(&file, original)?;
+    let (rows, _, version) = list_pgn_games(&file)?;
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.white.as_str())
+            .collect::<Vec<_>>(),
+        ["A", "B"]
+    );
+    for row in [1, 2] {
+        let error = delete_pgn_game(&file, number(row)?, &version, history(&root)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "Could not locate game {row} safely in {}. Your PGN file is untouched.",
+                file.display()
+            )
+        );
+        assert_eq!(fs::read(&file)?, original);
+        assert_eq!(pgn_states(&file, &root)?, []);
+    }
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn refuses_deletion_that_would_merge_the_two_surviving_games() -> io::Result<()> {
+    let root = target("delete-between-tagless-games");
+    fs::create_dir(&root)?;
+    let file = root.join("Club.pgn");
+    let original = b"1. a3 *\n[White \"B\"]\n\n1. d4 *\n\n1. c4 *";
+    fs::write(&file, original)?;
+    let (rows, _, version) = list_pgn_games(&file)?;
+    assert_eq!(rows.len(), 3);
+    let error = delete_pgn_game(&file, number(2)?, &version, history(&root)).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Could not locate game 2 safely in {}. Your PGN file is untouched.",
+            file.display()
+        )
+    );
+    assert_eq!(fs::read(&file)?, original);
+    assert_eq!(pgn_states(&file, &root)?, []);
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn a_delete_belongs_to_the_path_and_all_bytes_of_the_listed_version() -> io::Result<()> {
+    let root = target("delete-version");
+    fs::create_dir(&root)?;
+    let file = root.join("587fd3befe5c6ffa.pgn");
+    let other = root.join("e2f3679cc5968d27.pgn");
+    let original = [ADA, b"\r\n", BEA, b"\n", CY].concat();
+    let changed = [
+        b"[White \"Ada\"]\r\n\r\n1. e3 {keep  this} *\r\n",
+        b"\r\n".as_slice(),
+        BEA,
+        b"\n",
+        CY,
+    ]
+    .concat();
+    fs::write(&file, &original)?;
+    fs::write(&other, &original)?;
+    let (rows, problems, version) = list_pgn_games(&file)?;
+    assert_eq!(problems, 0);
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.number, row.white.as_str()))
+            .collect::<Vec<_>>(),
+        [(1, "Ada"), (2, "Bea"), (3, "Cy")]
+    );
+    let modified = fs::metadata(&file)?.modified()?;
+    fs::write(&file, &changed)?;
+    fs::File::options()
+        .write(true)
+        .open(&file)?
+        .set_modified(modified)?;
+    let stale =
+        "This file changed since the list was read. Reopen the file and choose the game again.";
+    for destination in [&file, &other] {
+        let error = delete_pgn_game(destination, number(2)?, &version, history(&root)).unwrap_err();
+        assert_eq!(error.to_string(), stale);
+        assert_eq!(pgn_states(destination, &root)?, []);
+    }
+    assert_eq!(fs::read(&file)?, changed);
+    assert_eq!(fs::read(&other)?, original);
+    fs::remove_file(&file)?;
+    let error = delete_pgn_game(&file, number(2)?, &version, history(&root)).unwrap_err();
+    assert_eq!(error.to_string(), stale);
+    assert!(!file.try_exists()?);
+    fs::remove_dir_all(root)
+}
+
+#[cfg(unix)]
+#[test]
+fn listing_a_pipe_and_its_regular_file_copy_gives_the_same_rows_and_version() -> io::Result<()> {
+    use std::io::Write as _;
+
+    let root = target("delete-pipe");
+    fs::create_dir(&root)?;
+    let file = root.join("Club.pgn");
+    assert!(
+        process::Command::new("mkfifo")
+            .arg(&file)
+            .status()?
+            .success()
+    );
+    let original = [ADA, b"\n", BEA, b"\n", CY, b" {", &vec![b'x'; 8193], b"}"].concat();
+    let from_pipe = std::thread::scope(|scope| -> io::Result<_> {
+        let writer = scope.spawn(|| -> io::Result<()> {
+            let mut pipe = fs::File::options().write(true).open(&file)?;
+            for chunk in original.chunks(83) {
+                pipe.write_all(chunk)?;
+            }
+            Ok(())
+        });
+        let listed = list_pgn_games(&file)?;
+        writer.join().unwrap()?;
+        Ok(listed)
+    })?;
+    fs::remove_file(&file)?;
+    fs::write(&file, original)?;
+    let (rows, problems, version) = list_pgn_games(&file)?;
+    assert_eq!(rows.len(), 3);
+    assert_eq!(problems, 0);
+    assert_eq!(from_pipe, (rows, 0, version));
+    fs::remove_dir_all(root)
+}
+
+#[test]
+fn refuses_deletion_with_read_only_history_then_retries_without_a_gap() -> io::Result<()> {
+    let root = target("delete-readonly");
+    fs::create_dir(&root)?;
+    let file = root.join("Club.pgn");
+    let original = [ADA, b"\r\n", BEA, b"\n", CY].concat();
+    fs::write(&file, &original)?;
+    let (_, _, version) = list_pgn_games(&file)?;
+    delete_pgn_game(&file, number(2)?, &version, history(&root))?;
+    let stamp = prepare_pgn_restore(&file, &root, 1)?;
+    restore_pgn_state(&file, history(&root), 1, &stamp)?;
+    let folder = fs::read_dir(root.join("pgn-history"))?
+        .next()
+        .unwrap()?
+        .path();
+    let first = fs::read(folder.join("1.state"))?;
+    let second = fs::read(folder.join("2.state"))?;
+    let permissions = folder.metadata()?.permissions();
+    let mut read_only = permissions.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(&folder, read_only)?;
+    let error = delete_pgn_game(&file, number(2)?, &version, history(&root)).unwrap_err();
+    fs::set_permissions(&folder, permissions)?;
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Could not delete game 2. The current bytes could not be kept in {}. The history folder is read-only. Allow writing to this folder and try again.",
+            folder.display()
+        )
+    );
+    assert_eq!(fs::read(&file)?, original);
+    assert_eq!(fs::read(folder.join("1.state"))?, first);
+    assert_eq!(fs::read(folder.join("2.state"))?, second);
+    assert!(!folder.join("3.state").try_exists()?);
+    delete_pgn_game(&file, number(2)?, &version, history(&root))?;
+    assert_eq!(fs::read(&file)?, [ADA, b"\r\n", CY].concat());
+    assert_eq!(fs::read(folder.join("3.state"))?, first);
+    fs::remove_dir_all(root)
+}
+
 #[test]
 fn refuses_a_stale_restore_without_creating_a_state() -> io::Result<()> {
     let root = target("restore-conflict");
@@ -585,6 +876,7 @@ fn refuses_a_save_and_restore_while_another_handle_holds_the_history_lock() -> i
     let old = game(OLD_GAME)?;
     replace_pgn_game(&file, number(1)?, &new, Some(&old), Some(history(&root)))?;
     let stamp = prepare_pgn_restore(&file, &root, 1)?;
+    let (_, _, version) = list_pgn_games(&file)?;
     let folder = fs::read_dir(root.join("pgn-history"))?
         .next()
         .unwrap()?
@@ -613,6 +905,12 @@ fn refuses_a_save_and_restore_while_another_handle_holds_the_history_lock() -> i
             send.send(refuse(restore_pgn_state(&file, history(&root), 1, &stamp)))
                 .ok();
         });
+        scope.spawn(|| {
+            send.send(refuse(
+                delete_pgn_game(&file, NonZeroU64::MIN, &version, history(&root)).map(drop),
+            ))
+            .ok();
+        });
         let mut batch = PgnBatch::new()?;
         batch.push("1. e4 1-0")?;
         scope.spawn(|| {
@@ -623,7 +921,7 @@ fn refuses_a_save_and_restore_while_another_handle_holds_the_history_lock() -> i
         });
         // Leave room for worker scheduling around the five-second lock deadline.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
-        for _ in 0..3 {
+        for _ in 0..4 {
             let answer =
                 receive.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
             assert_eq!(

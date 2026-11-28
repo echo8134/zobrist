@@ -1,11 +1,12 @@
 //! The requests of the page Files and their complete answers, as the view sends and receives them.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{env, fs, io, process};
 
 use serde_json::{Value, json};
 use tauri::async_runtime::block_on;
 use zobrist_app::ipc::{Request, SharedGames};
+use zobrist_store::list_pgn_games;
 
 fn ask(request: Value) -> serde_json::Result<Value> {
     ask_games(&SharedGames::default(), request)
@@ -31,11 +32,13 @@ fn temporary_path(name: &str) -> PathBuf {
 #[test]
 fn opens_the_clean_file_and_lists_its_two_games() -> serde_json::Result<()> {
     let path = fixture("clean.pgn");
+    let (_, _, version) = list_pgn_games(Path::new(&path)).map_err(serde::ser::Error::custom)?;
     assert_eq!(
         ask(json!({"type": "OpenPgnFile", "path": path}))?,
         json!({"type": "OpenPgnFile", "answer": {
             "type": "File",
             "path": path,
+            "version": version,
             "rows": [
                 {"number": 1, "white": "Alpha", "black": "Beta", "result": "1-0",
                  "date": "2024.01.01", "event": "Example"},
@@ -51,11 +54,13 @@ fn opens_the_clean_file_and_lists_its_two_games() -> serde_json::Result<()> {
 #[test]
 fn opens_the_damaged_file_and_counts_its_game_with_a_problem() -> serde_json::Result<()> {
     let path = fixture("damaged.pgn");
+    let (_, _, version) = list_pgn_games(Path::new(&path)).map_err(serde::ser::Error::custom)?;
     assert_eq!(
         ask(json!({"type": "OpenPgnFile", "path": path}))?,
         json!({"type": "OpenPgnFile", "answer": {
             "type": "File",
             "path": path,
+            "version": version,
             "rows": [
                 {"number": 1, "white": "Alpha", "black": "Beta", "result": "1-0",
                  "date": "?", "event": "Example"},
