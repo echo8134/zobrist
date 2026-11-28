@@ -29,6 +29,7 @@ pub use session::{BoardPicture, SessionRequest};
 
 use std::collections::BTreeMap;
 use std::io;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
