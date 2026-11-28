@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -13,9 +12,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
 import { expect } from "@wdio/globals";
-import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
+import { drawnBoard, play, startPositionWithWhiteAtBottom, waitForSession } from "./board";
 import { freePort, withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
 
@@ -69,23 +67,6 @@ async function addComment(app: WebdriverIO.Browser) {
   );
 }
 
-async function play(
-  app: WebdriverIO.Browser,
-  from: string,
-  to: string,
-  move: string,
-) {
-  const board = app.$("main cg-board");
-  const side = (await board.getSize("width")) / 8;
-  for (const square of [from, to]) {
-    await board.click({
-      x: ("abcdefgh".indexOf(square.charAt(0)) - 3.5) * side,
-      y: (4.5 - Number(square.charAt(1))) * side,
-    });
-  }
-  await expectMove(app, move);
-}
-
 async function openBoardWithVariation(app: WebdriverIO.Browser) {
   await newBoard(app);
   await play(app, "d2", "d4", "d4");
@@ -112,21 +93,6 @@ async function captureWindow(app: WebdriverIO.Browser, filename: string) {
   expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
     1280, 800,
   ]);
-}
-
-async function waitForSession(
-  app: WebdriverIO.Browser,
-  path: string,
-  expected: { boards: unknown[]; selected: number | null },
-) {
-  await app.waitUntil(
-    () =>
-      existsSync(path) &&
-      isDeepStrictEqual(JSON.parse(readFileSync(path, "utf8")), expected),
-    {
-      timeoutMsg: `The board session did not reach ${JSON.stringify(expected)}`,
-    },
-  );
 }
 
 describe("boards after quitting and starting zobrist", function () {
