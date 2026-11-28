@@ -2,7 +2,10 @@
 
 mod player;
 
-pub use player::{PlayerExportError, download_player_games, download_player_games_with_history};
+pub use player::{
+    PlayerExportError, download_player_games, download_player_games_for_task,
+    download_player_games_with_history,
+};
 
 use std::fmt;
 use std::io::Read as _;

@@ -10,7 +10,7 @@ enum Phase {
     Preparing(Vec<Weak<StagingDirectory>>),
     Publishing,
     Finished,
-    Abandoned,
+    Abandoned(Vec<Weak<StagingDirectory>>),
 }
 
 /// The right to publish a staged write. Its owner can abandon the work before publication.
@@ -34,37 +34,57 @@ impl PendingWrite {
         target: &Path,
         create: impl FnOnce(Arc<StagingDirectory>) -> io::Result<T>,
     ) -> io::Result<T> {
+        self.prepare(|directories| {
+            let directory = Arc::new(StagingDirectory::beside(target)?);
+            directories.push(Arc::downgrade(&directory));
+            create(directory)
+        })
+    }
+
+    pub(super) fn prepare<T>(
+        &self,
+        work: impl FnOnce(&mut Vec<Weak<StagingDirectory>>) -> io::Result<T>,
+    ) -> io::Result<T> {
         let mut phase = self.phase.lock().unwrap_or_else(PoisonError::into_inner);
         let Phase::Preparing(directories) = &mut *phase else {
             return Err(io::ErrorKind::Interrupted.into());
         };
-        let directory = Arc::new(StagingDirectory::beside(target)?);
-        directories.push(Arc::downgrade(&directory));
-        create(directory)
+        work(directories)
+    }
+
+    pub(super) fn check(&self) -> io::Result<()> {
+        self.prepare(|_| Ok(()))
     }
 
     pub(super) fn begin_publication(&self) -> io::Result<()> {
         let mut phase = self.phase.lock().unwrap_or_else(PoisonError::into_inner);
-        if !matches!(*phase, Phase::Preparing(_)) {
+        if matches!(*phase, Phase::Abandoned(_) | Phase::Finished) {
             return Err(io::ErrorKind::Interrupted.into());
         }
         *phase = Phase::Publishing;
         Ok(())
     }
 
-    /// Discards staged files, even if the worker is blocked on input. If publication has
-    /// already begun, waits until the owner has completed all parts of the transaction.
+    /// Prevents the operation from publishing if it is still staging.
     pub fn abandon(&self) {
+        let mut phase = self.phase.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Phase::Preparing(directories) = &mut *phase {
+            *phase = Phase::Abandoned(std::mem::take(directories));
+        }
+    }
+
+    /// Removes abandoned stages even if input is blocked. Waits for the owner when
+    /// publication had already started, including updates to the database catalog.
+    pub fn finish_abandoning(&self) {
         let phase = self.phase.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut phase = self
+        let phase = self
             .finished
             .wait_while(phase, |phase| matches!(phase, Phase::Publishing))
             .unwrap_or_else(PoisonError::into_inner);
-        if let Phase::Preparing(directories) = &*phase {
+        if let Phase::Abandoned(directories) = &*phase {
             for directory in directories.iter().filter_map(Weak::upgrade) {
                 directory.remove();
             }
-            *phase = Phase::Abandoned;
         }
     }
 

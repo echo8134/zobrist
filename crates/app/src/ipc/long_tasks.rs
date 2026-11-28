@@ -77,10 +77,17 @@ impl SharedGames {
         tasks.running.retain(|(_, write)| write.strong_count() > 0);
         let message = if abandon {
             tasks.abandoning = true;
-            for (_, write) in tasks.running.drain(..) {
-                if let Some(write) = write.upgrade() {
-                    write.abandon();
-                }
+            let writes: Vec<_> = tasks
+                .running
+                .drain(..)
+                .filter_map(|(_, write)| write.upgrade())
+                .collect();
+            // Stop every unpublished task before waiting for any task already committing.
+            for write in &writes {
+                write.abandon();
+            }
+            for write in writes {
+                write.finish_abandoning();
             }
             None
         } else {

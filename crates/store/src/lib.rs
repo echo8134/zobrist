@@ -316,9 +316,7 @@ impl StagingDirectory {
             }
         }
     }
-}
 
-impl StagingDirectory {
     fn remove(&self) {
         self.1.call_once(|| {
             fs::remove_dir_all(&self.0).ok();
@@ -391,7 +389,7 @@ impl DatabaseWriter {
     fn finish_for_task(mut self, task: &PendingWrite) -> io::Result<()> {
         self.encoder.take().ok_or_else(failed_push)?;
         let path = self.staging.0.join("database");
-        let mut file = BufWriter::new(File::create_new(&path)?);
+        let mut file = BufWriter::new(task.prepare(|_| File::create_new(&path))?);
         file.write_all(MAGIC)?;
         file.write_all(&VERSION.to_le_bytes())?;
         file.write_all(&0_u64.to_le_bytes())?;

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::pgn_file::{Staged, open};
-use crate::{PgnWriteConflict, StagingDirectory, copy_with_checksum, read_bytes};
+use crate::{PendingWrite, PgnWriteConflict, StagingDirectory, copy_with_checksum, read_bytes};
 
 const MAGIC: &[u8; 8] = b"ZPGNHST\x01";
 const HEADER_BYTES: u64 = 28;
@@ -218,7 +218,12 @@ impl StateFolder {
         self.path.join(format!("{number}.state"))
     }
 
-    fn capture(&self, old: &mut File, captured_at: u64) -> io::Result<Capture> {
+    fn capture(
+        &self,
+        old: &mut File,
+        captured_at: u64,
+        write: &PendingWrite,
+    ) -> io::Result<Capture> {
         if self.path.metadata()?.permissions().readonly() {
             return Err(ErrorKind::PermissionDenied.into());
         }
@@ -230,9 +235,11 @@ impl StateFolder {
             .checked_add(1)
             .ok_or_else(|| io::Error::other("No state number is available."))?;
         let path = self.state(number);
-        let staging = StagingDirectory::beside(&path)?;
-        let temporary = staging.0.join("state");
-        let mut state = File::create_new(&temporary)?;
+        let (_staging, temporary, mut state) = write.stage(&path, |staging| {
+            let temporary = staging.0.join("state");
+            let state = File::create_new(&temporary)?;
+            Ok((staging, temporary, state))
+        })?;
         state.write_all(MAGIC)?;
         state.write_all(&captured_at.to_le_bytes())?;
         state.write_all(&[0; 12])?;
@@ -243,6 +250,7 @@ impl StateFolder {
         state.write_all(&checksum.to_le_bytes())?;
         state.sync_all()?;
         drop(state);
+        write.begin_publication()?;
         fs::rename(temporary, &path)?;
         let capture = Capture {
             path,
@@ -358,6 +366,7 @@ impl SaveTarget {
     }
 
     pub(super) fn publish(self, staged: Staged) -> io::Result<Option<String>> {
+        staged.file.sync_all()?;
         let Some((time, folder)) = self.history else {
             staged.publish()?;
             return Ok(None);
@@ -377,7 +386,7 @@ impl SaveTarget {
         }
         let captured = match &folder {
             Ok(folder) => old
-                .and_then(|mut file| folder.capture(&mut file, time))
+                .and_then(|mut file| folder.capture(&mut file, time, &staged.write))
                 .map_err(|reason| {
                     HistoryFailure {
                         path: folder.path.clone(),
@@ -482,13 +491,14 @@ pub fn restore_pgn_state(
     if stamp(&target, &mut current)? != expected {
         return Err(changed());
     }
-    let staged = Staged::beside(target.clone(), Some(&current))?;
+    let staged = Staged::beside(&target, Some(&current))?;
     read_state(&folder.state(number), &staged.file)?;
     if equal_bytes(&current, &staged.file)? {
         return Ok(());
     }
+    staged.file.sync_all()?;
     let capture = folder
-        .capture(&mut current, history.captured_at)
+        .capture(&mut current, history.captured_at, &staged.write)
         .map_err(|reason| {
             HistoryFailure {
                 path: folder.path.clone(),

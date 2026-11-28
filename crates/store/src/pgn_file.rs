@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
 
-use crate::StagingDirectory;
+use std::sync::Arc;
+
 use crate::pgn_history::{PgnHistory, SaveTarget};
+use crate::{PendingWrite, StagingDirectory};
 
 /// A PGN change refused before publication.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,7 +50,8 @@ impl From<PgnWriteConflict> for io::Error {
 /// Complete raw PGN games staged on disk until their destination can be published.
 pub struct PgnBatch {
     file: File,
-    _directory: StagingDirectory,
+    _directory: Arc<StagingDirectory>,
+    write: Arc<PendingWrite>,
     games: Option<u64>,
     first_start: u64,
 }
@@ -56,18 +59,26 @@ pub struct PgnBatch {
 impl PgnBatch {
     /// Starts a batch without opening its eventual destination.
     pub fn new() -> io::Result<Self> {
-        let directory = StagingDirectory::beside(&std::env::temp_dir().join("games.pgn"))?;
-        Ok(Self {
-            file: File::create_new(directory.0.join("games.pgn"))?,
-            _directory: directory,
-            games: Some(0),
-            first_start: 0,
+        Self::for_task(&Arc::default())
+    }
+
+    /// Starts a batch whose unpublished files can be discarded by its owner.
+    pub fn for_task(write: &Arc<PendingWrite>) -> io::Result<Self> {
+        write.stage(&std::env::temp_dir().join("games.pgn"), |directory| {
+            Ok(Self {
+                file: File::create_new(directory.0.join("games.pgn"))?,
+                _directory: directory,
+                write: Arc::clone(write),
+                games: Some(0),
+                first_start: 0,
+            })
         })
     }
 
     /// Stages one finished PGN, retaining its tags, annotations and variant moves verbatim.
     /// After a failed push the batch cannot be published.
     pub fn push(&mut self, pgn: &str) -> io::Result<()> {
+        self.write.check()?;
         let games = self.games.take().ok_or_else(failed_write)?;
         let mut entries = 0;
         let mut start = None;
@@ -132,8 +143,9 @@ impl PgnBatch {
         if games == 0 {
             return Ok((0, None));
         }
+        self.write.check()?;
         let target = SaveTarget::new(destination(target)?, history)?;
-        let (mut staged, separator) = Staged::for_append(&target.path)?;
+        let (mut staged, separator) = Staged::for_append(&target.path, &self.write)?;
         staged.file.write_all(separator)?;
         let first = staged.file.stream_position()? + self.first_start;
         self.file.rewind()?;
@@ -260,7 +272,7 @@ fn stage_with_added<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<(Staged, u64), E> {
-    let (mut staged, separator) = Staged::for_append(target)?;
+    let (mut staged, separator) = Staged::for_append(target, &Arc::default())?;
     let prefix_length = staged.file.stream_position()? + separator.len() as u64;
     let mut output = BufWriter::new(&staged.file);
     let mut separator = Some(separator);
@@ -335,7 +347,7 @@ pub fn replace_pgn_game(
     };
     // Staging beside a file would otherwise bypass its write permissions.
     drop(File::options().write(true).open(&target.path)?);
-    let staged = Staged::beside(target.path.clone(), Some(&old))?;
+    let staged = Staged::beside(&target.path, Some(&old))?;
     let mut output = BufWriter::new(&staged.file);
     old.rewind()?;
     io::copy(&mut (&old).take(range.start), &mut output)?;
@@ -451,20 +463,21 @@ pub(super) fn open(destination: &Path) -> io::Result<File> {
 
 /// The next version of a PGN file, written beside its destination and published whole.
 pub(super) struct Staged {
+    pub(super) write: Arc<PendingWrite>,
     pub(super) file: File,
     path: PathBuf,
     destination: PathBuf,
-    _directory: StagingDirectory,
+    _directory: Arc<StagingDirectory>,
 }
 
 impl Staged {
-    fn for_append(target: &Path) -> io::Result<(Self, &'static [u8])> {
+    fn for_append(target: &Path, write: &Arc<PendingWrite>) -> io::Result<(Self, &'static [u8])> {
         let old = match open(target) {
             Ok(old) => Some(old),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-        let mut staged = Staged::beside(target.to_owned(), old.as_ref())?;
+        let mut staged = Staged::beside_for_task(target, old.as_ref(), write)?;
         let mut separator: &[u8] = b"";
         if let Some(mut old) = old {
             let length = io::copy(&mut old, &mut staged.file)?;
@@ -486,24 +499,34 @@ impl Staged {
         Ok((staged, separator))
     }
 
-    pub(super) fn beside(destination: PathBuf, old: Option<&File>) -> io::Result<Staged> {
-        let directory = StagingDirectory::beside(&destination)?;
-        let path = directory.0.join("games.pgn");
-        let file = File::create_new(&path)?;
-        if let Some(old) = old {
-            file.set_permissions(old.metadata()?.permissions())?;
-        }
-        Ok(Staged {
-            file,
-            path,
-            destination,
-            _directory: directory,
+    pub(super) fn beside(destination: &Path, old: Option<&File>) -> io::Result<Staged> {
+        Self::beside_for_task(destination, old, &Arc::default())
+    }
+
+    fn beside_for_task(
+        destination: &Path,
+        old: Option<&File>,
+        write: &Arc<PendingWrite>,
+    ) -> io::Result<Staged> {
+        write.stage(destination, |directory| {
+            let path = directory.0.join("games.pgn");
+            let file = File::create_new(&path)?;
+            if let Some(old) = old {
+                file.set_permissions(old.metadata()?.permissions())?;
+            }
+            Ok(Staged {
+                write: Arc::clone(write),
+                file,
+                path,
+                destination: destination.to_owned(),
+                _directory: directory,
+            })
         })
     }
 
     pub(super) fn publish(self) -> io::Result<()> {
-        self.file.sync_all()?;
         drop(self.file);
+        self.write.begin_publication()?;
         fs::rename(self.path, self.destination)
     }
 }

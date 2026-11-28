@@ -8,7 +8,9 @@ use shakmaty::fen::Fen;
 use shakmaty::{CastlingMode, Chess, EnPassantMode, Outcome, Position};
 use zobrist_core::game::{AnnotationSymbol, Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{Database, DatabaseWriter, ImportError, OpenError, import_pgn};
+use zobrist_store::{
+    Database, DatabaseWriter, ImportError, OpenError, PendingWrite, import_pgn, import_pgn_for_task,
+};
 
 struct Directory(PathBuf);
 
@@ -137,6 +139,34 @@ fn an_empty_database_appears_only_after_finish() {
     writer.finish().unwrap();
     assert_eq!(read(&path).unwrap(), []);
     assert_eq!(directory.0.read_dir().unwrap().count(), 1);
+}
+
+#[test]
+fn abandoning_an_import_releases_its_stage_once_and_prevents_publication() -> io::Result<()> {
+    let directory = Directory::new("abandon-import")?;
+    let collections = directory.0.join("collections");
+    fs::create_dir(&collections)?;
+    let pgn = directory.0.join("game.pgn");
+    fs::write(&pgn, "1. e4 *")?;
+    let write = PendingWrite::default();
+    let target = collections.join("study");
+    let result = import_pgn_for_task(&pgn, &target, &write, |_| {
+        let stage = collections.read_dir()?.next().unwrap()?.path();
+        write.abandon();
+        write.finish_abandoning();
+        assert_eq!(collections.read_dir()?.count(), 0);
+        // Someone else can use this path before the abandoned reader returns.
+        fs::create_dir(&stage)?;
+        fs::write(stage.join("new owner's file"), "keep")
+    });
+    assert!(
+        matches!(result, Err(ImportError::Create(error)) if error.kind() == io::ErrorKind::Interrupted)
+    );
+    let stage = collections.read_dir()?.next().unwrap()?.path();
+    assert_eq!(fs::read(stage.join("new owner's file"))?, b"keep");
+    assert_eq!(stage.read_dir()?.count(), 1);
+    assert!(!target.exists());
+    Ok(())
 }
 
 #[test]

@@ -34,7 +34,10 @@ async fn answer(
                 .map_err(|error| error.to_string());
         }
         DesktopRequest::Session(request) => {
-            let directory = data_directory(&window).map_err(|error| error.to_string())?;
+            let directory = data_directory(&window).map_err(|error| {
+                games.resume_writes();
+                error.to_string()
+            })?;
             let response = games
                 .answer_session(request, directory)
                 .await
