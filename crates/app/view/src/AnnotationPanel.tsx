@@ -3,7 +3,7 @@ import styles from "./AnnotationPanel.module.css";
 import type { GamePicture } from "./generated/GamePicture";
 import type { MoveSymbol } from "./generated/MoveSymbol";
 import type { PositionSymbol } from "./generated/PositionSymbol";
-import { type Annotation, commentOfCurrentPlace, isSaveKey } from "./tabs";
+import { type Annotation, isSaveKey } from "./tabs";
 
 const { annotationPanel, commentField, symbolRow, symbolButton } = styles;
 
@@ -68,7 +68,7 @@ export function AnnotationPanel({ picture, onAnnotate }: Props) {
   const commentInField = useRef("");
   const sentText = useRef<string>(undefined);
   useLayoutEffect(() => {
-    const comment = commentOfCurrentPlace(picture);
+    const comment = picture.comment;
     // The field takes the comment of a new picture while it holds the comment of the picture
     // before or the text that it sent. A text that the player typed on while Rust answered
     // stays, because no picture has it.
@@ -82,7 +82,7 @@ export function AnnotationPanel({ picture, onAnnotate }: Props) {
     sentText.current = undefined;
   }, [picture]);
   const sendComment = (text: string) => {
-    if (text !== commentOfCurrentPlace(picture)) {
+    if (text !== picture.comment) {
       sentText.current = text;
       onAnnotate({ type: "SetComment", text });
     }

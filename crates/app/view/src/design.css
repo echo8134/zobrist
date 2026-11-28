@@ -138,6 +138,11 @@
   --notation-tools-group-gap: 12px;
   --notation-tools-line-color: #e6e6e6;
 
+  --recorded-values-gap: 4px 16px;
+  --recorded-values-padding: 8px 16px;
+  --recorded-values-line-width: 1px;
+  --recorded-values-weight: 600;
+
   --refused-save-padding: 6px 16px;
   --refused-save-size: 12px;
 

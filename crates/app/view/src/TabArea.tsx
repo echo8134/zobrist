@@ -32,6 +32,7 @@ const {
   buttonRow,
   notationArea,
   refusedSave,
+  recordedValues,
   notationScroller,
 } = styles;
 
@@ -184,6 +185,21 @@ export function TabArea({
           onSave={() => onSave("ConfirmSave")}
           onCancel={() => onSetGameData("closed")}
         />
+        {(picture.evaluation !== undefined || picture.clock !== undefined) && (
+          <ul className={recordedValues} aria-label="Recorded move values">
+            {picture.evaluation !== undefined && (
+              <li>
+                Evaluation <strong>{picture.evaluation}</strong>
+              </li>
+            )}
+            {picture.clock !== undefined && (
+              <li>
+                {picture.clock.side === "white" ? "White clock" : "Black clock"}{" "}
+                <strong>{picture.clock.time}</strong>
+              </li>
+            )}
+          </ul>
+        )}
         <div className={notationScroller}>
           <Notation
             mainLine={picture.notation}

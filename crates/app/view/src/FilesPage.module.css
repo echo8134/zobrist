@@ -86,6 +86,22 @@
   border-right: 1px solid var(--list-line-color);
 }
 
+.workspace:has(.recovery) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.collection:has(.recovery) {
+  border-right: none;
+}
+
+.recovery {
+  overflow-wrap: anywhere;
+}
+
+.recovery button {
+  margin-top: var(--files-toolbar-gap);
+}
+
 .caption {
   margin: 0 0 var(--files-toolbar-gap);
   color: var(--list-head-color);

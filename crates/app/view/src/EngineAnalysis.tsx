@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import styles from "./EngineAnalysis.module.css";
 import type { Response } from "./generated/Response";
 import { ask } from "./ipc";
+import { type BoardPlace, type Change, sameBoardPlace } from "./tabs";
 
 type Snapshot = Extract<Response, { type: "Analysis" }>["snapshot"];
 const { panel } = styles;
@@ -10,7 +11,7 @@ let lastGeneration = 0;
 
 export function followAnalysis(
   game: number,
-  revision: number,
+  origin: BoardPlace,
   show: (snapshot: Snapshot) => void,
 ) {
   const generation = ++lastGeneration;
@@ -36,7 +37,8 @@ export function followAnalysis(
     show({
       game,
       generation,
-      revision,
+      revision: origin.revision,
+      place: origin.place,
       state: { type: "Searching", lines: [] },
     });
   }
@@ -44,7 +46,7 @@ export function followAnalysis(
   async function read(type: "Start" | "Status"): Promise<void> {
     clearTimeout(timer);
     pending = true;
-    const askedAt = revision;
+    const askedAt = origin;
     try {
       const { snapshot } = await ask({
         type: "Analysis",
@@ -56,7 +58,7 @@ export function followAnalysis(
       if (
         snapshot.game === game &&
         snapshot.generation === generation &&
-        snapshot.revision === revision
+        sameBoardPlace(snapshot, origin)
       ) {
         show(snapshot);
         if (snapshot.state.type !== "Searching") {
@@ -70,7 +72,8 @@ export function followAnalysis(
           reason instanceof Error ? reason.message : String(reason);
         show({
           game,
-          revision,
+          revision: origin.revision,
+          place: origin.place,
           generation,
           state: { type: "Failed", message },
         });
@@ -80,7 +83,7 @@ export function followAnalysis(
     } finally {
       pending = false;
     }
-    if (revision !== askedAt) {
+    if (origin !== askedAt) {
       void read("Status");
     } else {
       timer = setTimeout(() => void read("Status"), 250);
@@ -90,9 +93,9 @@ export function followAnalysis(
   waiting();
   void read("Start");
   return {
-    follow(next: number) {
-      if (!active || revision === next) return;
-      revision = next;
+    follow(next: BoardPlace) {
+      if (!active || sameBoardPlace(origin, next)) return;
+      origin = next;
       waiting();
       if (!pending) void read("Status");
     },
@@ -102,11 +105,13 @@ export function followAnalysis(
 
 export function EngineAnalysis({
   game,
-  revision,
+  origin,
+  change,
   hidden,
 }: {
   game: number;
-  revision: number;
+  origin: BoardPlace;
+  change: (change: Change) => void;
   hidden: boolean;
 }) {
   const search = useRef<ReturnType<typeof followAnalysis> | undefined>(
@@ -114,9 +119,26 @@ export function EngineAnalysis({
   );
   const [snapshot, setSnapshot] = useState<Snapshot>();
   useLayoutEffect(() => () => search.current?.stop(), []);
-  useLayoutEffect(() => search.current?.follow(revision), [revision]);
+  useLayoutEffect(() => search.current?.follow(origin), [origin]);
   const running = snapshot?.state.type === "Searching";
-  const state = snapshot?.revision === revision ? snapshot.state : undefined;
+  const displayed =
+    snapshot && sameBoardPlace(snapshot, origin) ? snapshot : undefined;
+  const state = displayed?.state;
+
+  async function addVariation(row: Snapshot, moves: string[]) {
+    const { game, revision, generation, place } = row;
+    const { answer } = await ask({
+      type: "AddEngineVariation",
+      game,
+      revision,
+      generation,
+      place,
+      moves,
+    });
+    if (answer.type === "Added") {
+      change({ type: "drawPicture", game, picture: answer.picture, from: row });
+    }
+  }
 
   return (
     <section className={panel} aria-label="Engine analysis" hidden={hidden}>
@@ -129,7 +151,7 @@ export function EngineAnalysis({
               search.current?.stop();
               setSnapshot(undefined);
             } else {
-              search.current = followAnalysis(game, revision, setSnapshot);
+              search.current = followAnalysis(game, origin, setSnapshot);
             }
           }}
         >
@@ -137,7 +159,8 @@ export function EngineAnalysis({
         </button>
       </header>
       {state?.type === "Failed" && <p role="alert">{state.message}</p>}
-      {state?.type === "Searching" &&
+      {displayed &&
+        state?.type === "Searching" &&
         (state.lines.length === 0 ? (
           <p>Analysing…</p>
         ) : (
@@ -146,6 +169,12 @@ export function EngineAnalysis({
               <li key={line.notation}>
                 <strong>{line.evaluation}</strong>
                 <span>{line.notation}</span>
+                <button
+                  type="button"
+                  onClick={() => void addVariation(displayed, line.moves)}
+                >
+                  Add variation
+                </button>
               </li>
             ))}
           </ol>

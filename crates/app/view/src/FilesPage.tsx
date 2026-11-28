@@ -14,6 +14,7 @@ import {
 } from "react";
 import styles from "./FilesPage.module.css";
 import type { CollectionEntry } from "./generated/CollectionEntry";
+import type { FileCollection } from "./generated/FileCollection";
 import type { PgnFile } from "./generated/PgnFile";
 import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
 import type { PickerChoice } from "./generated/PickerChoice";
@@ -28,6 +29,7 @@ const {
   options,
   workspace,
   collection,
+  recovery,
   caption,
   tree,
   entryButton,
@@ -50,19 +52,19 @@ type Selection =
   | { kind: "File"; entry: CollectionEntry; root: string; file: PgnFile };
 
 type Kept = {
-  roots: CollectionEntry[];
+  fileCollection: FileCollection;
   expanded: Map<string, CollectionEntry[]>;
   selected: Selection | null;
-  error: { source: "collection" | "selection"; message: string } | null;
+  selectionError: string | null;
 };
 
 // A board can be shown while a file is still being read. Its answer belongs to the
 // same Files page when the player comes back.
 let kept: Kept = {
-  roots: [],
+  fileCollection: { type: "Ready", entries: [] },
   expanded: new Map(),
   selected: null,
-  error: null,
+  selectionError: null,
 };
 const pagesInTheWindow = new Set<() => void>();
 let selectionRequest = 0;
@@ -98,19 +100,29 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function loadCollection() {
+async function loadCollection(
+  type: "GetFileCollection" | "RecoverFileCollection" = "GetFileCollection",
+) {
   const request = ++collectionRequest;
   try {
-    const { entries } = await ask({ type: "GetFileCollection" });
+    const { collection } = await ask({ type });
     if (request === collectionRequest) {
-      keep({
-        roots: entries,
-        error: kept.error?.source === "collection" ? null : kept.error,
-      });
+      const selectionError =
+        collection.type === "Unavailable" &&
+        collection.message === kept.selectionError
+          ? null
+          : kept.selectionError;
+      keep({ fileCollection: collection, selectionError });
     }
   } catch (error) {
     if (request === collectionRequest) {
-      keep({ error: { source: "collection", message: errorText(error) } });
+      keep({
+        fileCollection: {
+          type: "Unavailable",
+          message: errorText(error),
+          recoverable: false,
+        },
+      });
     }
   }
 }
@@ -134,24 +146,24 @@ export async function readFileAgain() {
     });
     if (kept.selected === selected && request === refreshRequest) {
       if (answer.type === "File") {
-        keep({ selected: { ...selected, file: answer }, error: null });
+        keep({ selected: { ...selected, file: answer }, selectionError: null });
       } else {
         keep({
           selected: null,
-          error: { source: "selection", message: refusalText(answer) },
+          selectionError: refusalText(answer),
         });
       }
     }
   } catch (error) {
     if (kept.selected === selected && request === refreshRequest) {
-      keep({ error: { source: "selection", message: errorText(error) } });
+      keep({ selectionError: errorText(error) });
     }
   }
 }
 
 function beginSelection(path: string) {
   const request = ++selectionRequest;
-  keep({ selected: { kind: "Opening", path }, error: null });
+  keep({ selected: { kind: "Opening", path }, selectionError: null });
   return request;
 }
 
@@ -163,14 +175,16 @@ function failedSelection(
   if (request === selectionRequest) {
     keep({
       selected: previous?.kind === "Opening" ? null : previous,
-      error: { source: "selection", message: errorText(error) },
+      selectionError: errorText(error),
     });
   }
 }
 
 function branchContaining(
   path: string,
-  entries: CollectionEntry[],
+  entries = kept.fileCollection.type === "Ready"
+    ? kept.fileCollection.entries
+    : [],
 ): CollectionEntry | undefined {
   return entries.find((entry) => {
     if (entry.path === path) return true;
@@ -181,7 +195,7 @@ function branchContaining(
 
 export async function openListed(
   entry: CollectionEntry,
-  root = branchContaining(entry.path, kept.roots)?.path ?? entry.path,
+  root = branchContaining(entry.path)?.path ?? entry.path,
 ) {
   const previous = kept.selected;
   if (
@@ -194,7 +208,7 @@ export async function openListed(
     ++selectionRequest;
     const expanded = new Map(kept.expanded);
     expanded.delete(entry.path);
-    keep({ expanded, error: null });
+    keep({ expanded, selectionError: null });
     return;
   }
 
@@ -240,12 +254,16 @@ async function pick(choice: PickerChoice) {
     if (answer.type === "Refusal") throw new Error(refusalText(answer));
     if (choice === "File") fileWasOpened();
     if (request === selectionRequest) {
-      const { entry, entries: roots } = answer;
+      const { entry } = answer;
+      const fileCollection: FileCollection = {
+        type: "Ready",
+        entries: answer.entries,
+      };
       const expanded = new Map(kept.expanded);
       if (answer.type === "Folder") {
         expanded.set(entry.path, answer.children);
         keep({
-          roots,
+          fileCollection,
           expanded,
           selected: { kind: "Folder", entry, root: entry.path },
         });
@@ -257,17 +275,17 @@ async function pick(choice: PickerChoice) {
             ? previous.root
             : entry.path;
         keep({
-          roots,
+          fileCollection,
           expanded,
           selected: { kind: "File", entry, root, file: answer.file },
         });
       }
     }
-    // Another confirmed dialog may finish after this one, even if its file is no longer selected.
-    await loadCollection();
   } catch (error) {
     failedSelection(request, choice === "File" ? null : previous, error);
   }
+  // A failed open can be the first sign that the collection on disk needs recovery.
+  await loadCollection();
 }
 
 type Props = {
@@ -275,11 +293,10 @@ type Props = {
 };
 
 export function FilesPage({ onOpenGame }: Props) {
-  const { roots, expanded, selected, error } = useSyncExternalStore(
-    subscribe,
-    () => kept,
-  );
+  const { fileCollection, expanded, selected, selectionError } =
+    useSyncExternalStore(subscribe, () => kept);
   const [choosing, setChoosing] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const openButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     void loadCollection();
@@ -399,8 +416,28 @@ export function FilesPage({ onOpenGame }: Props) {
       <div className={workspace}>
         <section className={collection} aria-label="Collection">
           <h2 className={caption}>Collection</h2>
-          {roots.length > 0 ? (
-            entries(roots)
+          {fileCollection.type === "Unavailable" ? (
+            <div className={recovery}>
+              <p className={`${line} ${refusal}`} role="status">
+                {fileCollection.message}
+              </p>
+              {fileCollection.recoverable && (
+                <button
+                  className={button}
+                  type="button"
+                  disabled={recovering}
+                  onClick={async () => {
+                    setRecovering(true);
+                    await loadCollection("RecoverFileCollection");
+                    setRecovering(false);
+                  }}
+                >
+                  Recover file list
+                </button>
+              )}
+            </div>
+          ) : fileCollection.entries.length > 0 ? (
+            entries(fileCollection.entries)
           ) : (
             <p className={line}>No files or folders yet.</p>
           )}
@@ -420,9 +457,9 @@ export function FilesPage({ onOpenGame }: Props) {
               <p className={pathText}>{selectedEntry.path}</p>
             </>
           )}
-          {error && (
+          {selectionError && (
             <p className={`${line} ${refusal}`} role="status">
-              {error.message}
+              {selectionError}
             </p>
           )}
           {selected?.kind === "Opening" && (
@@ -430,7 +467,7 @@ export function FilesPage({ onOpenGame }: Props) {
               Opening {selected.path}…
             </p>
           )}
-          {!selected && !error && (
+          {!selected && !selectionError && fileCollection.type === "Ready" && (
             <p className={line}>Select a file to see its games.</p>
           )}
           {selected?.kind === "Folder" &&

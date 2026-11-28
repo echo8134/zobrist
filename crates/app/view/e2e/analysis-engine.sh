@@ -21,7 +21,15 @@ while IFS= read -r command; do
                 'position startpos')
                     if [ "$lines" = 2 ]; then
                         echo 'info depth 8 multipv 1 score cp 34 pv e2e4 e7e5'
-                        echo 'info depth 8 multipv 2 score cp 12 pv d2d4 d7d5'
+                        if [ "${0##*/}" = variation ]; then
+                            echo 'info depth 8 multipv 2 score cp 12 pv e2e4 c7c5 g1f3'
+                            if [ -e "$0.rerank" ]; then
+                                while [ -e "$0.rerank" ]; do sleep 0.02; done
+                                echo 'info depth 9 multipv 2 score cp 15 pv d2d4 d7d5'
+                            fi
+                        else
+                            echo 'info depth 8 multipv 2 score cp 12 pv d2d4 d7d5'
+                        fi
                     else
                         echo 'info depth 8 score cp 34 pv e2e4 e7e5'
                     fi ;;

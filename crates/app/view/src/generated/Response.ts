@@ -3,7 +3,9 @@ import type { AddedPgnPath } from "./AddedPgnPath";
 import type { AnalysisSnapshot } from "./AnalysisSnapshot";
 import type { BoardAppearance } from "./BoardAppearance";
 import type { CollectionEntry } from "./CollectionEntry";
+import type { DatabaseEntry } from "./DatabaseEntry";
 import type { EngineEntry } from "./EngineEntry";
+import type { FileCollection } from "./FileCollection";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
 import type { OpenGameLinkAnswer } from "./OpenGameLinkAnswer";
@@ -13,11 +15,16 @@ import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
 import type { PositionDraft } from "./PositionDraft";
 import type { SaveGameAnswer } from "./SaveGameAnswer";
+import type { VariationAnswer } from "./VariationAnswer";
 
 /**
  * What Rust answers. Each case has the name of its request.
  */
-export type Response = { "type": "Analysis", 
+export type Response = { "type": "AddEngineVariation", 
+/**
+ * Whether anything changed in the game.
+ */
+answer: VariationAnswer, } | { "type": "Analysis", 
 /**
  * Tagged with the game, revision and search generation.
  */
@@ -129,11 +136,39 @@ entries: Array<EngineEntry>, } | { "type": "PickPgnPath",
 /**
  * The absolute path returned by the system.
  */
-path: string | null, } | { "type": "GetFileCollection", 
+path: string | null, } | { "type": "PickDatabasePath", 
 /**
- * The root entries of the collection.
+ * The absolute path returned by the system.
  */
-entries: Array<CollectionEntry>, } | { "type": "GetRecentFiles", 
+path: string | null, } | { "type": "ListDatabases", 
+/**
+ * Names and locations of the registered collections.
+ */
+entries: Array<DatabaseEntry>, } | { "type": "AddDatabase", 
+/**
+ * Names and locations after registration.
+ */
+entries: Array<DatabaseEntry>, 
+/**
+ * The verified number of games in the database.
+ */
+games: number, } | { "type": "InspectDatabase", 
+/**
+ * The verified number of games in the database.
+ */
+games: number, } | { "type": "RemoveDatabase", 
+/**
+ * Names and locations after removal.
+ */
+entries: Array<DatabaseEntry>, } | { "type": "GetFileCollection", 
+/**
+ * The list or the available recovery action.
+ */
+collection: FileCollection, } | { "type": "RecoverFileCollection", 
+/**
+ * The recovered entries or the reason recovery could not complete.
+ */
+collection: FileCollection, } | { "type": "GetRecentFiles", 
 /**
  * Up to ten PGN files, newest first.
  */

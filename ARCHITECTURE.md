@@ -32,7 +32,7 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify and count a selected collection.
 
 ### `scripts/`
 
@@ -112,6 +112,8 @@ Revisit if a scan cannot answer a kind of query fast enough. The first answer is
 ### Personal PGN files on the desktop
 
 The Files page keeps references to PGN files and folders. A player can keep a repertoire in one folder and tournament games in another, close the app, and find both again on the next start. Opening a PGN keeps it in place. Saving an edit writes to that same file. The app stores the paths in files.json in its local data directory, which Tauri resolves with `app_local_data_dir()` for `io.github.echo8134.zobrist`.
+
+The app keeps a verified copy of that list in files.last-good.json. If the live list becomes unreadable, the player can recover it from Files. Recovery preserves the damaged bytes under a fresh name before replacing the list. It only changes collection metadata.
 
 When creating a PGN, the native save dialog starts in the selected folder. Without a selected folder, it suggests a folder named `zobrist` inside the personal Documents directory reported by the operating system. When the system has no Documents directory, the player chooses the destination in the dialog. The player can change the suggested location before saving.
 
