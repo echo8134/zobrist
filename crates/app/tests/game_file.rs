@@ -147,6 +147,40 @@ fn opening_a_game_again_answers_with_the_game_that_is_open() -> io::Result<()> {
     Ok(())
 }
 
+#[test]
+fn opens_a_native_game_as_a_copy_without_a_pgn_save_target() -> io::Result<()> {
+    let path = folder("native-copy")?.join("Study.zobrist");
+    let original = include_bytes!("../../store/tests/fixtures/clean.zobrist");
+    fs::write(&path, original)?;
+    let games = SharedGames::default();
+    let open = |number| {
+        ask(
+            &games,
+            json!({"type": "OpenDatabaseGame", "path": path, "number": number}),
+        )
+    };
+    let mut picture = second_game_at_its_start(&path, 2);
+    picture["file"] = Value::Null;
+    picture["unsaved"] = json!(true);
+    assert_eq!(
+        with_sorted_moves(open(2)?),
+        json!({"type": "OpenDatabaseGame", "answer": {
+            "type": "Game", "game": 1, "picture": picture
+        }})
+    );
+    assert_eq!(open(3)?, refusal("OpenDatabaseGame", "noSuchGame", None));
+    ask(
+        &games,
+        json!({"type": "SetComment", "game": 1, "text": "My copy."}),
+    )?;
+    assert_eq!(
+        ask(&games, json!({"type": "SaveGame", "game": 1}))?,
+        refusal("SaveGame", "noFile", None)
+    );
+    assert_eq!(fs::read(path)?, original);
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn refuses_a_number_that_the_file_does_not_have_and_a_file_that_cannot_be_read() -> io::Result<()> {

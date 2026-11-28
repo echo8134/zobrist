@@ -1,5 +1,6 @@
 //! The database format as seen by a writer and a new reader.
 
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::{fs, io};
@@ -9,7 +10,8 @@ use shakmaty::{CastlingMode, Chess, EnPassantMode, Outcome, Position};
 use zobrist_core::game::{AnnotationSymbol, Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
 use zobrist_store::{
-    Database, DatabaseWriter, ImportError, OpenError, PendingWrite, import_pgn, import_pgn_for_task,
+    Database, DatabaseWriter, GameColumn, GameQuery, ImportError, OpenError, PendingWrite,
+    import_pgn, import_pgn_for_task,
 };
 
 struct Directory(PathBuf);
@@ -299,6 +301,10 @@ fn correct_checksums_do_not_turn_an_illegal_move_into_a_game() {
     bytes[table + 168..].copy_from_slice(&checksum.to_le_bytes());
     fs::write(&path, bytes).unwrap();
     let mut database = Database::open(&path).unwrap();
+    assert!(matches!(
+        database.game(NonZeroU64::new(2).unwrap()),
+        Err(OpenError::Damaged)
+    ));
     let mut games = database.games().unwrap();
     assert!(matches!(games.next(), Some(Err(OpenError::Damaged))));
     assert!(games.next().is_none());
@@ -418,4 +424,65 @@ fn stores_every_variation_at_the_depth_limit() {
     let games = [builder.finish(Outcome::Unknown)];
     store(&path, &games).unwrap();
     assert_eq!(read(&path).unwrap(), games);
+}
+
+#[test]
+fn pages_sorted_headers_across_the_collection_and_reports_the_full_total() {
+    let directory = Directory::new("sorted-pages").unwrap();
+    let path = directory.0.join("games");
+    let mut writer = DatabaseWriter::create(&path).unwrap();
+    for number in 1..=401 {
+        let white = if number % 2 == 0 { "Zoë" } else { "Ada" };
+        let game =
+            GameBuilder::new(vec![tag("White", white)], Chess::default()).finish(Outcome::Unknown);
+        writer.push(&game).unwrap();
+    }
+    writer.finish().unwrap();
+    let mut database = Database::open(&path).unwrap();
+    let query = GameQuery {
+        sort: GameColumn::White,
+        descending: true,
+        ..GameQuery::default()
+    };
+    for (page, expected) in [
+        (1, (2..=200).step_by(2).collect::<Vec<_>>()),
+        (2, (202..=400).step_by(2).collect()),
+        (5, vec![401]),
+        (6, vec![]),
+    ] {
+        let result = database.query(&query, NonZeroUsize::new(page)).unwrap();
+        assert_eq!(result.total, 401);
+        assert_eq!(
+            result.rows.iter().map(|row| row.number).collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let query = GameQuery {
+        player: Some("OË".into()),
+        ..query
+    };
+    let result = database.query(&query, NonZeroUsize::new(3)).unwrap();
+    assert_eq!(result.total, 200);
+    assert_eq!(result.rows, []);
+}
+
+#[test]
+fn reads_the_selected_complete_game_by_its_original_number() {
+    let path = Path::new("tests/fixtures/clean.zobrist");
+    let mut database = Database::open(path).unwrap();
+    let first = database.game(NonZeroU64::MIN).unwrap().unwrap();
+    assert_eq!(first.tag("White"), Some("Alpha"));
+    let mut written = Vec::new();
+    pgn::write_game(&first, &mut written).unwrap();
+    let text = String::from_utf8(written).unwrap();
+    assert!(text.contains("{Overlooks the mate.}"));
+    assert!(text.contains("(3... g6 4. Qf3)"));
+    let second = database.game(NonZeroU64::new(2).unwrap()).unwrap().unwrap();
+    assert_eq!(second.tag("White"), Some("Gamma"));
+    assert!(
+        database
+            .game(NonZeroU64::new(3).unwrap())
+            .unwrap()
+            .is_none()
+    );
 }

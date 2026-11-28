@@ -31,7 +31,15 @@ text: string, } | { "type": "OpenGameLink",
 /**
  * The link entered by the player.
  */
-link: string, } | { "type": "LookupTablebase", 
+link: string, } | { "type": "OpenDatabaseGame", 
+/**
+ * The native collection selected on this device.
+ */
+path: string, 
+/**
+ * The game's original one-based number in the collection.
+ */
+number: number, } | { "type": "LookupTablebase", 
 /**
  * The open game on the board.
  */

@@ -7,6 +7,7 @@ mod accounts;
 mod analysis;
 mod board_appearance;
 mod database_collection;
+mod database_games;
 mod engines;
 mod file_collection;
 mod game_file;
@@ -19,6 +20,8 @@ pub use accounts::AccountRequest;
 pub use analysis::{AnalysisRequest, AnalysisSnapshot, VariationAnswer};
 pub use board_appearance::{AppearanceRequest, BoardAppearance};
 pub use database_collection::{DatabaseEntry, DatabaseRequest};
+pub use database_games::DatabaseGameQuery;
+use database_games::open_database_game;
 pub use engines::{EngineAction, EngineEntry};
 pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, EarlierState, EntryKind, FileCollection,
@@ -107,6 +110,14 @@ pub enum Request {
     OpenGameLink {
         /// The link entered by the player.
         link: String,
+    },
+    /// Open a copy of a stored game in a board tab.
+    OpenDatabaseGame {
+        /// The native collection selected on this device.
+        path: std::path::PathBuf,
+        /// The game's original one-based number in the collection.
+        #[ts(type = "number")]
+        number: std::num::NonZeroU64,
     },
     /// Look up the board position the player selected.
     LookupTablebase {
@@ -574,6 +585,11 @@ pub enum Response {
         /// The outcome of the fetch.
         answer: OpenGameLinkAnswer,
     },
+    /// The new board tab, or the reason the collection game could not open.
+    OpenDatabaseGame {
+        /// Opening a native game never attaches a PGN save target.
+        answer: OpenGameAnswer,
+    },
     /// The outcomes for the position and its moves, or a refusal.
     LookupTablebase {
         /// The answer to this board's lookup.
@@ -687,6 +703,13 @@ pub enum Response {
     ListDatabases {
         /// Names and locations of the registered collections.
         entries: Vec<DatabaseEntry>,
+    },
+    /// One page of the selected collection's matching games.
+    ListDatabaseGames {
+        /// Rows in the requested order, with their original game numbers.
+        rows: Vec<GameRow>,
+        /// Number of matches across all pages.
+        total: usize,
     },
     /// The updated list and count from the selected database.
     AddDatabase {
@@ -1220,6 +1243,7 @@ impl Games {
                 opened: self.open_pgn(&text),
             },
             Request::OpenGameLink { link } => return open_game_link(link),
+            Request::OpenDatabaseGame { path, number } => return open_database_game(path, number),
             Request::LookupTablebase { game, revision } => return self.tablebase(game, revision),
             Request::GamePgn { game } => Response::GamePgn(self.open_games.get(&game).into()),
             Request::SetTag { game, tag, text } => Response::SetTag {

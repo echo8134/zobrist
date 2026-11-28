@@ -1,0 +1,59 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--files-toolbar-gap);
+  margin-top: var(--list-gap-above);
+  padding-top: var(--list-gap-above);
+  border-top: 1px solid var(--list-line-color);
+}
+
+.filters label {
+  display: grid;
+  flex-grow: 1;
+  gap: var(--tab-strip-gap);
+  color: var(--list-head-color);
+}
+
+.filters input,
+.filters select {
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--field-height);
+  padding: var(--field-padding);
+  border: 1px solid var(--field-line-color);
+  border-radius: var(--field-corner-radius);
+  background: var(--background-color);
+  color: var(--text-color);
+  font: inherit;
+}
+
+.paging {
+  display: flex;
+  align-items: center;
+  gap: var(--files-toolbar-gap);
+}
+
+.paging:has(p:not(:empty)) {
+  margin-top: var(--list-gap-above);
+}
+
+.paging p {
+  margin: 0 auto 0 0;
+}
+
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tab-strip-gap);
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+th[aria-sort] .sort {
+  font-weight: var(--heading-weight);
+}
