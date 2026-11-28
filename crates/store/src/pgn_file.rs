@@ -1,9 +1,12 @@
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::num::NonZeroU64;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use zobrist_core::game::Game;
+use shakmaty::Outcome;
+use zobrist_core::game::{Game, Tag};
 use zobrist_core::pgn::{self, Entry};
 
 use crate::StagingDirectory;
@@ -42,6 +45,123 @@ impl std::error::Error for PgnWriteConflict {}
 impl From<PgnWriteConflict> for io::Error {
     fn from(conflict: PgnWriteConflict) -> Self {
         Self::other(conflict)
+    }
+}
+
+/// Complete raw PGN games staged on disk until their destination can be published.
+pub struct PgnBatch {
+    file: File,
+    _directory: StagingDirectory,
+    games: Option<u64>,
+    first_start: u64,
+}
+
+impl PgnBatch {
+    /// Starts a batch without opening its eventual destination.
+    pub fn new() -> io::Result<Self> {
+        let directory = StagingDirectory::beside(&std::env::temp_dir().join("games.pgn"))?;
+        Ok(Self {
+            file: File::create_new(directory.0.join("games.pgn"))?,
+            _directory: directory,
+            games: Some(0),
+            first_start: 0,
+        })
+    }
+
+    /// Stages one finished PGN, retaining its tags, annotations and variant moves verbatim.
+    /// After a failed push the batch cannot be published.
+    pub fn push(&mut self, pgn: &str) -> io::Result<()> {
+        let games = self.games.take().ok_or_else(failed_write)?;
+        let mut entries = 0;
+        let mut start = None;
+        let marker = pgn.split_ascii_whitespace().next_back();
+        pgn::read_export_record(pgn.as_bytes(), |entry| {
+            entries += 1;
+            if let Entry::Game {
+                game,
+                range: Some(range),
+                problem,
+            } = entry
+            {
+                // The board reader checks standard chess moves even for a variant export.
+                let variant = game.tag("Variant").is_some_and(|name| name != "Standard");
+                let readable = problem.is_none_or(|problem| {
+                    variant
+                        && matches!(
+                            problem.reason,
+                            pgn::Reason::IllegalMove(_)
+                                | pgn::Reason::AmbiguousMove(_)
+                                | pgn::Reason::InvalidFen
+                        )
+                });
+                let result = game.result().to_string();
+                if readable
+                    && !game.result().is_unknown()
+                    && marker == Some(result.as_str())
+                    && game.tag("Result").is_none_or(|tag| tag == result)
+                {
+                    start = Some(range.start);
+                }
+            }
+        })?;
+        let start = start.filter(|_| entries == 1).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "The export record does not contain one finished PGN game.",
+            )
+        })?;
+        if games == 0 {
+            self.first_start = start;
+        } else {
+            self.file.write_all(b"\n")?;
+        }
+        self.file.write_all(pgn.as_bytes())?;
+        if !pgn.ends_with('\n') {
+            self.file.write_all(b"\n")?;
+        }
+        self.games = Some(games + 1);
+        Ok(())
+    }
+
+    /// Appends the batch after the current destination bytes in one publication.
+    /// Returns the added count and any warning from recording history. An empty batch
+    /// leaves both the destination and its history untouched.
+    pub fn append_to(
+        mut self,
+        target: &Path,
+        history: Option<PgnHistory<'_>>,
+    ) -> io::Result<(u64, Option<String>)> {
+        let games = self.games.ok_or_else(failed_write)?;
+        if games == 0 {
+            return Ok((0, None));
+        }
+        let target = SaveTarget::new(destination(target)?, history)?;
+        let (mut staged, separator) = Staged::for_append(&target.path)?;
+        staged.file.write_all(separator)?;
+        let first = staged.file.stream_position()? + self.first_start;
+        self.file.rewind()?;
+        io::copy(&mut self.file, &mut staged.file)?;
+        // An open comment or tag in the destination can absorb part or all of the first game.
+        staged.file.rewind()?;
+        let mut found_first = false;
+        let mut appended = 0;
+        pgn::read_games(&staged.file, |entry| {
+            if let Entry::Game {
+                range: Some(range), ..
+            } = entry
+                && range.start >= first
+            {
+                found_first |= range.start == first;
+                appended += 1;
+            }
+        })?;
+        if !found_first || appended != games {
+            return Err(refusal(
+                "The destination would not keep every downloaded game separate.".to_owned(),
+            ));
+        }
+        let warning = target.publish(staged)?;
+        Ok((games, warning))
     }
 }
 
@@ -143,33 +263,8 @@ fn stage_with_added<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<(Staged, u64), E> {
-    let old = match open(target) {
-        Ok(old) => Some(old),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
-    };
-    let mut staged = Staged::beside(target.to_owned(), old.as_ref())?;
-    let mut separator: &[u8] = b"";
-    let prefix_length = if let Some(mut old) = old {
-        let length = io::copy(&mut old, &mut staged.file)?;
-        if length > 0 {
-            let mut tail = [0; 3];
-            let start = length.saturating_sub(3);
-            staged.file.seek(SeekFrom::Start(start))?;
-            let tail = &mut tail[..usize::try_from(length - start).unwrap_or(3)];
-            staged.file.read_exact(tail)?;
-            separator = if tail.ends_with(b"\n\n") || tail.ends_with(b"\n\r\n") {
-                b""
-            } else if tail.ends_with(b"\n") {
-                b"\n"
-            } else {
-                b"\n\n"
-            };
-        }
-        length + separator.len() as u64
-    } else {
-        0
-    };
+    let (mut staged, separator) = Staged::for_append(target)?;
+    let prefix_length = staged.file.stream_position()? + separator.len() as u64;
     let mut output = BufWriter::new(&staged.file);
     let mut separator = Some(separator);
     supply(&mut |game| {
@@ -295,7 +390,257 @@ pub fn read_pgn_game(source: &Path, number: NonZeroU64) -> io::Result<Option<Gam
     Ok(found)
 }
 
-/// What a list shows of one game of a PGN file.
+/// Reads the rows, problem count and version of the very same PGN byte stream.
+pub fn list_pgn_games(path: &Path) -> io::Result<(Vec<PgnGameRow>, usize, String)> {
+    let destination = path.canonicalize()?;
+    let mut source = VersionReader::new(&destination, File::open(&destination)?);
+    let mut rows = Vec::new();
+    let mut problems = 0;
+    pgn::read_games(&mut source, |entry| {
+        if let Entry::Game { game, problem, .. } = entry {
+            rows.push(PgnGameRow::new(rows.len() as u64 + 1, &game));
+            problems += usize::from(problem.is_some());
+        }
+    })?;
+    Ok((rows, problems, source.version()))
+}
+
+// Feed the hash fixed-size blocks so a short pipe read and a disk read have the same version.
+struct VersionReader<R> {
+    source: R,
+    hash: DefaultHasher,
+    checksum: crc32fast::Hasher,
+    block: [u8; 256],
+    filled: usize,
+    length: u64,
+}
+
+impl<R> VersionReader<R> {
+    fn new(path: &Path, source: R) -> Self {
+        let mut hash = DefaultHasher::new();
+        path.hash(&mut hash);
+        Self {
+            source,
+            hash,
+            checksum: crc32fast::Hasher::new(),
+            block: [0; 256],
+            filled: 0,
+            length: 0,
+        }
+    }
+
+    fn version(mut self) -> String {
+        self.hash.write(&self.block[..self.filled]);
+        format!(
+            "{}-{:08x}-{:016x}",
+            self.length,
+            self.checksum.finalize(),
+            self.hash.finish()
+        )
+    }
+}
+
+impl<R: Read> Read for VersionReader<R> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        let count = self.source.read(output)?;
+        let mut bytes = &output[..count];
+        self.checksum.update(bytes);
+        self.length += count as u64;
+        while !bytes.is_empty() {
+            let take = bytes.len().min(self.block.len() - self.filled);
+            self.block[self.filled..self.filled + take].copy_from_slice(&bytes[..take]);
+            self.filled += take;
+            bytes = &bytes[take..];
+            if self.filled == self.block.len() {
+                self.hash.write(&self.block);
+                self.filled = 0;
+            }
+        }
+        Ok(count)
+    }
+}
+
+pub(super) fn content_version(path: &Path, file: &mut File) -> io::Result<String> {
+    file.rewind()?;
+    let mut source = VersionReader::new(path, file);
+    io::copy(&mut source, &mut io::sink())?;
+    Ok(source.version())
+}
+
+pub(super) fn list_changed() -> io::Error {
+    io::Error::other(
+        "This file changed since the list was read. Reopen the file and choose the game again.",
+    )
+}
+
+// The PGN payload of the captured state begins at the current file position.
+pub(super) fn stage_without_game(
+    path: &Path,
+    number: NonZeroU64,
+    expected: &str,
+    mut snapshot: File,
+    output: &File,
+) -> io::Result<()> {
+    let payload = snapshot.stream_position()?;
+    let mut reader = VersionReader::new(path, &mut snapshot);
+    let mut games = 0;
+    let (mut previous, mut selected, mut following) = (None, None, None);
+    pgn::read_games(&mut reader, |entry| {
+        let range = match entry {
+            Entry::Game { range, .. } => {
+                games += 1;
+                if games == number.get() {
+                    selected = range;
+                    return;
+                }
+                range
+            }
+            Entry::StrayText { range, .. } => Some(range),
+        };
+        if games < number.get() {
+            previous = Some(range.map(|range| range.end));
+        } else if following.is_none() {
+            following = Some(range.map(|range| range.start));
+        }
+    })?;
+    let length = reader.length;
+    if reader.version() != expected {
+        return Err(list_changed());
+    }
+    let unknown = || {
+        io::Error::other(format!(
+            "Could not locate game {number} safely in {}. Your PGN file is untouched.",
+            path.display()
+        ))
+    };
+    let game = selected.ok_or_else(unknown)?;
+    let next = following.unwrap_or(Some(length)).ok_or_else(unknown)?;
+    // Only a final entry owns the blank separator before it. Keep the previous entry's line ending.
+    let prefix = if following.is_none() {
+        previous.unwrap_or(Some(game.start)).ok_or_else(unknown)?
+    } else {
+        game.start
+    };
+    if prefix > game.start || game.start >= game.end || game.end > next || next > length {
+        return Err(unknown());
+    }
+    snapshot.seek(SeekFrom::Start(payload))?;
+    let mut staged = BufWriter::new(output);
+    io::copy(&mut (&mut snapshot).take(prefix), &mut staged)?;
+    copy_separator(
+        &mut snapshot,
+        &mut staged,
+        prefix..game.start,
+        true,
+        unknown,
+    )?;
+    snapshot.seek(SeekFrom::Start(payload + game.end))?;
+    copy_separator(&mut snapshot, &mut staged, game.end..next, false, unknown)?;
+    io::copy(&mut snapshot, &mut staged)?;
+    staged.flush()?;
+    drop(staged);
+    snapshot.seek(SeekFrom::Start(payload))?;
+    if !surviving_games_match(snapshot, number, output)? {
+        return Err(unknown());
+    }
+    Ok(())
+}
+
+fn surviving_games_match(
+    original: File,
+    removed: NonZeroU64,
+    mut staged: &File,
+) -> io::Result<bool> {
+    staged.rewind()?;
+    // Compare the two readers in order without holding a whole PGN's games in memory.
+    std::thread::scope(|scope| {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let comparison = std::thread::Builder::new().spawn_scoped(scope, move || {
+            let mut equal = true;
+            pgn::read_games(staged, |entry| {
+                if let Entry::Game { game, problem, .. } = entry {
+                    equal &=
+                        receive.recv().ok() == Some((game, problem.map(|problem| problem.reason)));
+                }
+            })?;
+            Ok(equal && receive.recv().is_err())
+        })?;
+        let mut row = 0;
+        let read = pgn::read_games(original, |entry| {
+            if let Entry::Game { game, problem, .. } = entry {
+                row += 1;
+                if row != removed.get() {
+                    let _sent = send.send((game, problem.map(|problem| problem.reason)));
+                }
+            }
+        });
+        drop(send);
+        read?;
+        comparison.join().unwrap_or(Ok(false))
+    })
+}
+
+fn copy_separator(
+    file: &mut File,
+    output: &mut BufWriter<&File>,
+    gap: Range<u64>,
+    before_game: bool,
+    unknown: impl Fn() -> io::Error,
+) -> io::Result<()> {
+    let length = gap.end - gap.start;
+    if length == 0 {
+        return Ok(());
+    }
+    let start = file.stream_position()?;
+    let mut bytes = BufReader::new(file.take(length)).bytes().peekable();
+    let mut discard = 0..length;
+    let mut offset = 0;
+    let mut line_start = 0;
+    let mut has_text = false;
+    while let Some(byte) = bytes.next().transpose()? {
+        offset += 1;
+        match byte {
+            b'\n' => {}
+            b'\r' if before_game && line_start == 0 && !has_text => {
+                // The preceding entry keeps its own line ending, including a lone CR.
+                offset += u64::from(bytes.next_if(|next| matches!(next, Ok(b'\n'))).is_some());
+            }
+            b' ' | b'\t' | b'\r' => continue,
+            _ if before_game => {
+                has_text = true;
+                continue;
+            }
+            _ => {
+                if byte == b'%' && output.stream_position()? != 0 {
+                    output.seek(SeekFrom::Current(-1))?;
+                    let mut previous = [0];
+                    output.get_mut().read_exact(&mut previous)?;
+                    if previous != *b"\n" {
+                        return Err(unknown());
+                    }
+                }
+                discard.end = line_start;
+                break;
+            }
+        }
+        if before_game && (line_start == 0 || has_text) {
+            discard.start = offset;
+        }
+        line_start = offset;
+        has_text = false;
+    }
+    if before_game && (line_start == 0 || has_text) {
+        // The gap can end with a byte order mark directly before the selected game's first tag.
+        discard.end = line_start;
+    }
+    file.seek(SeekFrom::Start(start))?;
+    io::copy(&mut file.take(discard.start), output)?;
+    file.seek(SeekFrom::Start(start + discard.end))?;
+    io::copy(&mut file.take(length - discard.end), output)?;
+    Ok(())
+}
+
+/// The numbered fields shown in a game list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PgnGameRow {
     /// The number of the game in its file, counting from 1.
@@ -317,9 +662,14 @@ impl PgnGameRow {
     /// space, so that every value stays in one field.
     #[must_use]
     pub fn new(number: u64, game: &Game) -> Self {
+        Self::from_tags(number, game.tags(), game.result())
+    }
+
+    pub(super) fn from_tags(number: u64, tags: &[Tag], result: Outcome) -> Self {
         let tag = |name| {
-            game.tag(name)
-                .unwrap_or("?")
+            tags.iter()
+                .find(|tag| tag.name == name)
+                .map_or("?", |tag| tag.value.as_str())
                 .replace("\r\n", " ")
                 .replace(['\r', '\n', '\t'], " ")
         };
@@ -327,7 +677,7 @@ impl PgnGameRow {
             number,
             white: tag("White"),
             black: tag("Black"),
-            result: game.result().to_string(),
+            result: result.to_string(),
             date: tag("Date"),
             event: tag("Event"),
         }
@@ -366,6 +716,34 @@ pub(super) struct Staged {
 }
 
 impl Staged {
+    fn for_append(target: &Path) -> io::Result<(Self, &'static [u8])> {
+        let old = match open(target) {
+            Ok(old) => Some(old),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        let mut staged = Staged::beside(target.to_owned(), old.as_ref())?;
+        let mut separator: &[u8] = b"";
+        if let Some(mut old) = old {
+            let length = io::copy(&mut old, &mut staged.file)?;
+            if length > 0 {
+                let mut tail = [0; 3];
+                let start = length.saturating_sub(3);
+                staged.file.seek(SeekFrom::Start(start))?;
+                let tail = &mut tail[..usize::try_from(length - start).unwrap_or(3)];
+                staged.file.read_exact(tail)?;
+                separator = if tail.ends_with(b"\n\n") || tail.ends_with(b"\n\r\n") {
+                    b""
+                } else if tail.ends_with(b"\n") {
+                    b"\n"
+                } else {
+                    b"\n\n"
+                };
+            }
+        }
+        Ok((staged, separator))
+    }
+
     pub(super) fn beside(destination: PathBuf, old: Option<&File>) -> io::Result<Staged> {
         let directory = StagingDirectory::beside(&destination)?;
         let path = directory.0.join("games.pgn");
@@ -382,8 +760,16 @@ impl Staged {
     }
 
     pub(super) fn publish(self) -> io::Result<()> {
+        self.publish_if(|| Ok(()))
+    }
+
+    pub(super) fn publish_if(
+        self,
+        check_destination: impl FnOnce() -> io::Result<()>,
+    ) -> io::Result<()> {
         self.file.sync_all()?;
         drop(self.file);
+        check_destination()?;
         fs::rename(self.path, self.destination)
     }
 }

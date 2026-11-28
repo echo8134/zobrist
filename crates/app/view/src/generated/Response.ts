@@ -5,10 +5,12 @@ import type { BoardAppearance } from "./BoardAppearance";
 import type { BoardPicture } from "./BoardPicture";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
+import type { DeletePgnGameAnswer } from "./DeletePgnGameAnswer";
 import type { EarlierState } from "./EarlierState";
 import type { EngineEntry } from "./EngineEntry";
 import type { FileCollection } from "./FileCollection";
 import type { GamePicture } from "./GamePicture";
+import type { GameRow } from "./GameRow";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
 import type { OpenGameLinkAnswer } from "./OpenGameLinkAnswer";
 import type { OpenedGame } from "./OpenedGame";
@@ -17,6 +19,7 @@ import type { PgnFileAnswer } from "./PgnFileAnswer";
 import type { PositionChange } from "./PositionChange";
 import type { PositionDraft } from "./PositionDraft";
 import type { SaveGameAnswer } from "./SaveGameAnswer";
+import type { TablebaseAnswer } from "./TablebaseAnswer";
 import type { VariationAnswer } from "./VariationAnswer";
 
 /**
@@ -78,7 +81,15 @@ opened: OpenedGame | null, } | { "type": "OpenGameLink",
 /**
  * The outcome of the fetch.
  */
-answer: OpenGameLinkAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
+answer: OpenGameLinkAnswer, } | { "type": "OpenDatabaseGame", 
+/**
+ * Opening a native game never attaches a PGN save target.
+ */
+answer: OpenGameAnswer, } | { "type": "LookupTablebase", 
+/**
+ * The answer to this board's lookup.
+ */
+answer: TablebaseAnswer, } | { "type": "GamePgn" } & PgnExport | { "type": "SetTag", 
 /**
  * Absent when the game is no longer open.
  */
@@ -154,11 +165,23 @@ path: string | null, } | { "type": "PickDatabasePath",
 /**
  * The absolute path returned by the system.
  */
+path: string | null, } | { "type": "PickNewDatabasePath", 
+/**
+ * The absolute path returned by the system.
+ */
 path: string | null, } | { "type": "ListDatabases", 
 /**
  * Names and locations of the registered collections.
  */
-entries: Array<DatabaseEntry>, } | { "type": "AddDatabase", 
+entries: Array<DatabaseEntry>, } | { "type": "ListDatabaseGames", 
+/**
+ * Rows in the requested order, with their original game numbers.
+ */
+rows: Array<GameRow>, 
+/**
+ * Number of matches across all pages.
+ */
+total: number, } | { "type": "AddDatabase", 
 /**
  * Names and locations after registration.
  */
@@ -166,7 +189,27 @@ entries: Array<DatabaseEntry>,
 /**
  * The verified number of games in the database.
  */
-games: number, } | { "type": "InspectDatabase", 
+games: number, } | { "type": "ImportDatabase", 
+/**
+ * The registered collections after the import.
+ */
+entries: Array<DatabaseEntry>, 
+/**
+ * Where the new collection was saved.
+ */
+path: string, 
+/**
+ * Number of games written, including games with recoverable problems.
+ */
+games: number, 
+/**
+ * Total number of problems in the source.
+ */
+problems: number, 
+/**
+ * The first diagnostic in source order, when present.
+ */
+firstProblem: string | null, } | { "type": "InspectDatabase", 
 /**
  * The verified number of games in the database.
  */
@@ -218,7 +261,11 @@ answer: PgnFileAnswer, } | { "type": "CreatePgnFile",
 /**
  * What the page Files shows next.
  */
-answer: PgnFileAnswer, } | { "type": "OpenGame", 
+answer: PgnFileAnswer, } | { "type": "DeletePgnGame", 
+/**
+ * The result of confirming deletion.
+ */
+answer: DeletePgnGameAnswer, } | { "type": "OpenGame", 
 /**
  * The game and its picture, or why there is none.
  */

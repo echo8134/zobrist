@@ -1,5 +1,12 @@
 //! The zobrist desktop app.
 
+use std::{
+    fs::{self, File, TryLockError},
+    io::{self, Write as _},
+    path::PathBuf,
+    process::ExitCode,
+};
+
 use tauri::{
     DragDropEvent, Manager as _, RunEvent, State, Window, WindowEvent,
     async_runtime::spawn_blocking,
@@ -58,7 +65,29 @@ async fn answer(
         .map_err(|error| error.to_string())
 }
 
-fn main() -> tauri::Result<()> {
+fn local_data_directory(identifier: &str) -> tauri::Result<PathBuf> {
+    let directory = dirs::data_local_dir().ok_or(tauri::Error::UnknownPath)?;
+    Ok(directory.join(identifier))
+}
+
+fn main() -> tauri::Result<ExitCode> {
+    let context = tauri::generate_context!();
+    let directory = local_data_directory(&context.config().identifier)?;
+    fs::create_dir_all(&directory)?;
+    let lock = File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join("app.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            writeln!(io::stderr().lock(), "zobrist is already running.")?;
+            return Ok(ExitCode::FAILURE);
+        }
+        Err(TryLockError::Error(error)) => return Err(error.into()),
+    }
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -135,12 +164,24 @@ fn main() -> tauri::Result<()> {
         });
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
-    builder
-        .build(tauri::generate_context!())?
-        .run(|app, event| {
-            if matches!(event, RunEvent::Exit) {
-                app.state::<SharedGames>().stop_engines();
-            }
-        });
-    Ok(())
+    builder.build(context)?.run(|app, event| {
+        if matches!(event, RunEvent::Exit) {
+            app.state::<SharedGames>().stop_engines();
+        }
+    });
+    Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_directory_matches_tauris_local_data_directory() -> tauri::Result<()> {
+        let context = tauri::generate_context!(test = true);
+        let lock_directory = local_data_directory(&context.config().identifier)?;
+        let app = tauri::test::mock_builder().build(context)?;
+        assert_eq!(lock_directory, app.path().app_local_data_dir()?);
+        Ok(())
+    }
 }

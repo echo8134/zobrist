@@ -7,10 +7,23 @@
 }
 
 .boardPart {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   flex: 1;
-  place-content: center;
   padding: var(--board-part-padding);
+  container-type: size;
+}
+
+.boardPart:has(section) {
+  padding-bottom: 0;
+}
+
+.boardStage {
+  display: grid;
+  place-content: center;
+  flex: 0 1 calc(100cqw + var(--button-row-gap) + var(--button-row-height));
+  min-height: 0;
   container-type: size;
 }
 

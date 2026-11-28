@@ -17,7 +17,7 @@ choice: PickerChoice,
 /**
  * The selected folder, when choosing a new file.
  */
-folder: string | null, } | { "type": "PickDatabasePath" } | { "type": "GetFileCollection" } | { "type": "RecoverFileCollection" } | { "type": "GetRecentFiles" } | { "type": "OpenListedPgnFile", 
+folder: string | null, } | { "type": "PickDatabasePath" } | { "type": "PickNewDatabasePath" } | { "type": "GetFileCollection" } | { "type": "RecoverFileCollection" } | { "type": "GetRecentFiles" } | { "type": "OpenListedPgnFile", 
 /**
  * The absolute path of the selected file.
  */

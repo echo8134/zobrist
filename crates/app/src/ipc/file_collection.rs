@@ -34,6 +34,8 @@ pub enum CollectionRequest {
     },
     /// Choose a native database to add to the Databases page.
     PickDatabasePath,
+    /// Choose a destination for a collection imported from PGN.
+    PickNewDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Recover the collection after the player chooses its last good copy.
@@ -216,6 +218,7 @@ impl CollectionRequest {
     pub fn answer(self, window: &Window) -> io::Result<Response> {
         let data_directory = || window.path().app_local_data_dir().map_err(io::Error::other);
         let file_dialog = || window.dialog().file().set_parent(window);
+        let database_dialog = || file_dialog().add_filter("zobrist databases", &["zobrist"]);
         match self {
             Self::PickEnginePath => Ok(Response::PickEnginePath {
                 path: picker_path(file_dialog().blocking_pick_file())?,
@@ -253,14 +256,16 @@ impl CollectionRequest {
                 }
                 Ok(Response::PickPgnPath { path })
             }
-            Self::PickDatabasePath => {
-                let selected = file_dialog()
-                    .add_filter("zobrist databases", &["zobrist"])
-                    .blocking_pick_file();
-                Ok(Response::PickDatabasePath {
-                    path: picker_path(selected)?,
-                })
-            }
+            Self::PickDatabasePath => Ok(Response::PickDatabasePath {
+                path: picker_path(database_dialog().blocking_pick_file())?,
+            }),
+            Self::PickNewDatabasePath => Ok(Response::PickNewDatabasePath {
+                path: picker_path(
+                    database_dialog()
+                        .set_file_name("Collection.zobrist")
+                        .blocking_save_file(),
+                )?,
+            }),
             Self::GetFileCollection => Ok(Response::GetFileCollection {
                 collection: FileCollection::load(&data_directory()?, false),
             }),
@@ -745,12 +750,13 @@ mod tests {
         fs::write(&club, "[White \"Ada\"]\n[Black \"Bo\"]\n\n1. e4 1-0\n")?;
         fs::write(&league, "")?;
 
+        let (_, _, version) = zobrist_store::list_pgn_games(&club)?;
         let club_entry = json!({"kind":"File","path":club,"name":"Final.PGN"});
         let league_entry = json!({"kind":"File","path":league,"name":"League.pgn"});
         assert_eq!(
             json!(drop_paths(Ok(data.clone()), &[Some(club.clone())])?),
             json!({"type":"File","entry":club_entry,"entries":[club_entry],"parent":null,
-            "file":{"path":club,"problems":0,"rows":[
+            "file":{"path":club,"version":version,"problems":0,"rows":[
                 {"number":1,"white":"Ada","black":"Bo","result":"1-0","date":"?","event":"?"}
             ]}})
         );

@@ -5,6 +5,7 @@ import {
   Folder,
   FolderOpen,
   History,
+  Trash2,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -13,11 +14,14 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { EarlierStates } from "./EarlierStates";
+import { EarlierStates, FileConfirmation } from "./EarlierStates";
 import styles from "./FilesPage.module.css";
+import { GameRows } from "./GameRows";
+import type { ChangedGameFile } from "./generated/ChangedGameFile";
 import type { CollectionEntry } from "./generated/CollectionEntry";
 import type { CollectionRequest } from "./generated/CollectionRequest";
 import type { FileCollection } from "./generated/FileCollection";
+import type { GameRow } from "./generated/GameRow";
 import type { PgnFile } from "./generated/PgnFile";
 import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
 import type { PickerChoice } from "./generated/PickerChoice";
@@ -47,6 +51,8 @@ const {
   numberColumn,
   resultColumn,
   dateColumn,
+  gameActions,
+  deleteGame,
 } = styles;
 
 type Selection =
@@ -361,14 +367,25 @@ async function rereadAfterRestore(path: string) {
 
 type Props = {
   onOpenGame: (path: string, number: number) => Promise<boolean>;
+  onGameFileChanged: (tab: ChangedGameFile) => void;
 };
 
-export function FilesPage({ onOpenGame }: Props) {
+type DeleteChoice = {
+  path: string;
+  version: string;
+  row: GameRow;
+  selectionRequest: number;
+};
+
+export function FilesPage({ onOpenGame, onGameFileChanged }: Props) {
   const { fileCollection, expanded, selected, selectionError } =
     useSyncExternalStore(subscribe, () => kept);
   const [choosing, setChoosing] = useState(false);
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [recovering, setRecovering] = useState(false);
+  const [deletion, setDeletion] = useState<DeleteChoice | "pending" | null>(
+    null,
+  );
   const openButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     void loadCollection();
@@ -378,6 +395,29 @@ export function FilesPage({ onOpenGame }: Props) {
   const open = async (path: string, number: number) => {
     if (!(await onOpenGame(path, number))) {
       await readFileAgain();
+    }
+  };
+  const confirmDelete = async (choice: DeleteChoice) => {
+    setDeletion("pending");
+    try {
+      const { answer } = await ask({
+        type: "DeletePgnGame",
+        path: choice.path,
+        number: choice.row.number,
+        version: choice.version,
+      });
+      if (answer.type === "Refusal") throw new Error(answer.message);
+      for (const tab of answer.tabs) onGameFileChanged(tab);
+      if (fileOfThePage() === choice.path) await readFileAgain();
+    } catch (error) {
+      if (
+        choice.selectionRequest === selectionRequest &&
+        fileOfThePage() === choice.path
+      ) {
+        keep({ selectionError: errorText(error) });
+      }
+    } finally {
+      setDeletion(null);
     }
   };
   const entries = (
@@ -425,6 +465,7 @@ export function FilesPage({ onOpenGame }: Props) {
     </ul>
   );
   const file = selected?.kind === "File" ? selected.file : undefined;
+  const version = file?.version;
   const historyFile =
     file ?? (selected?.kind === "Unreadable" ? selected : null);
   const historyOpen = historyFile !== null && historyPath === historyFile.path;
@@ -598,29 +639,46 @@ export function FilesPage({ onOpenGame }: Props) {
                     <th scope="col">Event</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {file.rows.map((row) => (
-                    <tr
-                      key={row.number}
-                      onClick={() => void open(file.path, row.number)}
-                    >
-                      <td>
+                <GameRows
+                  rows={file.rows}
+                  open={(number) => void open(file.path, number)}
+                  renderEvent={(row) => (
+                    <div className={gameActions}>
+                      <span>{row.event}</span>
+                      {version !== undefined && (
                         <button
                           type="button"
-                          aria-label={`Open game ${row.number}`}
+                          className={deleteGame}
+                          aria-label={`Delete game ${row.number}`}
+                          title={`Delete game ${row.number}`}
+                          disabled={deletion === "pending"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeletion({
+                              path: file.path,
+                              version,
+                              row,
+                              selectionRequest,
+                            });
+                          }}
                         >
-                          {row.number}
+                          <Trash2 aria-hidden="true" />
                         </button>
-                      </td>
-                      <td>{row.white}</td>
-                      <td>{row.black}</td>
-                      <td>{row.result}</td>
-                      <td>{row.date}</td>
-                      <td>{row.event}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                      )}
+                    </div>
+                  )}
+                />
               </table>
+              {deletion &&
+                deletion !== "pending" &&
+                deletion.selectionRequest === selectionRequest && (
+                  <FileConfirmation
+                    question={`Delete game ${deletion.row.number} (${deletion.row.white} - ${deletion.row.black}) from ${deletion.path}?`}
+                    action="Delete"
+                    onCancel={() => setDeletion(null)}
+                    onConfirm={() => void confirmDelete(deletion)}
+                  />
+                )}
             </>
           )}
         </section>

@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager as _, Window};
 use ts_rs::TS;
-use zobrist_store::{Database, OpenError};
+use zobrist_store::{Database, ImportError, OpenError, import_pgn};
 
-use super::Response;
 use super::file_collection::{list_recovery, lock_collection, publish_collection, read_list};
+use super::{DatabaseGameQuery, Response};
 
 /// One local collection in the Databases list.
 #[derive(Debug, PartialEq, Eq, Serialize, TS)]
@@ -25,10 +25,24 @@ pub struct DatabaseEntry {
 pub enum DatabaseRequest {
     /// List saved references, including files that have moved.
     ListDatabases,
+    /// Browse the rows of one native collection.
+    ListDatabaseGames {
+        /// The collection on this device.
+        path: PathBuf,
+        /// The filters, ordering and page chosen by the player.
+        query: DatabaseGameQuery,
+    },
     /// Verify the chosen database and keep its location.
     AddDatabase {
         /// The absolute path chosen by the player.
         path: PathBuf,
+    },
+    /// Create a new native collection from one PGN and register its path.
+    ImportDatabase {
+        /// The PGN file chosen by the player.
+        source: PathBuf,
+        /// The new native database path.
+        destination: PathBuf,
     },
     /// Read the current count from the selected database.
     InspectDatabase {
@@ -58,10 +72,60 @@ impl DatabaseRequest {
             Self::ListDatabases => Ok(Response::ListDatabases {
                 entries: entries(&paths(&catalog)?)?,
             }),
+            Self::ListDatabaseGames { path, query } => query.list(&path),
             Self::AddDatabase { path } => {
                 let games = game_count(&path)?;
                 let entries = update(directory, &catalog, |paths| paths.insert(path))?;
                 Ok(Response::AddDatabase { entries, games })
+            }
+            Self::ImportDatabase {
+                source,
+                destination,
+            } => {
+                file_name(&destination)?;
+                let mut first_problem = None;
+                let report = import_pgn(&source, &destination, |line| {
+                    if first_problem.is_none() {
+                        first_problem = line;
+                    }
+                    Ok(())
+                })
+                .map_err(|error| match error {
+                    ImportError::Read(error) => io::Error::new(
+                        error.kind(),
+                        format!("Could not read {}: {error}", source.display()),
+                    ),
+                    ImportError::Create(error) if error.kind() == ErrorKind::AlreadyExists => {
+                        io::Error::new(
+                            error.kind(),
+                            format!(
+                                "A file already exists at {}. Choose a new file.",
+                                destination.display()
+                            ),
+                        )
+                    }
+                    ImportError::Create(error) => io::Error::new(
+                        error.kind(),
+                        format!("Could not create {}: {error}", destination.display()),
+                    ),
+                })?;
+                let entries = update(directory, &catalog, |paths| paths.insert(destination.clone()))
+                    .map_err(|error| {
+                        io::Error::new(
+                            error.kind(),
+                            format!(
+                                "The collection was saved at {}. {error} Use “Add collection…” to register the saved file.",
+                                destination.display()
+                            ),
+                        )
+                    })?;
+                Ok(Response::ImportDatabase {
+                    entries,
+                    path: destination,
+                    games: report.games,
+                    problems: report.problems,
+                    first_problem,
+                })
             }
             Self::InspectDatabase { path } => Ok(Response::InspectDatabase {
                 games: game_count(&path)?,
@@ -89,15 +153,22 @@ fn file_name(path: &Path) -> io::Result<&str> {
 }
 
 fn game_count(path: &Path) -> io::Result<u64> {
+    Ok(open_database(path)?.game_count())
+}
+
+pub(super) fn open_database(path: &Path) -> io::Result<Database> {
     file_name(path)?;
-    let database = Database::open(path).map_err(|error| match error {
+    Database::open(path).map_err(database_error)
+}
+
+pub(super) fn database_error(error: OpenError) -> io::Error {
+    match error {
         OpenError::NotDatabase => io::Error::new(ErrorKind::InvalidData, "Not a zobrist database"),
         OpenError::Read(error) => io::Error::new(error.kind(), "File unavailable"),
         error @ (OpenError::Damaged | OpenError::Version { .. }) => {
             io::Error::new(ErrorKind::InvalidData, error)
         }
-    })?;
-    Ok(database.game_count())
+    }
 }
 
 fn paths(catalog: &Path) -> io::Result<BTreeSet<PathBuf>> {
@@ -150,6 +221,69 @@ mod tests {
     use zobrist_store::DatabaseWriter;
 
     use super::*;
+
+    #[test]
+    fn an_import_can_be_registered_after_recovering_the_list() -> io::Result<()> {
+        let directory = env::temp_dir().join(format!("zobrist-import-recovery-{}", process::id()));
+        fs::create_dir(&directory)?;
+        let source = directory.join("round.pgn");
+        fs::write(&source, "[Result \"*\"]\n\n1. e4 *\n")?;
+        let list = directory.join("databases.json");
+        fs::write(&list, b"[")?;
+        let destination = directory.join("Study.zobrist");
+        let error = DatabaseRequest::ImportDatabase {
+            source,
+            destination: destination.clone(),
+        }
+        .apply(&directory)
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "The collection was saved at {}. Could not read the database collection at {}. Your existing database files are untouched. Restore the list from a backup or move it aside, then reopen Databases. Use “Add collection…” to register the saved file.",
+                destination.display(),
+                list.display()
+            )
+        );
+        assert_eq!(fs::read(&list)?, b"[");
+        fs::rename(&list, directory.join("damaged.json"))?;
+        assert_eq!(
+            json!(
+                DatabaseRequest::AddDatabase {
+                    path: destination.clone()
+                }
+                .apply(&directory)?
+            ),
+            json!({"type":"AddDatabase","entries":[{"name":"Study.zobrist","path":destination}],"games":1})
+        );
+        fs::remove_dir_all(directory)
+    }
+
+    #[test]
+    fn import_counts_every_problem_and_returns_the_first_diagnostic() -> io::Result<()> {
+        let directory = env::temp_dir().join(format!("zobrist-import-report-{}", process::id()));
+        fs::create_dir(&directory)?;
+        let source = directory.join("two.pgn");
+        fs::write(
+            &source,
+            "[White \"A\"]\n[Black \"B\"]\n\n1. Ke3 *\n\n[White \"C\"]\n[Black \"D\"]\n\n1. e4 e5 2. Ke3 *\n",
+        )?;
+        let destination = directory.join("Two.zobrist");
+        let answer = DatabaseRequest::ImportDatabase {
+            source,
+            destination: destination.clone(),
+        }
+        .apply(&directory)?;
+        assert_eq!(
+            json!(answer),
+            json!({
+                "type":"ImportDatabase", "entries":[{"name":"Two.zobrist","path":destination}],
+                "path":destination, "games":2, "problems":2,
+                "firstProblem":"game 1 (A - B): illegal move \"Ke3\" at White's move 1, 0 moves kept"
+            })
+        );
+        fs::remove_dir_all(directory)
+    }
 
     #[test]
     fn an_unreadable_database_list_identifies_the_file_and_leaves_both_files_untouched()

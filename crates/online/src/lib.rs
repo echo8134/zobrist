@@ -1,17 +1,25 @@
-//! Fetch a finished standard chess game from its public Lichess link.
+//! Fetch public games and endgame tablebase results from Lichess.
+
+mod player;
+mod tablebase;
+
+pub use player::{PlayerExportError, download_player_games, download_player_games_with_history};
+pub use tablebase::{
+    TablebaseError, TablebaseMove, TablebaseOutcome, TablebaseResult, lookup_tablebase,
+};
 
 use std::fmt;
 use std::io::Read as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use reqwest::StatusCode;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, HeaderValue, RETRY_AFTER};
+use reqwest::{StatusCode, Url};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
 
-const MAX_EXPORT_BYTES: u64 = 1 << 20;
+const MAX_RESPONSE_BYTES: u64 = 1 << 20;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MIN_COOLDOWN: Duration = Duration::from_secs(60);
 
@@ -83,17 +91,55 @@ fn game_id(link: &str) -> Result<&str, FetchError> {
 /// Download the PGN export and return its single finished standard game.
 pub fn fetch_game(link: &str) -> Result<Game, FetchError> {
     let id = game_id(link)?;
+    let bytes = request(
+        Endpoint::Export(&format!("/game/export/{id}")),
+        "application/x-chess-pgn",
+        Some(REQUEST_TIMEOUT),
+        read_response,
+    )?;
+    parse_export(&bytes)
+}
+
+fn read_response(response: Response) -> Result<Vec<u8>, FetchError> {
+    let mut bytes = Vec::new();
+    let length = response
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| FetchError::Unavailable)?;
+    if length as u64 > MAX_RESPONSE_BYTES {
+        return Err(FetchError::TooLarge);
+    }
+    Ok(bytes)
+}
+
+#[derive(Clone, Copy)]
+enum Endpoint<'a> {
+    Export(&'a str),
+    Tablebase(&'a str),
+}
+
+// A player export may run longer than a single lookup while reads keep succeeding.
+fn request<T, E: From<FetchError>>(
+    endpoint: Endpoint<'_>,
+    accept: &str,
+    deadline: Option<Duration>,
+    consume: impl FnOnce(Response) -> Result<T, E>,
+) -> Result<T, E> {
     let mut cooldown = COOLDOWN.lock().map_err(|_| FetchError::Unavailable)?;
     if cooldown.is_some_and(|(since, duration)| since.elapsed() < duration) {
-        return Err(FetchError::RateLimited);
+        return Err(FetchError::RateLimited.into());
     }
 
     let client = Client::builder()
         .user_agent("zobrist")
+        .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never());
     #[cfg(not(feature = "fixture"))]
-    let host = "https://lichess.org";
+    let host = match endpoint {
+        Endpoint::Export(_) => "https://lichess.org",
+        Endpoint::Tablebase(_) => "https://tablebase.lichess.org",
+    };
     #[cfg(feature = "fixture")]
     let (client, host) = {
         let port = std::env::var("ZOBRIST_TEST_EXPORT_PORT")
@@ -102,36 +148,35 @@ pub fn fetch_game(link: &str) -> Result<Game, FetchError> {
             .ok_or(FetchError::Unavailable)?;
         (client.no_proxy(), format!("http://127.0.0.1:{port}"))
     };
-    let response = client
+    let url = match endpoint {
+        Endpoint::Export(path) => Url::parse(&format!("{host}{path}")),
+        Endpoint::Tablebase(fen) => {
+            Url::parse_with_params(&format!("{host}/standard"), [("fen", fen)])
+        }
+    }
+    .map_err(|_| FetchError::Unavailable)?;
+    let request = client
         .build()
         .map_err(|_| FetchError::Unavailable)?
-        .get(format!("{host}/game/export/{id}"))
-        .header(ACCEPT, "application/x-chess-pgn")
-        .timeout(REQUEST_TIMEOUT)
-        .send()
-        .map_err(|_| FetchError::Unavailable)?;
+        .get(url)
+        .header(ACCEPT, accept);
+    let request = match deadline {
+        Some(timeout) => request.timeout(timeout),
+        None => request,
+    };
+    let response = request.send().map_err(|_| FetchError::Unavailable)?;
     match response.status() {
-        StatusCode::OK => {}
-        StatusCode::NOT_FOUND => return Err(FetchError::NotFound),
+        StatusCode::OK => consume(response),
+        StatusCode::NOT_FOUND => Err(FetchError::NotFound.into()),
         StatusCode::TOO_MANY_REQUESTS => {
             *cooldown = Some((
                 Instant::now(),
                 retry_delay(response.headers().get(RETRY_AFTER)),
             ));
-            return Err(FetchError::RateLimited);
+            Err(FetchError::RateLimited.into())
         }
-        _ => return Err(FetchError::Unavailable),
+        _ => Err(FetchError::Unavailable.into()),
     }
-    let mut bytes = Vec::new();
-    let length = response
-        .take(MAX_EXPORT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| FetchError::Unavailable)?;
-    drop(cooldown);
-    if length as u64 > MAX_EXPORT_BYTES {
-        return Err(FetchError::TooLarge);
-    }
-    parse_export(&bytes)
 }
 
 fn retry_delay(value: Option<&HeaderValue>) -> Duration {

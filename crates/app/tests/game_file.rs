@@ -43,6 +43,31 @@ fn start_moves() -> Vec<Value> {
         .collect()
 }
 
+#[test]
+fn a_deleted_game_without_moves_can_still_be_saved_as_a_new_game() -> io::Result<()> {
+    let directory = folder("delete-empty-game")?;
+    let path = directory.join("only.pgn");
+    fs::write(&path, b"*\n")?;
+    let games = SharedGames::with_history(Ok(directory.join("data")));
+    let listed = ask(&games, json!({"type":"OpenPgnFile", "path": path}))?;
+    assert_eq!(open(&games, &path, 1)?["answer"]["game"], json!(1));
+    let deleted = ask(
+        &games,
+        json!({
+            "type":"DeletePgnGame", "path": path, "number": 1,
+            "version": listed["answer"]["version"]
+        }),
+    )?;
+    let tab = &deleted["answer"]["tabs"][0];
+    assert_eq!(tab["previous"], json!({"path": path, "number": 1}));
+    assert_eq!(tab["file"], json!(null));
+    assert_eq!(tab["unsaved"], true);
+    assert_eq!(fs::read(&path)?, b"");
+    assert_eq!(save_as(&games, 1, &path)?["answer"]["type"], "Saved");
+    assert_eq!(fs::read(path)?, b"*\n");
+    fs::remove_dir_all(directory)
+}
+
 fn notation_move(ply: usize, text: &str, comments_after: &[&str]) -> Value {
     let side = if ply.is_multiple_of(2) {
         "white"
@@ -60,6 +85,7 @@ fn second_game_at_its_start(path: &Path, number: u64) -> Value {
     legal_moves.sort_by_key(Value::to_string);
     json!({
         "revision": 0, "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "tablebaseUnavailableReason": "This lookup supports at most 7 pieces (32 on the board).",
         "turn": "white", "inCheck": false,
         "legalMoves": legal_moves,
         "canUndo": false, "canRedo": false, "inVariation": false, "hasNextMove": true,
@@ -118,6 +144,40 @@ fn opening_a_game_again_answers_with_the_game_that_is_open() -> io::Result<()> {
 
     assert_eq!(open(&games, &clean, 1)?["answer"]["game"], json!(2));
     assert_eq!(ask(&games, json!({"type": "NewGame"}))?["game"], json!(3));
+    Ok(())
+}
+
+#[test]
+fn opens_a_native_game_as_a_copy_without_a_pgn_save_target() -> io::Result<()> {
+    let path = folder("native-copy")?.join("Study.zobrist");
+    let original = include_bytes!("../../store/tests/fixtures/clean.zobrist");
+    fs::write(&path, original)?;
+    let games = SharedGames::default();
+    let open = |number| {
+        ask(
+            &games,
+            json!({"type": "OpenDatabaseGame", "path": path, "number": number}),
+        )
+    };
+    let mut picture = second_game_at_its_start(&path, 2);
+    picture["file"] = Value::Null;
+    picture["unsaved"] = json!(true);
+    assert_eq!(
+        with_sorted_moves(open(2)?),
+        json!({"type": "OpenDatabaseGame", "answer": {
+            "type": "Game", "game": 1, "picture": picture
+        }})
+    );
+    assert_eq!(open(3)?, refusal("OpenDatabaseGame", "noSuchGame", None));
+    ask(
+        &games,
+        json!({"type": "SetComment", "game": 1, "text": "My copy."}),
+    )?;
+    assert_eq!(
+        ask(&games, json!({"type": "SaveGame", "game": 1}))?,
+        refusal("SaveGame", "noFile", None)
+    );
+    assert_eq!(fs::read(path)?, original);
     Ok(())
 }
 

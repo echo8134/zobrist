@@ -16,7 +16,7 @@ The chess domain model. Pure. No IO and no framework dependencies.
 
 ### `crates/store` (zobrist-store)
 
-Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. It also reads one game of a PGN file by its number, adds games to a PGN file, and replaces one game of a PGN file. Adding and replacing keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Search over games and positions is planned.
+Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. The CLI and the app use the same streaming PGN import to create a new database and report problems in source order. It also reads one game of a PGN file by its number, adds games to a PGN file, and replaces one game of a PGN file. Adding and replacing keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Native collection queries filter and sort game headers before paging. Each result keeps its original game number. Position search is planned.
 
 ### `crates/engine` (zobrist-engine)
 
@@ -24,7 +24,7 @@ Runs a local UCI program and collects the lines it reports for each search. It u
 
 ### `crates/online` (zobrist-online)
 
-Owns outgoing connections to chess sites. It resolves a public Lichess game link, fetches its PGN export, and returns one finished standard game or the reason it could not be opened.
+Owns outgoing connections to chess sites. It can open one finished standard game from a Lichess link or download a player's public games for an inclusive range of UTC dates. For a player download, it gives the exported PGNs to `store` and appends them as a batch after the download finishes. When a player asks from the board, it sends the current FEN to the Lichess endgame tablebase and returns the position and move outcomes from the moving side's perspective.
 
 ### `crates/cli` (zobrist-cli)
 
@@ -32,9 +32,11 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify and count a selected collection.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify, count and browse a selected collection. Opening a native game puts a copy in a board tab with no PGN save target.
 
-On a normal quit the shell keeps the open boards in boards.json beside files.json in the app's local data directory. For a board from a PGN file it also keeps the game as last read or saved there, so Save can detect a change to the file even after a restart.
+Before starting the window toolkit, the shell takes an exclusive OS lock on app.lock in its local data directory. It resolves this folder with `dirs` and the identifier from Tauri's app configuration. It holds the lock until exit so only one process can use the boards and file collection in that directory.
+
+On a normal quit the shell keeps the open boards in boards.json beside files.json in the app's local data directory. For a board from a PGN file it also keeps the game as last read or saved there, so Save can detect a change to the file even after a restart. When the player deletes that game, the board retains its moves and its session origin becomes `"deleted"`, so it can be saved as a new game after a restart.
 If a saved session is damaged, the app opens the boards it can read and tells the player where it kept the original file.
 
 ### `scripts/`
@@ -45,6 +47,7 @@ The quality gate. `scripts/check.sh` is the entry point. Each script says in its
 
 ```
 core  <-  store, engine, online  <-  cli, app
+store <-  online
 ```
 
 Read each arrow as "is depended on by". `store`, `engine`, and `online` may depend on `core`. `cli` and `app` may use each of these crates and `core` directly. Nothing depends on `cli` or `app`. `core` depends only on the pure chess crates that `scripts/check-deps.sh` allows, and never on IO or framework crates. No workspace crate may depend directly on `rusqlite`. Only `app` may depend directly on the `tauri` crates. Only `online` may depend directly on `reqwest`.
@@ -100,6 +103,8 @@ While the engine runs, the view polls through the typed request. Each answer ide
 
 The CLI and desktop both open public Lichess links through `zobrist-online`. The crate owns the provider's HTTPS address, request limits, and cooldown. It uses `reqwest` (MIT OR Apache-2.0) with native TLS and returns game types from `zobrist-core`. Keeping this code in each interface would duplicate the request rules. Putting it in `core` would give the chess model an I/O dependency.
 
+For a player download, `online` uses `time` to convert the selected UTC dates and `serde_json` to extract the PGN from each export record. Its dependency on `store` lets both interfaces call one operation that publishes the entire batch or reports a refusal. The PGN keeps its variant tags and annotations, and the local destination path stays on the device. After the export is complete, the batch uses the same staged write as other PGN saves. A desktop caller can supply its history folder and receive a capture warning. The CLI supplies no history folder.
+
 Future connections to chess sites, including account features, belong in this crate. Revisit the client choice if a provider requires a transport it cannot support.
 
 ### An own file format for the game store
@@ -122,7 +127,7 @@ When creating a PGN, the native save dialog starts in the selected folder. Witho
 
 Desktop saves keep the 20 most recent pre-change states of each PGN under pgn-history in the app's local data directory. Each resolved absolute PGN path owns its own folder. Moving or removing the PGN leaves its states at the original path. Keeping each state's raw bytes, capture time, size and checksum in a separate file lets a player restore annotated or damaged PGNs exactly and keeps the other states usable if one is damaged.
 
-A board save can succeed when recording history fails and tells the player why. If another change holds the PGN's history lock, saves and restores wait up to five seconds. If the lock is still held, the app refuses the change so the player can retry. Restoring requires a verified state and a durable copy of the current bytes so the player can undo the restore. Both operations publish through the store's staged PGN write. The desktop supplies the history root and the command line currently supplies none. Revisit path ownership if players need history to follow a file to a new location.
+A board save can succeed when recording history fails and tells the player why. If another change holds the PGN's history lock, saves and restores wait up to five seconds. If the lock is still held, the app refuses the change so the player can retry. Restoring requires a verified state and a durable copy of the current bytes so the player can undo the restore. Deleting a game also requires that copy and confirmation for the listed version of the file. Save, restore and delete publish through the store's staged PGN write. The desktop supplies the history root and the command line currently supplies none. Revisit path ownership if players need history to follow a file to a new location.
 
 A single managed folder would require players to move or copy existing collections. Resolving a new name against the app's launch directory made its location depend on how the player started the app. The desktop shell uses `tauri-plugin-dialog` to offer the system's file, folder and save dialogs. Revisit the storage choice if players need a collection that travels between computers.
 
