@@ -1,6 +1,8 @@
 use std::fs::{self, File};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::num::NonZeroU64;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use zobrist_core::game::Game;
@@ -295,6 +297,194 @@ pub fn read_pgn_game(source: &Path, number: NonZeroU64) -> io::Result<Option<Gam
     Ok(found)
 }
 
+/// Reads the rows, problem count and version of the very same PGN byte stream.
+pub fn list_pgn_games(path: &Path) -> io::Result<(Vec<PgnGameRow>, usize, String)> {
+    let destination = path.canonicalize()?;
+    let mut source = VersionReader::new(&destination, File::open(&destination)?);
+    let mut rows = Vec::new();
+    let mut problems = 0;
+    pgn::read_games(&mut source, |entry| {
+        if let Entry::Game { game, problem, .. } = entry {
+            rows.push(PgnGameRow::new(rows.len() as u64 + 1, &game));
+            problems += usize::from(problem.is_some());
+        }
+    })?;
+    Ok((rows, problems, source.version()))
+}
+
+// Feed the hash fixed-size blocks so a short pipe read and a disk read have the same version.
+struct VersionReader<R> {
+    source: R,
+    hash: DefaultHasher,
+    checksum: crc32fast::Hasher,
+    block: [u8; 256],
+    filled: usize,
+    length: u64,
+}
+
+impl<R> VersionReader<R> {
+    fn new(path: &Path, source: R) -> Self {
+        let mut hash = DefaultHasher::new();
+        path.hash(&mut hash);
+        Self {
+            source,
+            hash,
+            checksum: crc32fast::Hasher::new(),
+            block: [0; 256],
+            filled: 0,
+            length: 0,
+        }
+    }
+
+    fn version(mut self) -> String {
+        self.hash.write(&self.block[..self.filled]);
+        format!(
+            "{}-{:08x}-{:016x}",
+            self.length,
+            self.checksum.finalize(),
+            self.hash.finish()
+        )
+    }
+}
+
+impl<R: Read> Read for VersionReader<R> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        let count = self.source.read(output)?;
+        let mut bytes = &output[..count];
+        self.checksum.update(bytes);
+        self.length += count as u64;
+        while !bytes.is_empty() {
+            let take = bytes.len().min(self.block.len() - self.filled);
+            self.block[self.filled..self.filled + take].copy_from_slice(&bytes[..take]);
+            self.filled += take;
+            bytes = &bytes[take..];
+            if self.filled == self.block.len() {
+                self.hash.write(&self.block);
+                self.filled = 0;
+            }
+        }
+        Ok(count)
+    }
+}
+
+pub(super) fn content_version(path: &Path, file: &mut File) -> io::Result<String> {
+    file.rewind()?;
+    let mut source = VersionReader::new(path, file);
+    io::copy(&mut source, &mut io::sink())?;
+    Ok(source.version())
+}
+
+pub(super) fn list_changed() -> io::Error {
+    io::Error::other(
+        "This file changed since the list was read. Reopen the file and choose the game again.",
+    )
+}
+
+// The PGN payload of the captured state begins at the current file position.
+pub(super) fn stage_without_game(
+    path: &Path,
+    number: NonZeroU64,
+    expected: &str,
+    mut snapshot: File,
+    output: &File,
+) -> io::Result<()> {
+    let payload = snapshot.stream_position()?;
+    let mut reader = VersionReader::new(path, &mut snapshot);
+    let mut games = 0;
+    let (mut previous, mut selected, mut following) = (None, None, None);
+    pgn::read_games(&mut reader, |entry| {
+        let range = match entry {
+            Entry::Game { range, .. } => {
+                games += 1;
+                if games == number.get() {
+                    selected = range;
+                    return;
+                }
+                range
+            }
+            Entry::StrayText { range, .. } => Some(range),
+        };
+        if games < number.get() {
+            previous = Some(range.map(|range| range.end));
+        } else if following.is_none() {
+            following = Some(range.map(|range| range.start));
+        }
+    })?;
+    let length = reader.length;
+    if reader.version() != expected {
+        return Err(list_changed());
+    }
+    let unknown = || {
+        io::Error::other(format!(
+            "Could not locate game {number} safely in {}. Your PGN file is untouched.",
+            path.display()
+        ))
+    };
+    let game = selected.ok_or_else(unknown)?;
+    let next = following.unwrap_or(Some(length)).ok_or_else(unknown)?;
+    // Only a final entry owns the blank separator before it. Keep the previous entry's line ending.
+    let prefix = if following.is_none() {
+        previous.unwrap_or(Some(game.start)).ok_or_else(unknown)?
+    } else {
+        game.start
+    };
+    if prefix > game.start || game.start >= game.end || game.end > next || next > length {
+        return Err(unknown());
+    }
+    snapshot.seek(SeekFrom::Start(payload))?;
+    let mut staged = BufWriter::new(output);
+    io::copy(&mut (&mut snapshot).take(prefix), &mut staged)?;
+    copy_separator(&mut snapshot, &mut staged, prefix..game.start, true)?;
+    snapshot.seek(SeekFrom::Start(payload + game.end))?;
+    copy_separator(&mut snapshot, &mut staged, game.end..next, false)?;
+    io::copy(&mut snapshot, &mut staged)?;
+    staged.flush()?;
+    drop(staged);
+    let mut remaining = 0;
+    let mut input = output;
+    input.rewind()?;
+    pgn::read_games(input, |entry| {
+        if matches!(entry, Entry::Game { .. }) {
+            remaining += 1;
+        }
+    })?;
+    if remaining != games - 1 {
+        return Err(unknown());
+    }
+    Ok(())
+}
+
+fn copy_separator(
+    file: &mut File,
+    output: &mut impl Write,
+    gap: Range<u64>,
+    mut keep_line: bool,
+) -> io::Result<()> {
+    let mut left = gap.end - gap.start;
+    let mut buffer = [0; 8192];
+    let mut after_carriage_return = false;
+    while left != 0 {
+        let size = usize::try_from(left)
+            .unwrap_or(buffer.len())
+            .min(buffer.len());
+        file.read_exact(&mut buffer[..size])?;
+        for &byte in &buffer[..size] {
+            if after_carriage_return && byte != b'\n' {
+                keep_line = false;
+            }
+            if keep_line || !matches!(byte, b' ' | b'\t' | b'\r' | b'\n') {
+                output.write_all(&[byte])?;
+            }
+            if byte == b'\n' {
+                keep_line = false;
+            }
+            after_carriage_return = byte == b'\r';
+        }
+        left -= size as u64;
+    }
+    Ok(())
+}
+
 /// What a list shows of one game of a PGN file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PgnGameRow {
@@ -382,8 +572,16 @@ impl Staged {
     }
 
     pub(super) fn publish(self) -> io::Result<()> {
+        self.publish_if(|| Ok(()))
+    }
+
+    pub(super) fn publish_if(
+        self,
+        check_destination: impl FnOnce() -> io::Result<()>,
+    ) -> io::Result<()> {
         self.file.sync_all()?;
         drop(self.file);
+        check_destination()?;
         fs::rename(self.path, self.destination)
     }
 }

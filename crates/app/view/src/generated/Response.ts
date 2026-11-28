@@ -5,6 +5,7 @@ import type { BoardAppearance } from "./BoardAppearance";
 import type { BoardPicture } from "./BoardPicture";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
+import type { DeletePgnGameAnswer } from "./DeletePgnGameAnswer";
 import type { EarlierState } from "./EarlierState";
 import type { EngineEntry } from "./EngineEntry";
 import type { FileCollection } from "./FileCollection";
@@ -206,7 +207,11 @@ answer: PgnFileAnswer, } | { "type": "CreatePgnFile",
 /**
  * What the page Files shows next.
  */
-answer: PgnFileAnswer, } | { "type": "OpenGame", 
+answer: PgnFileAnswer, } | { "type": "DeletePgnGame", 
+/**
+ * The result of confirming deletion.
+ */
+answer: DeletePgnGameAnswer, } | { "type": "OpenGame", 
 /**
  * The game and its picture, or why there is none.
  */

@@ -1,9 +1,10 @@
 use std::fs::{self, File, TryLockError};
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Seek, Write};
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::pgn_file::{Staged, open};
+use crate::pgn_file::{Staged, content_version, list_changed, open, stage_without_game};
 use crate::{PgnWriteConflict, StagingDirectory, copy_with_checksum, read_bytes};
 
 const MAGIC: &[u8; 8] = b"ZPGNHST\x01";
@@ -83,7 +84,7 @@ impl HistoryFailure {
         )
     }
 
-    fn restore_error(self, number: u64) -> io::Error {
+    fn change_error(self, change: ProtectedChange) -> io::Error {
         if self.contended() {
             return self.reason;
         }
@@ -95,7 +96,7 @@ impl HistoryFailure {
         io::Error::new(
             self.reason.kind(),
             format!(
-                "Could not restore State {number}. The current bytes could not be kept in {}. {}{advice}",
+                "Could not {change}. The current bytes could not be kept in {}. {}{advice}",
                 self.path.display(),
                 self.detail()
             ),
@@ -267,8 +268,8 @@ struct Capture {
 }
 
 impl Capture {
-    fn publish(self, staged: Staged) -> io::Result<()> {
-        if let Err(error) = staged.publish() {
+    fn finish(self, publication: io::Result<()>) -> io::Result<()> {
+        if let Err(error) = publication {
             fs::remove_file(self.path)?;
             return Err(error);
         }
@@ -389,7 +390,7 @@ impl SaveTarget {
         };
         match captured {
             Ok(capture) => {
-                capture.publish(staged)?;
+                capture.finish(staged.publish())?;
                 Ok(None)
             }
             Err(warning) => {
@@ -466,6 +467,97 @@ pub fn prepare_pgn_restore(target: &Path, root: &Path, number: u64) -> io::Resul
     stamp(&target, &mut File::open(&target)?)
 }
 
+#[derive(Clone, Copy)]
+enum ProtectedChange {
+    Restore(u64),
+    Delete(NonZeroU64),
+}
+
+impl std::fmt::Display for ProtectedChange {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Restore(number) => write!(formatter, "restore State {number}"),
+            Self::Delete(number) => write!(formatter, "delete game {number}"),
+        }
+    }
+}
+
+impl ProtectedChange {
+    fn changed(self) -> io::Error {
+        match self {
+            Self::Restore(_) => io::Error::other("This file changed. Choose the state again."),
+            Self::Delete(_) => list_changed(),
+        }
+    }
+
+    fn version(self, path: &Path, file: &mut File) -> io::Result<String> {
+        match self {
+            Self::Restore(_) => stamp(path, file),
+            Self::Delete(_) => content_version(path, file),
+        }
+    }
+
+    fn apply(self, path: &Path, history: PgnHistory<'_>, expected: &str) -> io::Result<PathBuf> {
+        let deleting = matches!(self, Self::Delete(_));
+        let target = path.canonicalize().map_err(|error| {
+            if deleting && error.kind() == ErrorKind::NotFound {
+                self.changed()
+            } else {
+                error
+            }
+        })?;
+        let folder = StateFolder::open(history.root, &target, deleting)
+            .map_err(|error| error.change_error(self))?
+            .ok_or_else(|| list_error(&history.root.join("pgn-history")))?;
+        let mut current = open(&target).map_err(|error| {
+            if deleting && error.kind() == ErrorKind::NotFound {
+                self.changed()
+            } else {
+                error
+            }
+        })?;
+        if self.version(&target, &mut current)? != expected {
+            return Err(self.changed());
+        }
+        let staged = Staged::beside(target.clone(), Some(&current))?;
+        if let Self::Restore(number) = self {
+            read_state(&folder.state(number), &staged.file)?;
+            if equal_bytes(&current, &staged.file)? {
+                return Ok(target);
+            }
+        }
+        let capture = folder
+            .capture(&mut current, history.captured_at)
+            .map_err(|reason| {
+                HistoryFailure {
+                    path: folder.path.clone(),
+                    reason,
+                }
+                .change_error(self)
+            })?;
+        let publication = (|| {
+            if let Self::Delete(number) = self {
+                // Read from the captured file so the list, range and surviving bytes describe one snapshot.
+                let mut snapshot = open_state(&capture.path)?;
+                read_header(&mut snapshot)?;
+                stage_without_game(&target, number, expected, snapshot, &staged.file)?;
+            }
+            staged.publish_if(|| {
+                let version = path
+                    .canonicalize()
+                    .and_then(|resolved| self.version(&resolved, &mut File::open(&resolved)?));
+                if version.is_ok_and(|version| version == expected) {
+                    Ok(())
+                } else {
+                    Err(self.changed())
+                }
+            })
+        })();
+        capture.finish(publication)?;
+        Ok(target)
+    }
+}
+
 /// Publishes the chosen bytes only after keeping the current PGN and checking the confirmation.
 pub fn restore_pgn_state(
     target: &Path,
@@ -473,34 +565,17 @@ pub fn restore_pgn_state(
     number: u64,
     expected: &str,
 ) -> io::Result<()> {
-    let target = target.canonicalize()?;
-    let folder = StateFolder::open(history.root, &target, false)
-        .map_err(|e| e.restore_error(number))?
-        .ok_or_else(|| list_error(&history.root.join("pgn-history")))?;
-    let changed = || io::Error::other("This file changed. Choose the state again.");
-    let mut current = open(&target)?;
-    if stamp(&target, &mut current)? != expected {
-        return Err(changed());
-    }
-    let staged = Staged::beside(target.clone(), Some(&current))?;
-    read_state(&folder.state(number), &staged.file)?;
-    if equal_bytes(&current, &staged.file)? {
-        return Ok(());
-    }
-    let capture = folder
-        .capture(&mut current, history.captured_at)
-        .map_err(|reason| {
-            HistoryFailure {
-                path: folder.path.clone(),
-                reason,
-            }
-            .restore_error(number)
-        })?;
-    match File::open(&target).and_then(|mut file| stamp(&target, &mut file)) {
-        Ok(actual) if actual == expected => capture.publish(staged),
-        _ => {
-            fs::remove_file(capture.path)?;
-            Err(changed())
-        }
-    }
+    ProtectedChange::Restore(number)
+        .apply(target, history, expected)
+        .map(drop)
+}
+
+/// Deletes one listed game after keeping the full PGN. Returns the resolved path that was changed.
+pub fn delete_pgn_game(
+    target: &Path,
+    number: NonZeroU64,
+    expected: &str,
+    history: PgnHistory<'_>,
+) -> io::Result<PathBuf> {
+    ProtectedChange::Delete(number).apply(target, history, expected)
 }

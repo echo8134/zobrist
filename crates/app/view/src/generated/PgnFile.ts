@@ -8,4 +8,8 @@ export type PgnFile = {
 /**
  * The path on disk.
  */
-path: string, rows: Array<GameRow>, problems: number, };
+path: string, rows: Array<GameRow>, problems: number, 
+/**
+ * Binds rows eligible for deletion to the bytes read from their source.
+ */
+version?: string, };

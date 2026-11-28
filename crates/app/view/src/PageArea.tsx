@@ -97,6 +97,9 @@ export function PageArea({ page, change }: Props) {
       ) : page === "Files" ? (
         <FilesPage
           onOpenGame={(path, number) => openGame(path, number, change)}
+          onGameFileChanged={(tab) =>
+            change({ type: "updateGameFile", ...tab })
+          }
         />
       ) : (
         contents[page]
