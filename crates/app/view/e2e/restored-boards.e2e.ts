@@ -1,7 +1,9 @@
+import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmdirSync,
   rmSync,
@@ -10,7 +12,7 @@ import {
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
 import { drawnBoard, startPositionWithWhiteAtBottom } from "./board";
-import { withDesktopApp } from "./desktop-session";
+import { freePort, withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
 
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
@@ -91,6 +93,67 @@ describe("boards after quitting and starting zobrist", function () {
     copyFileSync(fixture, file);
   });
   afterEach(() => rmSync(work, { recursive: true, force: true }));
+
+  it("keeps one running copy per data directory and restores its board after quitting", async () => {
+    const directory = `${work}/io.github.echo8134.zobrist`;
+    await withDesktopApp(work, async (app) => {
+      await expectHome(app);
+      await newBoard(app);
+      await play(app, "e2", "e4", "e4");
+
+      // Recovery would move this file if another window tried to restore the session.
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(`${directory}/boards.json`, '{"boards":[');
+      writeFileSync(`${directory}/files.json`, "[]");
+      const entries = readdirSync(directory).sort();
+      for (const display of [{}, { DISPLAY: "", WAYLAND_DISPLAY: "" }]) {
+        const second = spawnSync(`${target}/debug/zobrist-app`, {
+          env: {
+            ...process.env,
+            XDG_DATA_HOME: work,
+            XDG_CACHE_HOME: `${work}/cache`,
+            ...display,
+            TAURI_WEBDRIVER_PORT: String(await freePort()),
+          },
+          encoding: "utf8",
+          timeout: 10_000,
+          killSignal: "SIGKILL",
+        });
+        expect({ status: second.status, signal: second.signal }).toEqual({
+          status: 1,
+          signal: null,
+        });
+        expect(second.stderr).toBe("zobrist is already running.\n");
+      }
+      expect(readdirSync(directory).sort()).toEqual(entries);
+      expect(readFileSync(`${directory}/boards.json`, "utf8")).toBe(
+        '{"boards":[',
+      );
+      expect(readFileSync(`${directory}/files.json`, "utf8")).toBe("[]");
+      expect(readFileSync(`${directory}/app.lock`)).toHaveLength(0);
+      await withDesktopApp(`${work}/other`, expectHome);
+      await expectMove(app, "e4");
+      const picture = await app.saveScreenshot(
+        `${target}/e2e/one-running-copy.png`,
+      );
+      expect([picture.readUInt32BE(16), picture.readUInt32BE(20)]).toEqual([
+        1280, 800,
+      ]);
+    });
+    await withDesktopApp(
+      work,
+      async (app) => {
+        await expect(tabs(app)).toBeElementsArrayOfSize(1);
+        await expect(selected(app)).toHaveText("New game");
+        await expectMove(app, "e4");
+      },
+      {},
+      "terminate process",
+    );
+    await withDesktopApp(work, async (app) => {
+      await expect(app.$("header").$("aria/New board")).toBeDisplayed();
+    });
+  });
 
   it("opens Home or the readable board and tells the player where the original session is kept", async () => {
     const directory = `${work}/io.github.echo8134.zobrist`;

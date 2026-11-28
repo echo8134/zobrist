@@ -48,12 +48,14 @@
 //! | 6 | Add the following `u8` annotation symbol to the preceding move. |
 
 mod codec;
+mod import;
 mod pgn_file;
 mod pgn_history;
 
+pub use import::{ImportError, PgnReport, import_pgn, problem_line, read_pgn_entries};
 pub use pgn_file::{
-    PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, list_pgn_games, read_pgn_game,
-    replace_pgn_game,
+    PgnBatch, PgnGameRow, PgnWriteConflict, add_pgn_game, add_pgn_games, list_pgn_games,
+    read_pgn_game, replace_pgn_game,
 };
 
 pub use pgn_history::{

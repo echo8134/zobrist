@@ -25,6 +25,7 @@ import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
 import type { PickerChoice } from "./generated/PickerChoice";
 import type { RefusalReason } from "./generated/RefusalReason";
 import { ask, errorText } from "./ipc";
+import { fileWasOpened } from "./RecentFiles";
 
 const {
   toolbar,
@@ -191,7 +192,23 @@ function failedSelection(
   }
 }
 
-async function openListed(entry: CollectionEntry, root: string) {
+function branchContaining(
+  path: string,
+  entries = kept.fileCollection.type === "Ready"
+    ? kept.fileCollection.entries
+    : [],
+): CollectionEntry | undefined {
+  return entries.find((entry) => {
+    if (entry.path === path) return true;
+    const children = kept.expanded.get(entry.path);
+    return children && branchContaining(path, children);
+  });
+}
+
+export async function openListed(
+  entry: CollectionEntry,
+  root = branchContaining(entry.path)?.path ?? entry.path,
+) {
   const previous = kept.selected;
   if (
     entry.kind === "Folder" &&
@@ -221,7 +238,10 @@ async function openListed(entry: CollectionEntry, root: string) {
         });
       }
     } else {
-      const { answer } = await ask({ type: "OpenPgnFile", path: entry.path });
+      const { answer } = await ask({
+        type: "OpenListedPgnFile",
+        path: entry.path,
+      });
       if (answer.type === "Refusal") {
         failedSelection(
           request,
@@ -234,6 +254,7 @@ async function openListed(entry: CollectionEntry, root: string) {
         );
         return;
       }
+      fileWasOpened();
       if (request === selectionRequest) {
         keep({ selected: { kind: "File", entry, root, file: answer } });
       }
@@ -254,6 +275,7 @@ async function pick(choice: PickerChoice, chosenPath?: string) {
     if (request === selectionRequest) request = beginSelection(path);
 
     const { answer } = await ask({ type: "AddPgnPath", choice, path, folder });
+    if (choice === "File" && answer.type === "File") fileWasOpened();
     if (answer.type === "Refusal") {
       const keepOnRefusal: Selection | null =
         choice === "File"

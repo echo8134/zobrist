@@ -47,6 +47,123 @@ impl From<PgnWriteConflict> for io::Error {
     }
 }
 
+/// Complete raw PGN games staged on disk until their destination can be published.
+pub struct PgnBatch {
+    file: File,
+    _directory: StagingDirectory,
+    games: Option<u64>,
+    first_start: u64,
+}
+
+impl PgnBatch {
+    /// Starts a batch without opening its eventual destination.
+    pub fn new() -> io::Result<Self> {
+        let directory = StagingDirectory::beside(&std::env::temp_dir().join("games.pgn"))?;
+        Ok(Self {
+            file: File::create_new(directory.0.join("games.pgn"))?,
+            _directory: directory,
+            games: Some(0),
+            first_start: 0,
+        })
+    }
+
+    /// Stages one finished PGN, retaining its tags, annotations and variant moves verbatim.
+    /// After a failed push the batch cannot be published.
+    pub fn push(&mut self, pgn: &str) -> io::Result<()> {
+        let games = self.games.take().ok_or_else(failed_write)?;
+        let mut entries = 0;
+        let mut start = None;
+        let marker = pgn.split_ascii_whitespace().next_back();
+        pgn::read_export_record(pgn.as_bytes(), |entry| {
+            entries += 1;
+            if let Entry::Game {
+                game,
+                range: Some(range),
+                problem,
+            } = entry
+            {
+                // The board reader checks standard chess moves even for a variant export.
+                let variant = game.tag("Variant").is_some_and(|name| name != "Standard");
+                let readable = problem.is_none_or(|problem| {
+                    variant
+                        && matches!(
+                            problem.reason,
+                            pgn::Reason::IllegalMove(_)
+                                | pgn::Reason::AmbiguousMove(_)
+                                | pgn::Reason::InvalidFen
+                        )
+                });
+                let result = game.result().to_string();
+                if readable
+                    && !game.result().is_unknown()
+                    && marker == Some(result.as_str())
+                    && game.tag("Result").is_none_or(|tag| tag == result)
+                {
+                    start = Some(range.start);
+                }
+            }
+        })?;
+        let start = start.filter(|_| entries == 1).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "The export record does not contain one finished PGN game.",
+            )
+        })?;
+        if games == 0 {
+            self.first_start = start;
+        } else {
+            self.file.write_all(b"\n")?;
+        }
+        self.file.write_all(pgn.as_bytes())?;
+        if !pgn.ends_with('\n') {
+            self.file.write_all(b"\n")?;
+        }
+        self.games = Some(games + 1);
+        Ok(())
+    }
+
+    /// Appends the batch after the current destination bytes in one publication.
+    /// Returns the added count and any warning from recording history. An empty batch
+    /// leaves both the destination and its history untouched.
+    pub fn append_to(
+        mut self,
+        target: &Path,
+        history: Option<PgnHistory<'_>>,
+    ) -> io::Result<(u64, Option<String>)> {
+        let games = self.games.ok_or_else(failed_write)?;
+        if games == 0 {
+            return Ok((0, None));
+        }
+        let target = SaveTarget::new(destination(target)?, history)?;
+        let (mut staged, separator) = Staged::for_append(&target.path)?;
+        staged.file.write_all(separator)?;
+        let first = staged.file.stream_position()? + self.first_start;
+        self.file.rewind()?;
+        io::copy(&mut self.file, &mut staged.file)?;
+        // An open comment or tag in the destination can absorb part or all of the first game.
+        staged.file.rewind()?;
+        let mut found_first = false;
+        let mut appended = 0;
+        pgn::read_games(&staged.file, |entry| {
+            if let Entry::Game {
+                range: Some(range), ..
+            } = entry
+                && range.start >= first
+            {
+                found_first |= range.start == first;
+                appended += 1;
+            }
+        })?;
+        if !found_first || appended != games {
+            return Err(refusal(
+                "The destination would not keep every downloaded game separate.".to_owned(),
+            ));
+        }
+        let warning = target.publish(staged)?;
+        Ok((games, warning))
+    }
+}
+
 /// Adds the supplied games to a PGN file, creating the target if necessary.
 /// Follows symbolic links and stages the new file beside the destination.
 /// Calls `supply` with a function that writes one game at a time. An error from
@@ -145,33 +262,8 @@ fn stage_with_added<E: From<io::Error>>(
     target: &Path,
     supply: impl FnOnce(&mut dyn FnMut(&Game) -> io::Result<()>) -> Result<(), E>,
 ) -> Result<(Staged, u64), E> {
-    let old = match open(target) {
-        Ok(old) => Some(old),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
-    };
-    let mut staged = Staged::beside(target.to_owned(), old.as_ref())?;
-    let mut separator: &[u8] = b"";
-    let prefix_length = if let Some(mut old) = old {
-        let length = io::copy(&mut old, &mut staged.file)?;
-        if length > 0 {
-            let mut tail = [0; 3];
-            let start = length.saturating_sub(3);
-            staged.file.seek(SeekFrom::Start(start))?;
-            let tail = &mut tail[..usize::try_from(length - start).unwrap_or(3)];
-            staged.file.read_exact(tail)?;
-            separator = if tail.ends_with(b"\n\n") || tail.ends_with(b"\n\r\n") {
-                b""
-            } else if tail.ends_with(b"\n") {
-                b"\n"
-            } else {
-                b"\n\n"
-            };
-        }
-        length + separator.len() as u64
-    } else {
-        0
-    };
+    let (mut staged, separator) = Staged::for_append(target)?;
+    let prefix_length = staged.file.stream_position()? + separator.len() as u64;
     let mut output = BufWriter::new(&staged.file);
     let mut separator = Some(separator);
     supply(&mut |game| {
@@ -618,6 +710,34 @@ pub(super) struct Staged {
 }
 
 impl Staged {
+    fn for_append(target: &Path) -> io::Result<(Self, &'static [u8])> {
+        let old = match open(target) {
+            Ok(old) => Some(old),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        let mut staged = Staged::beside(target.to_owned(), old.as_ref())?;
+        let mut separator: &[u8] = b"";
+        if let Some(mut old) = old {
+            let length = io::copy(&mut old, &mut staged.file)?;
+            if length > 0 {
+                let mut tail = [0; 3];
+                let start = length.saturating_sub(3);
+                staged.file.seek(SeekFrom::Start(start))?;
+                let tail = &mut tail[..usize::try_from(length - start).unwrap_or(3)];
+                staged.file.read_exact(tail)?;
+                separator = if tail.ends_with(b"\n\n") || tail.ends_with(b"\n\r\n") {
+                    b""
+                } else if tail.ends_with(b"\n") {
+                    b"\n"
+                } else {
+                    b"\n\n"
+                };
+            }
+        }
+        Ok((staged, separator))
+    }
+
     pub(super) fn beside(destination: PathBuf, old: Option<&File>) -> io::Result<Staged> {
         let directory = StagingDirectory::beside(&destination)?;
         let path = directory.0.join("games.pgn");

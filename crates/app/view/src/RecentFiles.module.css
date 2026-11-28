@@ -1,0 +1,52 @@
+.recent {
+  max-width: var(--user-content-width);
+  margin-top: var(--user-section-gap);
+  overflow-wrap: anywhere;
+}
+
+.recent h2 {
+  margin: 0;
+  font-size: var(--collection-heading-size);
+  font-weight: var(--top-bar-name-weight);
+}
+
+.recent p {
+  margin: var(--file-line-gap-above) 0 0;
+  color: var(--file-line-color);
+}
+
+.recent [role="alert"] {
+  color: var(--refusal-color);
+}
+
+.recent ol {
+  margin: var(--file-line-gap-above) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--list-line-color);
+  list-style: none;
+}
+
+.recent li {
+  border-bottom: 1px solid var(--list-line-color);
+}
+
+.recent button {
+  display: grid;
+  width: 100%;
+  padding: var(--user-row-padding);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.recent button:hover,
+.recent button:focus-visible {
+  background: var(--top-bar-background-color);
+}
+
+.path {
+  color: var(--file-line-color);
+}

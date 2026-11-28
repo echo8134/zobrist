@@ -4,7 +4,11 @@ type Choice = "File" | "Folder" | "New" | "Engine";
 
 /** WebDriver cannot drive the system dialog. Only its next answer is supplied by the test. */
 export async function answerNextPicker(
-  type: "PickPgnPath" | "PickDatabasePath" | "PickEnginePath",
+  type:
+    | "PickPgnPath"
+    | "PickDatabasePath"
+    | "PickNewDatabasePath"
+    | "PickEnginePath",
   path: string | null,
   session: WebdriverIO.Browser = browser,
 ) {

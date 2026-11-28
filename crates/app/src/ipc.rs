@@ -657,6 +657,11 @@ pub enum Response {
         /// The absolute path returned by the system.
         path: Option<std::path::PathBuf>,
     },
+    /// The chosen destination for a new database, or nothing after cancellation.
+    PickNewDatabasePath {
+        /// The absolute path returned by the system.
+        path: Option<std::path::PathBuf>,
+    },
     /// The native databases registered on this device.
     ListDatabases {
         /// Names and locations of the registered collections.
@@ -669,6 +674,21 @@ pub enum Response {
         /// The verified number of games in the database.
         #[ts(type = "number")]
         games: u64,
+    },
+    /// The published and registered PGN import.
+    ImportDatabase {
+        /// The registered collections after the import.
+        entries: Vec<DatabaseEntry>,
+        /// Where the new collection was saved.
+        path: std::path::PathBuf,
+        /// Number of games written, including games with recoverable problems.
+        #[ts(type = "number")]
+        games: u64,
+        /// Total number of problems in the source.
+        problems: usize,
+        /// The first diagnostic in source order, when present.
+        #[serde(rename = "firstProblem")]
+        first_problem: Option<String>,
     },
     /// The result of opening the selected native database.
     InspectDatabase {
@@ -690,6 +710,16 @@ pub enum Response {
     RecoverFileCollection {
         /// The recovered entries or the reason recovery could not complete.
         collection: FileCollection,
+    },
+    /// The files the player recently opened.
+    GetRecentFiles {
+        /// Up to ten PGN files, newest first.
+        entries: Vec<CollectionEntry>,
+    },
+    /// The PGN selected on Home or Files, or the refusal.
+    OpenListedPgnFile {
+        /// The file with its games or why it could not be opened.
+        answer: PgnFileAnswer,
     },
     /// Earlier states of this PGN, most recent first.
     ListPgnStates {
