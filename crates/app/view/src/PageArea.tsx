@@ -76,8 +76,10 @@ function GameLinkForm({ change }: Pick<Props, "change">) {
   );
 }
 
-const contents: Record<Exclude<Page, "Files" | "Home">, ReactNode> = {
-  Databases: <DatabasesPage />,
+const contents: Record<
+  Exclude<Page, "Databases" | "Files" | "Home">,
+  ReactNode
+> = {
   Events: null,
   Engines: <EnginesPage />,
   User: <UserPage />,
@@ -107,6 +109,8 @@ export function PageArea({ page, change }: Props) {
         <FilesPage
           onOpenGame={(path, number) => openGame(path, number, change)}
         />
+      ) : page === "Databases" ? (
+        <DatabasesPage change={change} />
       ) : (
         contents[page]
       )}

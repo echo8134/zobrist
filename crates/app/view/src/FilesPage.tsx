@@ -15,6 +15,7 @@ import {
 } from "react";
 import { EarlierStates } from "./EarlierStates";
 import styles from "./FilesPage.module.css";
+import { GameRows } from "./GameRows";
 import type { CollectionEntry } from "./generated/CollectionEntry";
 import type { FileCollection } from "./generated/FileCollection";
 import type { PgnFile } from "./generated/PgnFile";
@@ -564,28 +565,10 @@ export function FilesPage({ onOpenGame }: Props) {
                     <th scope="col">Event</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {file.rows.map((row) => (
-                    <tr
-                      key={row.number}
-                      onClick={() => void open(file.path, row.number)}
-                    >
-                      <td>
-                        <button
-                          type="button"
-                          aria-label={`Open game ${row.number}`}
-                        >
-                          {row.number}
-                        </button>
-                      </td>
-                      <td>{row.white}</td>
-                      <td>{row.black}</td>
-                      <td>{row.result}</td>
-                      <td>{row.date}</td>
-                      <td>{row.event}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                <GameRows
+                  rows={file.rows}
+                  open={(number) => void open(file.path, number)}
+                />
               </table>
             </>
           )}

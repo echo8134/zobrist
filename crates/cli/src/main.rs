@@ -2,7 +2,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Seek, Write};
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::process::{self, ExitCode};
 
@@ -10,8 +10,8 @@ use clap::{Parser, Subcommand};
 use zobrist_core::game::Game;
 use zobrist_core::pgn::{self, Entry};
 use zobrist_store::{
-    Database, ImportError, PgnGameRow, PgnReport, add_pgn_games, import_pgn, problem_line,
-    read_pgn_entries, replace_pgn_game,
+    Database, GameColumn, GameQuery, ImportError, PgnGameRow, PgnReport, add_pgn_games, import_pgn,
+    problem_line, read_pgn_entries, replace_pgn_game,
 };
 
 /// A personal chess database.
@@ -96,6 +96,32 @@ enum DatabaseCommand {
         /// The database file to inspect.
         database: PathBuf,
     },
+    /// List matching games as tab-separated number, White, Black, result, date and event.
+    List {
+        /// The database file to search.
+        database: PathBuf,
+        /// Part of either player's name (case-insensitive).
+        #[arg(long)]
+        player: Option<String>,
+        /// Part of the event name (case-insensitive).
+        #[arg(long)]
+        event: Option<String>,
+        /// Exact four-digit year.
+        #[arg(long)]
+        year: Option<String>,
+        /// Exact result marker.
+        #[arg(long, value_parser = ["1-0", "0-1", "1/2-1/2", "*"])]
+        result: Option<String>,
+        /// Order by number, white, black, result, date or event.
+        #[arg(long, default_value = "number")]
+        sort: GameColumn,
+        /// Reverse the chosen column. Ties keep their original order.
+        #[arg(long)]
+        descending: bool,
+        /// Show a single page of 100 matches, counting from 1.
+        #[arg(long)]
+        page: Option<NonZeroUsize>,
+    },
     /// Store every game of a PGN file and print the import report.
     Create {
         /// The PGN file to read.
@@ -155,6 +181,26 @@ fn main() -> ExitCode {
         },
         Command::Database { command } => match command {
             DatabaseCommand::Info { database } => exit_code(&database, info(&database)),
+            DatabaseCommand::List {
+                database,
+                player,
+                event,
+                year,
+                result,
+                sort,
+                descending,
+                page,
+            } => {
+                let query = GameQuery {
+                    player,
+                    event,
+                    year,
+                    result,
+                    sort,
+                    descending,
+                };
+                exit_code(&database, list_database(&database, &query, page))
+            }
             DatabaseCommand::Create { pgn, database } => exit_code(&pgn, create(&pgn, &database)),
             DatabaseCommand::Export { database } => exit_code(&database, export(&database)),
         },
@@ -335,15 +381,33 @@ fn list_games(path: &Path) -> Result<usize, Failure> {
     let mut number = 0_u64;
     let read = for_each_game(file, |game| {
         number += 1;
-        let row = PgnGameRow::new(number, game);
-        writeln!(
-            output,
-            "{number}\t{}\t{}\t{}\t{}\t{}",
-            row.white, row.black, row.result, row.date, row.event
-        )
+        write_row(&mut output, &PgnGameRow::new(number, game))
     });
     output.flush().map_err(Failure::Write)?;
     read
+}
+
+fn write_row(output: &mut impl Write, row: &PgnGameRow) -> io::Result<()> {
+    writeln!(
+        output,
+        "{}\t{}\t{}\t{}\t{}\t{}",
+        row.number, row.white, row.black, row.result, row.date, row.event
+    )
+}
+
+fn list_database(
+    path: &Path,
+    query: &GameQuery,
+    page: Option<NonZeroUsize>,
+) -> Result<usize, Failure> {
+    let mut database = Database::open(path).map_err(cannot_read)?;
+    let list = database.query(query, page).map_err(cannot_read)?;
+    let mut output = io::stdout().lock();
+    for row in &list.rows {
+        write_row(&mut output, row)?;
+    }
+    output.flush()?;
+    Ok(0)
 }
 
 fn add_games(target: &Path, source: &Path) -> Result<usize, Failure> {

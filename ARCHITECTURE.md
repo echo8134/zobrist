@@ -16,7 +16,7 @@ The chess domain model. Pure. No IO and no framework dependencies.
 
 ### `crates/store` (zobrist-store)
 
-Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. The CLI and the app use the same streaming PGN import to create a new database and report problems in source order. It also reads one game of a PGN file by its number, adds games to a PGN file, and replaces one game of a PGN file. Adding and replacing keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Search over games and positions is planned.
+Creates a game database in zobrist's own file format, verifies its checksums, and reads its games in order. The CLI and the app use the same streaming PGN import to create a new database and report problems in source order. It also reads one game of a PGN file by its number, adds games to a PGN file, and replaces one game of a PGN file. Adding and replacing keep every other byte of the file. It builds the row that a list shows of a game, so the CLI and the app list the same values. Native collection queries filter and sort game headers before paging. Each result keeps its original game number. Position search is planned.
 
 ### `crates/engine` (zobrist-engine)
 
@@ -32,7 +32,7 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify and count a selected collection.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify, count and browse a selected collection. Opening a native game puts a copy in a board tab with no PGN save target.
 
 On a normal quit the shell keeps the open boards in boards.json beside files.json in the app's local data directory. For a board from a PGN file it also keeps the game as last read or saved there, so Save can detect a change to the file even after a restart.
 If a saved session is damaged, the app opens the boards it can read and tells the player where it kept the original file.

@@ -1,8 +1,10 @@
 import { Database } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
+import { DatabaseGames } from "./DatabaseGames";
 import styles from "./FilesPage.module.css";
 import type { DatabaseEntry } from "./generated/DatabaseEntry";
 import { ask } from "./ipc";
+import type { Change } from "./tabs";
 
 const {
   toolbar,
@@ -88,7 +90,11 @@ function counted(
     : { kind: "Count", path, games };
 }
 
-export function DatabasesPage() {
+export function DatabasesPage({
+  change,
+}: {
+  change: (change: Change) => void;
+}) {
   const { entries, selected, error, activity } = useSyncExternalStore(
     subscribe,
     () => kept,
@@ -162,6 +168,20 @@ export function DatabasesPage() {
     });
   }
 
+  function open(path: string, number: number) {
+    run(async () => {
+      const { answer } = await ask({ type: "OpenDatabaseGame", path, number });
+      if (answer.type === "Refusal") {
+        const reason =
+          answer.reason === "noSuchGame"
+            ? `The collection has no game numbered ${number}.`
+            : `Game ${number} could not be opened from ${path}.`;
+        throw new Error(answer.system ? `${reason} ${answer.system}` : reason);
+      }
+      change({ type: "openTab", game: answer.game, picture: answer.picture });
+    });
+  }
+
   function remove(path: string) {
     run(async () => {
       const { entries } = await ask({ type: "RemoveDatabase", path });
@@ -208,6 +228,11 @@ export function DatabasesPage() {
           </ul>
         </section>
         <section className={details} aria-label="Selected collection">
+          {error && (
+            <p className={refusal} role="status">
+              {error.message}
+            </p>
+          )}
           {entry && selected && (
             <>
               <div className={titleRow}>
@@ -250,12 +275,14 @@ export function DatabasesPage() {
                   Remove from list
                 </button>
               </div>
+              {"games" in selected && (
+                <DatabaseGames
+                  key={entry.path}
+                  path={entry.path}
+                  open={(number) => open(entry.path, number)}
+                />
+              )}
             </>
-          )}
-          {error && (
-            <p className={refusal} role="status">
-              {error.message}
-            </p>
           )}
         </section>
       </div>
