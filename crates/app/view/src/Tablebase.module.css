@@ -1,0 +1,68 @@
+.panel {
+  flex: none;
+  align-self: center;
+  max-width: 100%;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--position-button-gap);
+  min-height: var(--board-part-padding);
+  color: var(--file-line-color);
+  font-size: var(--refused-save-size);
+}
+
+.controls button {
+  flex: none;
+  padding: var(--position-button-padding);
+  border: 1px solid var(--button-line-color);
+  border-radius: var(--button-corner-radius);
+  background: var(--button-background-color);
+  color: var(--button-color);
+  font: inherit;
+}
+
+.controls button:disabled {
+  color: var(--dim-icon-button-color);
+}
+
+.summary,
+.refusal {
+  margin: var(--position-button-gap) 0;
+}
+
+.summary {
+  font-weight: var(--top-bar-name-weight);
+}
+
+.refusal {
+  color: var(--refusal-color);
+}
+
+.moveList {
+  max-height: min(var(--tablebase-list-height), 25cqh);
+  overflow-y: auto;
+  margin-bottom: var(--position-button-gap);
+}
+
+.moveList table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.moveList th,
+.moveList td {
+  padding: var(--list-cell-padding);
+  height: var(--move-line-height);
+  border-bottom: 1px solid var(--list-line-color);
+}
+
+.moveList th {
+  position: sticky;
+  top: 0;
+  background: var(--background-color);
+  color: var(--list-head-color);
+  font-weight: var(--list-head-weight);
+}
