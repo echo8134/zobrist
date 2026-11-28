@@ -253,7 +253,7 @@ describe("boards after quitting and starting zobrist", function () {
       },
       { game: "1. d4 d5 (1... Nf6) *\n", place: [0, 1], origin: null },
     ];
-    await runApp(
+    await withDesktopApp(
       work,
       async (app) => {
         await openGameTwo(app, file, false);
@@ -284,10 +284,11 @@ describe("boards after quitting and starting zobrist", function () {
         await comment(app).setValue("Still typing");
         await expect(comment(app)).toBeFocused();
       },
+      {},
       "terminate process",
     );
 
-    await runApp(
+    await withDesktopApp(
       work,
       async (app) => {
         await expect(tabs(app)).toBeElementsArrayOfSize(2);
@@ -303,10 +304,11 @@ describe("boards after quitting and starting zobrist", function () {
         expect(readFileSync(file)).toEqual(original);
         await waitForSession(app, session, { boards, selected: 0 });
       },
+      {},
       "terminate process",
     );
 
-    await runApp(
+    await withDesktopApp(
       work,
       async (app) => {
         await expect(selected(app)).toHaveText("Gamma - Delta");
@@ -318,10 +320,11 @@ describe("boards after quitting and starting zobrist", function () {
         await expectHome(app);
         await waitForSession(app, session, { boards: [], selected: null });
       },
+      {},
       "terminate process",
     );
 
-    await runApp(work, expectHome);
+    await withDesktopApp(work, expectHome);
   });
 
   it("reopens the recovered board after an immediate termination", async () => {
@@ -336,7 +339,7 @@ describe("boards after quitting and starting zobrist", function () {
     });
     writeFileSync(`${directory}/boards.json`, original);
     const backup = `${directory}/boards-recovery-1.json`;
-    await runApp(
+    await withDesktopApp(
       work,
       async (app) => {
         await expectMove(app, "d4");
@@ -350,10 +353,11 @@ describe("boards after quitting and starting zobrist", function () {
           selected: 0,
         });
       },
+      {},
       "terminate process",
     );
 
-    await runApp(work, async (app) => {
+    await withDesktopApp(work, async (app) => {
       await expect(tabs(app)).toBeElementsArrayOfSize(1);
       await expectMove(app, "d4");
       await expect(app.$('[role="alert"]')).not.toExist();
