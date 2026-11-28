@@ -57,7 +57,11 @@ folder: string | null,
 /**
  * Absolute path returned by the desktop picker.
  */
-path: string, } | { "type": "ReadPgnFolder", 
+path: string, } | { "type": "DropPgnPaths", 
+/**
+ * Absolute paths, with a missing value when an OS path cannot be represented as text.
+ */
+paths: Array<string | null>, } | { "type": "ReadPgnFolder", 
 /**
  * The folder to list.
  */

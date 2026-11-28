@@ -16,6 +16,7 @@ import {
 import { EarlierStates } from "./EarlierStates";
 import styles from "./FilesPage.module.css";
 import type { CollectionEntry } from "./generated/CollectionEntry";
+import type { CollectionRequest } from "./generated/CollectionRequest";
 import type { FileCollection } from "./generated/FileCollection";
 import type { PgnFile } from "./generated/PgnFile";
 import type { PgnFileAnswer } from "./generated/PgnFileAnswer";
@@ -96,6 +97,9 @@ const refusals: Record<RefusalReason, string> = {
   cannotRead: "This file cannot be opened.",
   existsAlready: "This file exists already.",
   cannotCreate: "This file cannot be created.",
+  oneFileAtATime: "Drop one PGN file at a time.",
+  droppedFolder: "To open a folder, use the Folder… option under Open.",
+  notPgn: "Drop a file with the .pgn extension.",
 };
 
 function refusalText(answer: Extract<PgnFileAnswer, { type: "Refusal" }>) {
@@ -259,22 +263,42 @@ export async function openListed(
   }
 }
 
-async function pick(choice: PickerChoice, chosenPath?: string) {
+export type DroppedPaths = Pick<
+  Extract<CollectionRequest, { type: "DropPgnPaths" }>,
+  "paths"
+>;
+
+export async function openPgnPath(
+  input: PickerChoice | DroppedPaths,
+  chosenPath?: string,
+) {
   const previous = kept.selected;
-  const folder = previous?.kind === "Folder" ? previous.entry.path : null;
   let request = selectionRequest;
   try {
-    const path =
-      chosenPath ?? (await ask({ type: "PickPgnPath", choice, folder })).path;
-    if (path === null) return;
-    if (request === selectionRequest) request = beginSelection(path);
-
-    const { answer } = await ask({ type: "AddPgnPath", choice, path, folder });
-    if (choice === "File" && answer.type === "File") fileWasOpened();
+    let operation: Extract<
+      CollectionRequest,
+      { type: "AddPgnPath" | "DropPgnPaths" }
+    >;
+    if (typeof input === "string") {
+      const folder = previous?.kind === "Folder" ? previous.entry.path : null;
+      const choice = input;
+      const path =
+        chosenPath ?? (await ask({ type: "PickPgnPath", choice, folder })).path;
+      if (path === null) return;
+      if (request === selectionRequest) request = beginSelection(path);
+      operation = { type: "AddPgnPath", choice, path, folder };
+    } else {
+      request = ++selectionRequest;
+      ++refreshRequest;
+      keep({ selectionError: null });
+      operation = { type: "DropPgnPaths", paths: input.paths };
+    }
+    const { answer } = await ask(operation);
+    if (input !== "New" && answer.type === "File") fileWasOpened();
     if (answer.type === "Refusal") {
       const keepOnRefusal: Selection | null =
-        choice === "File"
-          ? { kind: "Unreadable", path, listed: null }
+        operation.type === "AddPgnPath" && operation.choice === "File"
+          ? { kind: "Unreadable", path: operation.path, listed: null }
           : previous;
       failedSelection(request, keepOnRefusal, refusalText(answer));
     } else if (request === selectionRequest) {
@@ -306,7 +330,7 @@ async function pick(choice: PickerChoice, chosenPath?: string) {
       }
     }
   } catch (error) {
-    failedSelection(request, choice === "File" ? null : previous, error);
+    failedSelection(request, input === "File" ? null : previous, error);
   }
   // A failed open can be the first sign that the collection on disk needs recovery.
   await loadCollection();
@@ -320,7 +344,7 @@ async function rereadAfterRestore(path: string) {
     if (selected.listed) {
       await openListed(selected.listed.entry, selected.listed.root);
     } else {
-      await pick("File", path);
+      await openPgnPath("File", path);
     }
   }
 }
@@ -427,7 +451,7 @@ export function FilesPage({ onOpenGame }: Props) {
                 type="button"
                 onClick={() => {
                   setChoosing(false);
-                  void pick("File");
+                  void openPgnPath("File");
                 }}
               >
                 <FileText aria-hidden="true" />
@@ -437,7 +461,7 @@ export function FilesPage({ onOpenGame }: Props) {
                 type="button"
                 onClick={() => {
                   setChoosing(false);
-                  void pick("Folder");
+                  void openPgnPath("Folder");
                 }}
               >
                 <Folder aria-hidden="true" />
@@ -449,7 +473,7 @@ export function FilesPage({ onOpenGame }: Props) {
         <button
           className={button}
           type="button"
-          onClick={() => void pick("New")}
+          onClick={() => void openPgnPath("New")}
         >
           New PGN…
         </button>

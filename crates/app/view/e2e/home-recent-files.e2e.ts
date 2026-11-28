@@ -6,36 +6,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
 import { withDesktopApp } from "./desktop-session";
 import { pick } from "./file-picker";
+import { expectRecent, recent } from "./recent-files";
 
 const screenshots = fileURLToPath(
   new URL("../../../../target/e2e", import.meta.url),
 );
 const game = '[White "Ada"]\n[Black "Bo"]\n[Result "1-0"]\n\n1. e4 1-0\n';
-const recent = (app: WebdriverIO.Browser) =>
-  app.$('main section[aria-label="Recent files"]');
 const selection = (app: WebdriverIO.Browser) =>
   app.$('main section[aria-label="Selection"]');
 const choosePage = (app: WebdriverIO.Browser, page: "Home" | "Files") =>
   app.$("nav").$(`aria/${page}`).click();
-
-async function expectRecent(app: WebdriverIO.Browser, paths: string[]) {
-  const entries = recent(app).$$("button");
-  await expect(entries).toBeElementsArrayOfSize(paths.length);
-  for (const [index, path] of paths.entries()) {
-    const entry = recent(app).$(`li:nth-child(${index + 1}) button`);
-    const nameLabel = entry.$("span:first-child");
-    const pathLabel = entry.$("span:last-child");
-    await expect(nameLabel).toBeDisplayed();
-    await expect(nameLabel).toHaveText(basename(path));
-    await expect(pathLabel).toBeDisplayed();
-    await expect(pathLabel).toHaveText(path);
-  }
-}
 
 describe("recent PGN files on Home", () => {
   it("opens the selected Final.pgn and remembers it first after quitting", async function () {

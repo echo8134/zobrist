@@ -1,5 +1,10 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { fileOfThePage, readFileAgain } from "./FilesPage";
+import {
+  type DroppedPaths,
+  fileOfThePage,
+  openPgnPath,
+  readFileAgain,
+} from "./FilesPage";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
 import { ask, finishBoardActions } from "./ipc";
@@ -25,6 +30,12 @@ import {
   setTag,
   tabName,
 } from "./tabs";
+
+declare global {
+  interface WindowEventMap {
+    "zobrist-file-drop": CustomEvent<DroppedPaths>;
+  }
+}
 
 const { frame, startup, problem: problemLine } = styles;
 
@@ -57,6 +68,11 @@ export function Frame() {
   }, [change]);
 
   useLayoutEffect(() => {
+    const onDrop = async (event: CustomEvent<DroppedPaths>) => {
+      if (!(await restoring.current) || document.body.inert) return;
+      change({ type: "showPage", page: "Files" });
+      await openPgnPath(event.detail);
+    };
     const close = async () => {
       if (document.body.inert) return;
       const focused = document.activeElement;
@@ -88,9 +104,13 @@ export function Frame() {
       input.abort();
     };
     window.addEventListener("zobrist-close-requested", close);
+    window.addEventListener("zobrist-file-drop", onDrop);
     restore();
-    return () => window.removeEventListener("zobrist-close-requested", close);
-  }, [restore]);
+    return () => {
+      window.removeEventListener("zobrist-close-requested", close);
+      window.removeEventListener("zobrist-file-drop", onDrop);
+    };
+  }, [change, restore]);
 
   if (shown === undefined) {
     return (

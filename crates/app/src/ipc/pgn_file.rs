@@ -60,6 +60,12 @@ pub enum RefusalReason {
     ExistsAlready,
     /// The file cannot be created.
     CannotCreate,
+    /// A drop must contain exactly one file.
+    OneFileAtATime,
+    /// The dropped item is a directory.
+    DroppedFolder,
+    /// The dropped file has a different extension.
+    NotPgn,
 }
 
 /// One game in the list of a file. A missing tag is the text `?`.

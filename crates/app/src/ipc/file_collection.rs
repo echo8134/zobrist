@@ -77,6 +77,11 @@ pub enum CollectionRequest {
         /// Absolute path returned by the desktop picker.
         path: PathBuf,
     },
+    /// Open one PGN dropped on the window and keep it in the collection.
+    DropPgnPaths {
+        /// Absolute paths, with a missing value when an OS path cannot be represented as text.
+        paths: Vec<Option<PathBuf>>,
+    },
     /// Read the immediate children of a folder.
     ReadPgnFolder {
         /// The folder to list.
@@ -299,6 +304,9 @@ impl CollectionRequest {
             } => Ok(Response::AddPgnPath {
                 answer: add(&data_directory()?, choice, &path, folder.as_deref())?,
             }),
+            Self::DropPgnPaths { paths } => Ok(Response::DropPgnPaths {
+                answer: drop_paths(data_directory(), &paths)?,
+            }),
             Self::ReadPgnFolder { path } => Ok(Response::ReadPgnFolder {
                 entries: children(&path)?,
             }),
@@ -344,6 +352,29 @@ pub enum AddedPgnPath {
 pub struct FolderListing {
     path: PathBuf,
     entries: Vec<CollectionEntry>,
+}
+
+fn drop_paths(
+    directory: io::Result<PathBuf>,
+    paths: &[Option<PathBuf>],
+) -> io::Result<AddedPgnPath> {
+    let (reason, system) = match paths {
+        [Some(path)] => match path.metadata() {
+            Ok(metadata) if metadata.is_dir() => (RefusalReason::DroppedFolder, None),
+            _ if !is_pgn(path) => (RefusalReason::NotPgn, None),
+            Ok(metadata) if metadata.is_file() => {
+                return add(&directory?, PickerChoice::File, path, None);
+            }
+            Ok(_) => (RefusalReason::CannotRead, None),
+            Err(error) => (RefusalReason::CannotRead, Some(error.to_string())),
+        },
+        [None] => (
+            RefusalReason::CannotRead,
+            Some("The path cannot be displayed as text.".into()),
+        ),
+        _ => (RefusalReason::OneFileAtATime, None),
+    };
+    Ok(AddedPgnPath::Refusal { reason, system })
 }
 
 fn add(
@@ -687,6 +718,89 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_drop_with_a_path_that_cannot_be_shown_as_text_reports_a_refusal() -> io::Result<()> {
+        let request = json!({"type":"DropPgnPaths", "paths":[null]});
+        let CollectionRequest::DropPgnPaths { paths } = serde_json::from_value(request)? else {
+            unreachable!();
+        };
+        let directory = Err(io::Error::other(
+            "No data directory needed to refuse this drop",
+        ));
+        assert_eq!(
+            json!(drop_paths(directory, &paths)?),
+            json!({"type":"Refusal", "reason":"cannotRead", "system":"The path cannot be displayed as text."})
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_dropped_file_opens_its_games_and_moves_to_the_front_of_recent_files() -> io::Result<()> {
+        let work = env::temp_dir().join(format!("zobrist-file-drop-{}", process::id()));
+        let data = work.join("data");
+        let club = work.join("Club").join("Final.PGN");
+        let league = work.join("League.pgn");
+        fs::create_dir_all(work.join("Club"))?;
+        fs::write(&club, "[White \"Ada\"]\n[Black \"Bo\"]\n\n1. e4 1-0\n")?;
+        fs::write(&league, "")?;
+
+        let club_entry = json!({"kind":"File","path":club,"name":"Final.PGN"});
+        let league_entry = json!({"kind":"File","path":league,"name":"League.pgn"});
+        assert_eq!(
+            json!(drop_paths(Ok(data.clone()), &[Some(club.clone())])?),
+            json!({"type":"File","entry":club_entry,"entries":[club_entry],"parent":null,
+            "file":{"path":club,"problems":0,"rows":[
+                {"number":1,"white":"Ada","black":"Bo","result":"1-0","date":"?","event":"?"}
+            ]}})
+        );
+        add(&data, PickerChoice::File, &league, None)?;
+        assert_eq!(
+            json!(recent_files::list(&data)?),
+            json!([league_entry, club_entry])
+        );
+        drop_paths(Ok(data.clone()), &[Some(club)])?;
+        assert_eq!(json!(collection(&data)?), json!([club_entry, league_entry]));
+        assert_eq!(
+            json!(recent_files::list(&data)?),
+            json!([club_entry, league_entry])
+        );
+        fs::remove_dir_all(work)
+    }
+
+    #[test]
+    fn refused_drops_leave_the_collection_and_recent_files_alone() -> io::Result<()> {
+        let work = env::temp_dir().join(format!("zobrist-refused-drop-{}", process::id()));
+        let data = work.join("data");
+        let folder = work.join("Archive.pgn");
+        fs::create_dir_all(&folder)?;
+        let game = folder.join("A.pgn");
+        let second = work.join("B.pgn");
+        let notes = work.join("notes.txt");
+        let missing = work.join("Missing.pgn");
+        for file in [&game, &second, &notes] {
+            fs::write(file, "1. e4 *\n")?;
+        }
+        for (paths, reason) in [
+            (vec![Some(game.clone()), Some(second)], "oneFileAtATime"),
+            (vec![Some(game), Some(notes.clone())], "oneFileAtATime"),
+            (vec![Some(folder)], "droppedFolder"),
+            (vec![Some(notes)], "notPgn"),
+        ] {
+            assert_eq!(
+                json!(drop_paths(Ok(data.clone()), &paths)?),
+                json!({"type":"Refusal","reason":reason,"system":null})
+            );
+        }
+        let system = fs::metadata(&missing).unwrap_err().to_string();
+        assert_eq!(
+            json!(drop_paths(Ok(data.clone()), &[Some(missing)])?),
+            json!({"type":"Refusal","reason":"cannotRead","system":system})
+        );
+        assert_eq!(json!(collection(&data)?), json!([]));
+        assert_eq!(json!(recent_files::list(&data)?), json!([]));
+        fs::remove_dir_all(work)
+    }
 
     #[test]
     fn lists_the_folder_and_its_pgn_files_in_name_order() -> io::Result<()> {

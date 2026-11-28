@@ -3,4 +3,4 @@
 /**
  * Why Rust did not open or create a PGN file.
  */
-export type RefusalReason = "cannotRead" | "existsAlready" | "cannotCreate";
+export type RefusalReason = "cannotRead" | "existsAlready" | "cannotCreate" | "oneFileAtATime" | "droppedFolder" | "notPgn";
