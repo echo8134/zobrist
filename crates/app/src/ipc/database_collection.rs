@@ -1,6 +1,7 @@
 //! Native databases that the player has registered on this device.
 
 use std::collections::BTreeSet;
+use std::fs::File;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
@@ -67,7 +68,8 @@ impl DatabaseRequest {
             }),
             Self::AddDatabase { path } => {
                 let games = game_count(&path)?;
-                let entries = update(directory, &catalog, |paths| paths.insert(path))?;
+                let entries =
+                    CatalogEdit::open(directory, &catalog)?.update(|paths| paths.insert(path))?;
                 Ok(Response::AddDatabase { entries, games })
             }
             Self::ImportDatabase {
@@ -77,7 +79,7 @@ impl DatabaseRequest {
                 file_name(&destination)?;
                 let mut first_problem = None;
                 let standalone = PendingWrite::default();
-                let report = import_pgn_for_task(
+                let (report, catalog) = import_pgn_for_task(
                     &source,
                     &destination,
                     write.unwrap_or(&standalone),
@@ -87,6 +89,7 @@ impl DatabaseRequest {
                         }
                         Ok(())
                     },
+                    || CatalogEdit::open(directory, &catalog),
                 )
                 .map_err(|error| match error {
                     ImportError::Read(error) => io::Error::new(
@@ -107,7 +110,7 @@ impl DatabaseRequest {
                         format!("Could not create {}: {error}", destination.display()),
                     ),
                 })?;
-                let entries = update(directory, &catalog, |paths| paths.insert(destination.clone()))
+                let entries = catalog.and_then(|catalog| catalog.update(|paths| paths.insert(destination.clone())))
                     .map_err(|error| {
                         io::Error::new(
                             error.kind(),
@@ -131,7 +134,8 @@ impl DatabaseRequest {
             Self::RemoveDatabase { path } => {
                 file_name(&path)?;
                 Ok(Response::RemoveDatabase {
-                    entries: update(directory, &catalog, |paths| paths.remove(&path))?,
+                    entries: CatalogEdit::open(directory, &catalog)?
+                        .update(|paths| paths.remove(&path))?,
                 })
             }
         }
@@ -189,19 +193,33 @@ fn entries(paths: &BTreeSet<PathBuf>) -> io::Result<Vec<DatabaseEntry>> {
         .collect()
 }
 
-fn update(
-    directory: &Path,
-    catalog: &Path,
-    change: impl FnOnce(&mut BTreeSet<PathBuf>) -> bool,
-) -> io::Result<Vec<DatabaseEntry>> {
-    let _lock = lock_collection(directory, "databases.lock")?;
-    let mut paths = paths(catalog)?;
-    let changed = change(&mut paths);
-    let entries = entries(&paths)?;
-    if changed {
-        publish_collection(catalog, &paths)?;
+struct CatalogEdit<'a> {
+    _lock: File,
+    file: &'a Path,
+    paths: BTreeSet<PathBuf>,
+}
+
+impl<'a> CatalogEdit<'a> {
+    fn open(directory: &Path, file: &'a Path) -> io::Result<Self> {
+        let lock = lock_collection(directory, "databases.lock")?;
+        Ok(Self {
+            _lock: lock,
+            file,
+            paths: paths(file)?,
+        })
     }
-    Ok(entries)
+
+    fn update(
+        mut self,
+        change: impl FnOnce(&mut BTreeSet<PathBuf>) -> bool,
+    ) -> io::Result<Vec<DatabaseEntry>> {
+        let changed = change(&mut self.paths);
+        let entries = entries(&self.paths)?;
+        if changed {
+            publish_collection(self.file, &self.paths)?;
+        }
+        Ok(entries)
+    }
 }
 
 #[cfg(test)]

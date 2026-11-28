@@ -384,10 +384,14 @@ impl DatabaseWriter {
 
     /// Syncs the segment, publishes it without replacing any file, and syncs the directory.
     pub fn finish(self) -> io::Result<()> {
-        self.finish_for_task(&PendingWrite::default())
+        self.finish_for_task(&PendingWrite::default(), || ())
     }
 
-    fn finish_for_task(mut self, task: &PendingWrite) -> io::Result<()> {
+    fn finish_for_task<T>(
+        mut self,
+        task: &PendingWrite,
+        before_publication: impl FnOnce() -> T,
+    ) -> io::Result<T> {
         self.encoder.take().ok_or_else(failed_push)?;
         let path = self.staging.0.join("database");
         let mut file = BufWriter::new(task.prepare(|_| File::create_new(&path))?);
@@ -425,11 +429,14 @@ impl DatabaseWriter {
             options.write(true).custom_flags(0x0200_0000);
         }
         let directory = options.open(parent)?;
+        task.check()?;
+        let prepared = before_publication();
         task.begin_publication()?;
         fs::hard_link(path, &self.target)?;
         drop(file);
         drop(self);
-        directory.sync_all()
+        directory.sync_all()?;
+        Ok(prepared)
     }
 }
 
