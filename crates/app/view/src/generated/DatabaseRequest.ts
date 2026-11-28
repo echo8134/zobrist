@@ -7,7 +7,15 @@ export type DatabaseRequest = { "type": "ListDatabases" } | { "type": "AddDataba
 /**
  * The absolute path chosen by the player.
  */
-path: string, } | { "type": "InspectDatabase", 
+path: string, } | { "type": "ImportDatabase", 
+/**
+ * The PGN file chosen by the player.
+ */
+source: string, 
+/**
+ * The new native database path.
+ */
+destination: string, } | { "type": "InspectDatabase", 
 /**
  * The database to verify.
  */

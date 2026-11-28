@@ -166,6 +166,10 @@ path: string | null, } | { "type": "PickDatabasePath",
 /**
  * The absolute path returned by the system.
  */
+path: string | null, } | { "type": "PickNewDatabasePath", 
+/**
+ * The absolute path returned by the system.
+ */
 path: string | null, } | { "type": "ListDatabases", 
 /**
  * Names and locations of the registered collections.
@@ -178,7 +182,27 @@ entries: Array<DatabaseEntry>,
 /**
  * The verified number of games in the database.
  */
-games: number, } | { "type": "InspectDatabase", 
+games: number, } | { "type": "ImportDatabase", 
+/**
+ * The registered collections after the import.
+ */
+entries: Array<DatabaseEntry>, 
+/**
+ * Where the new collection was saved.
+ */
+path: string, 
+/**
+ * Number of games written, including games with recoverable problems.
+ */
+games: number, 
+/**
+ * Total number of problems in the source.
+ */
+problems: number, 
+/**
+ * The first diagnostic in source order, when present.
+ */
+firstProblem: string | null, } | { "type": "InspectDatabase", 
 /**
  * The verified number of games in the database.
  */

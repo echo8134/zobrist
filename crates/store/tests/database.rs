@@ -8,7 +8,7 @@ use shakmaty::fen::Fen;
 use shakmaty::{CastlingMode, Chess, EnPassantMode, Outcome, Position};
 use zobrist_core::game::{AnnotationSymbol, Game, GameBuilder, Tag};
 use zobrist_core::pgn::{self, Entry};
-use zobrist_store::{Database, DatabaseWriter, OpenError};
+use zobrist_store::{Database, DatabaseWriter, ImportError, OpenError, import_pgn};
 
 struct Directory(PathBuf);
 
@@ -95,6 +95,33 @@ fn version_one_fixture_reads_as_two_games_and_rebuilds_byte_for_byte() {
     let path = directory.0.join("games");
     store(&path, &expected).unwrap();
     assert_eq!(fs::read(path).unwrap(), fs::read(fixture).unwrap());
+}
+
+#[test]
+fn a_diagnostic_that_cannot_be_finished_leaves_no_database() -> io::Result<()> {
+    let directory = Directory::new("diagnostic-error")?;
+    let pgn = directory.0.join("input.pgn");
+    let target = directory.0.join("study.zobrist");
+    fs::write(&pgn, "1. e4 Ke7 *")?;
+    let mut lines = Vec::new();
+    let result = import_pgn(&pgn, &target, |line| {
+        if let Some(line) = line {
+            lines.push(line);
+            Ok(())
+        } else {
+            Err(io::Error::other("cannot finish the report"))
+        }
+    });
+    assert_eq!(
+        lines,
+        ["game 1 (? - ?): illegal move \"Ke7\" at Black's move 1, 1 move kept"]
+    );
+    assert!(
+        matches!(result, Err(ImportError::Create(error)) if error.to_string() == "cannot finish the report")
+    );
+    assert!(!target.exists());
+    assert_eq!(fs::read_dir(&directory.0)?.count(), 1);
+    Ok(())
 }
 
 #[test]
