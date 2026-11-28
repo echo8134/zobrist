@@ -103,15 +103,22 @@ describe("downloading public games from User", () => {
           await expect(status).toHaveText("Added 0 games to study.pgn.");
           expect(await exportPaths()).toEqual([january]);
           expect(bytes()).toEqual(first);
-          await replyWithPlayerGames("games");
+          await replyWithPlayerGames("hold");
           await username.setValue("UnsavedExample");
-          await answerNextPicker("PickPgnPath", study, app);
-          // Deliver both clicks while the first picker answer is still pending.
-          await app.execute(
-            "arguments[0].click(); arguments[0].click();",
-            await submit.getElement(),
-          );
-          await expect(status).toHaveText("Added 2 games to study.pgn.");
+          try {
+            await answerNextPicker("PickPgnPath", study, app);
+            // Deliver both clicks while the first picker answer is still pending.
+            await app.execute(
+              "arguments[0].click(); arguments[0].click();",
+              await submit.getElement(),
+            );
+            await app.waitUntil(async () => (await exportPaths()).length > 0);
+            await app.$("button=Save").click();
+            await expect(summaryName).toHaveText("UnsavedExample");
+          } finally {
+            await replyWithPlayerGames("games");
+          }
+          await expect(status).toHaveText("RookExample: Added 2 games to study.pgn.");
           expect(await exportPaths()).toEqual([january]);
           expect(bytes().subarray(0, first.length)).toEqual(first);
           expect(events()).toEqual([
