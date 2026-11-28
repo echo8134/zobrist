@@ -149,3 +149,14 @@
 .refusal {
   color: var(--refusal-color);
 }
+
+.dateRange {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--user-row-gap);
+}
+
+.dateRange label {
+  display: grid;
+  gap: var(--game-data-name-gap);
+}

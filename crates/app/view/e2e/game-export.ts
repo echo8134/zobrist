@@ -4,7 +4,7 @@ import { text } from "node:stream/consumers";
 
 const portVariable = "ZOBRIST_TEST_EXPORT_PORT";
 
-type PlayerReply = "games" | "empty" | "refused";
+type PlayerReply = "games" | "empty" | "refused" | "hold";
 
 const playerGames = [
   {
@@ -43,13 +43,16 @@ export async function startGameExports() {
       if (request.url === "/reply") {
         status = Number(request.headers["x-export-status"]);
         pgn = await text(request);
+        requests.length = 0;
       } else if (request.url === "/player-reply") {
+        const releasing = playerReply === "hold";
         playerReply = await text(request);
+        if (releasing) server.emit("player-reply");
+        else requests.length = 0;
       } else {
         response.writeHead(404).end();
         return;
       }
-      requests.length = 0;
       response.writeHead(204).end();
       return;
     }
@@ -102,6 +105,7 @@ export async function startGameExports() {
       request.headers.accept === "application/x-ndjson" &&
       url.searchParams.get("pgnInJson") === "true"
     ) {
+      if (playerReply === "hold") await once(server, "player-reply");
       if (playerReply === "refused") {
         response.writeHead(404).end();
         return;

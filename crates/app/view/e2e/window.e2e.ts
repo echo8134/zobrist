@@ -320,7 +320,7 @@ describe("the window", () => {
     await expect(lichess).toHaveAttribute("open");
     await expect(lichess.$("p")).toBeDisplayed();
     await expect(lichess.$("p")).toHaveText(
-      "Once linking is available, you can sign in to Lichess from your browser to open your bookmarked games.",
+      "Download public games for your saved username. Dates are in UTC. Overlapping downloads can add the same game twice.",
     );
     await lichess.$("summary").click();
     await expect(lichess).not.toHaveAttribute("open");
