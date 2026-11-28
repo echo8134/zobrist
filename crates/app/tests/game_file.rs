@@ -43,6 +43,31 @@ fn start_moves() -> Vec<Value> {
         .collect()
 }
 
+#[test]
+fn a_deleted_game_without_moves_can_still_be_saved_as_a_new_game() -> io::Result<()> {
+    let directory = folder("delete-empty-game")?;
+    let path = directory.join("only.pgn");
+    fs::write(&path, b"*\n")?;
+    let games = SharedGames::with_history(Ok(directory.join("data")));
+    let listed = ask(&games, json!({"type":"OpenPgnFile", "path": path}))?;
+    assert_eq!(open(&games, &path, 1)?["answer"]["game"], json!(1));
+    let deleted = ask(
+        &games,
+        json!({
+            "type":"DeletePgnGame", "path": path, "number": 1,
+            "version": listed["answer"]["version"]
+        }),
+    )?;
+    let tab = &deleted["answer"]["tabs"][0];
+    assert_eq!(tab["previous"], json!({"path": path, "number": 1}));
+    assert_eq!(tab["file"], json!(null));
+    assert_eq!(tab["unsaved"], true);
+    assert_eq!(fs::read(&path)?, b"");
+    assert_eq!(save_as(&games, 1, &path)?["answer"]["type"], "Saved");
+    assert_eq!(fs::read(path)?, b"*\n");
+    fs::remove_dir_all(directory)
+}
+
 fn notation_move(ply: usize, text: &str, comments_after: &[&str]) -> Value {
     let side = if ply.is_multiple_of(2) {
         "white"

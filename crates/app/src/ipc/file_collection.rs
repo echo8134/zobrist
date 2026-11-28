@@ -34,6 +34,8 @@ pub enum CollectionRequest {
     },
     /// Choose a native database to add to the Databases page.
     PickDatabasePath,
+    /// Choose a destination for a collection imported from PGN.
+    PickNewDatabasePath,
     /// Load the references the player has kept.
     GetFileCollection,
     /// Recover the collection after the player chooses its last good copy.
@@ -211,6 +213,7 @@ impl CollectionRequest {
     pub fn answer(self, window: &Window) -> io::Result<Response> {
         let data_directory = || window.path().app_local_data_dir().map_err(io::Error::other);
         let file_dialog = || window.dialog().file().set_parent(window);
+        let database_dialog = || file_dialog().add_filter("zobrist databases", &["zobrist"]);
         match self {
             Self::PickEnginePath => Ok(Response::PickEnginePath {
                 path: picker_path(file_dialog().blocking_pick_file())?,
@@ -248,14 +251,16 @@ impl CollectionRequest {
                 }
                 Ok(Response::PickPgnPath { path })
             }
-            Self::PickDatabasePath => {
-                let selected = file_dialog()
-                    .add_filter("zobrist databases", &["zobrist"])
-                    .blocking_pick_file();
-                Ok(Response::PickDatabasePath {
-                    path: picker_path(selected)?,
-                })
-            }
+            Self::PickDatabasePath => Ok(Response::PickDatabasePath {
+                path: picker_path(database_dialog().blocking_pick_file())?,
+            }),
+            Self::PickNewDatabasePath => Ok(Response::PickNewDatabasePath {
+                path: picker_path(
+                    database_dialog()
+                        .set_file_name("Collection.zobrist")
+                        .blocking_save_file(),
+                )?,
+            }),
             Self::GetFileCollection => Ok(Response::GetFileCollection {
                 collection: FileCollection::load(&data_directory()?, false),
             }),

@@ -23,8 +23,10 @@ pub use file_collection::{
     AddedPgnPath, CollectionEntry, CollectionRequest, EarlierState, EntryKind, FileCollection,
     PickerChoice,
 };
-pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
-use game_file::{InFile, OpenGame, SaveHistory, SavedState};
+pub use game_file::{
+    DeletePgnGameAnswer, GameFile, GameFileRefusal, ListedPgnGame, OpenGameAnswer, SaveGameAnswer,
+};
+use game_file::{GameSource, OpenGame, SaveHistory, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
 pub use session::{BoardPicture, SessionRequest};
 pub use tablebase::{TablebaseAnswer, TablebaseMove};
@@ -38,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use shakmaty::{
     Chess, Color, EnPassantMode, KnownOutcome, Outcome, Position, Role, Square, fen::Fen,
 };
-use tauri::async_runtime::{Mutex, spawn_blocking};
+use tauri::async_runtime::{Mutex, RwLock, spawn_blocking};
 use ts_rs::TS;
 use zobrist_core::comment::MoveReadings;
 use zobrist_core::editor::{self, GameEditor, Place, PlacedStep, board_target};
@@ -217,6 +219,8 @@ pub enum Request {
         /// The path as it was typed.
         path: String,
     },
+    /// Delete the confirmed row from the listed version of its file.
+    DeletePgnGame(ListedPgnGame),
     /// Open one game of a PGN file as an open game of the app.
     OpenGame {
         /// The path of the file.
@@ -667,6 +671,11 @@ pub enum Response {
         /// The absolute path returned by the system.
         path: Option<std::path::PathBuf>,
     },
+    /// The chosen destination for a new database, or nothing after cancellation.
+    PickNewDatabasePath {
+        /// The absolute path returned by the system.
+        path: Option<std::path::PathBuf>,
+    },
     /// The native databases registered on this device.
     ListDatabases {
         /// Names and locations of the registered collections.
@@ -679,6 +688,21 @@ pub enum Response {
         /// The verified number of games in the database.
         #[ts(type = "number")]
         games: u64,
+    },
+    /// The published and registered PGN import.
+    ImportDatabase {
+        /// The registered collections after the import.
+        entries: Vec<DatabaseEntry>,
+        /// Where the new collection was saved.
+        path: std::path::PathBuf,
+        /// Number of games written, including games with recoverable problems.
+        #[ts(type = "number")]
+        games: u64,
+        /// Total number of problems in the source.
+        problems: usize,
+        /// The first diagnostic in source order, when present.
+        #[serde(rename = "firstProblem")]
+        first_problem: Option<String>,
     },
     /// The result of opening the selected native database.
     InspectDatabase {
@@ -742,6 +766,11 @@ pub enum Response {
     CreatePgnFile {
         /// What the page Files shows next.
         answer: PgnFileAnswer,
+    },
+    /// Updated tab bindings after publication, or the reason deletion was refused.
+    DeletePgnGame {
+        /// The result of confirming deletion.
+        answer: DeletePgnGameAnswer,
     },
     /// The open game, or the refusal.
     OpenGame {
@@ -815,12 +844,12 @@ fn pgn_text(game: &Game) -> io::Result<String> {
     String::from_utf8(bytes).map_err(io::Error::other)
 }
 
-impl PgnExport {
-    fn from_editor(editor: Option<&GameEditor>) -> Self {
-        let Some(editor) = editor else {
+impl From<Option<&OpenGame>> for PgnExport {
+    fn from(board: Option<&OpenGame>) -> Self {
+        let Some(board) = board else {
             return Self::Text { text: None };
         };
-        match pgn_text(editor.game()) {
+        match pgn_text(board.editor.game()) {
             Ok(text) => Self::Text { text: Some(text) },
             Err(error) => Self::Error {
                 error: error.to_string(),
@@ -1017,7 +1046,7 @@ impl NotationMove {
 }
 
 impl GamePicture {
-    fn from_editor(editor: &GameEditor, file: Option<&InFile>, revision: usize) -> Self {
+    fn from_editor(editor: &GameEditor, file: &GameSource, revision: usize) -> Self {
         let position = editor.position();
         let (comment, shapes) = editor.comment();
         let mut current = CurrentPlace {
@@ -1094,7 +1123,7 @@ impl Default for Games {
 }
 
 impl Games {
-    fn open(&mut self, game: Game, file: Option<InFile>) -> (usize, GamePicture) {
+    fn open(&mut self, game: Game, file: GameSource) -> (usize, GamePicture) {
         let open = OpenGame::new(GameEditor::new(game), file);
         let picture = open.picture();
         (self.insert(open), picture)
@@ -1123,7 +1152,7 @@ impl Games {
             let noun = if moves == 1 { "move" } else { "moves" };
             format!("{}, {moves} {noun} kept", problem.reason)
         });
-        let (game, picture) = self.open(*game, None);
+        let (game, picture) = self.open(*game, GameSource::New);
         Some(OpenedGame {
             game,
             picture,
@@ -1162,7 +1191,7 @@ impl Games {
             },
             Request::NewGame => {
                 let new = GameBuilder::new(Vec::new(), Chess::default()).finish(Outcome::Unknown);
-                let (game, picture) = self.open(new, None);
+                let (game, picture) = self.open(new, GameSource::New);
                 Response::NewGame { game, picture }
             }
             Request::DescribePosition { input } => Response::DescribePosition {
@@ -1185,9 +1214,7 @@ impl Games {
             },
             Request::OpenGameLink { link } => return open_game_link(link),
             Request::LookupTablebase { game, revision } => return self.tablebase(game, revision),
-            Request::GamePgn { game } => Response::GamePgn(PgnExport::from_editor(
-                self.open_games.get(&game).map(|open| &open.editor),
-            )),
+            Request::GamePgn { game } => Response::GamePgn(self.open_games.get(&game).into()),
             Request::SetTag { game, tag, text } => Response::SetTag {
                 picture: self.edit(game, |editor| editor.set_tag(tag.into(), &text)),
             },
@@ -1249,6 +1276,7 @@ impl Games {
             }
             Request::OpenPgnFile { path } => return pgn_file::open(path),
             Request::CreatePgnFile { path } => return pgn_file::create(path),
+            Request::DeletePgnGame(listed) => return game_file::delete(listed, history),
             Request::OpenGame { path, number } => return game_file::open(path, number),
             Request::SaveGame { game } => return game_file::save(self, game, history),
             Request::SaveGameAs { game, path } => {
@@ -1265,7 +1293,7 @@ fn open_game_link(link: String) -> FirstStep {
         move |games: &mut Games| Response::OpenGameLink {
             answer: match fetched {
                 Ok(fetched) => {
-                    let (game, picture) = games.open(fetched, None);
+                    let (game, picture) = games.open(fetched, GameSource::New);
                     OpenGameLinkAnswer::Opened {
                         game,
                         picture: Box::new(picture),
@@ -1304,6 +1332,7 @@ pub struct SharedGames {
     // A failed recovery must preserve this original before the next save of the boards.
     one_save: Mutex<Option<PathBuf>>,
     restored_selection: OnceLock<Option<usize>>,
+    file_rows: RwLock<()>,
     history: SaveHistory,
 }
 
@@ -1323,11 +1352,23 @@ impl SharedGames {
     /// Answers a request. It holds the lock on the games only for the steps that touch them.
     /// File and network I/O run between those steps, on a thread that may wait.
     pub async fn answer(&self, request: Request) -> tauri::Result<Response> {
+        // A game read before a deletion belongs to its old row until its tab is registered.
+        // Take the row lock first so a slow open cannot block saves to another file.
+        let _opening = if matches!(request, Request::OpenGame { .. }) {
+            Some(self.file_rows.read().await)
+        } else {
+            None
+        };
+        let _deleting = if matches!(request, Request::DeletePgnGame(_)) {
+            Some(self.file_rows.write().await)
+        } else {
+            None
+        };
         // A save publishes its file whole. Two saves into one file that overlap would each
         // publish it without the game of the other, so a save waits for the save before it.
         let saves = matches!(
             request,
-            Request::SaveGame { .. } | Request::SaveGameAs { .. }
+            Request::SaveGame { .. } | Request::SaveGameAs { .. } | Request::DeletePgnGame(_)
         );
         let _one_save = if saves {
             Some(self.one_save.lock().await)
@@ -1386,7 +1427,8 @@ mod tests {
             (vec![], None, json!(null), ""),
         ] {
             editor.go_to(Place(place)).unwrap();
-            let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
+            let picture =
+                serde_json::to_value(GamePicture::from_editor(&editor, &GameSource::New, 0))?;
             assert_eq!(picture["evaluation"], json!(evaluation));
             assert_eq!(picture["clock"], clock);
             assert_eq!(picture["comment"], comment);
@@ -1406,11 +1448,14 @@ mod tests {
             (vec![0, 0], ""),
         ] {
             editor.go_to(Place(place)).unwrap();
-            assert_eq!(GamePicture::from_editor(&editor, None, 0).comment, comment);
+            assert_eq!(
+                GamePicture::from_editor(&editor, &GameSource::New, 0).comment,
+                comment
+            );
         }
         let empty = import(b"{Not} {played} *")?;
         assert_eq!(
-            GamePicture::from_editor(&empty, None, 0).comment,
+            GamePicture::from_editor(&empty, &GameSource::New, 0).comment,
             "Not played"
         );
         Ok(())
@@ -1419,7 +1464,7 @@ mod tests {
     #[test]
     fn imported_shapes_follow_their_place_and_leave_midgame_prefaces_intact() -> io::Result<()> {
         let mut editor = import(b"{Start [%cal Rd1h5]} 1. e4 {Plan [%csl Gd4]} {more} {[%cal Ge2e4]} (1. d4 {[%csl Ba1]}) {Before [%csl Yb2]} e5 *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, &GameSource::New, 0))?;
         assert_eq!(
             picture["arrows"],
             json!([{ "color": "red", "from": "d1", "to": "h5" }])
@@ -1432,7 +1477,7 @@ mod tests {
         assert_eq!(notation[1]["commentsBefore"], json!(["Before [%csl Yb2]"]));
 
         editor.go_to(Place(vec![1])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, &GameSource::New, 0))?;
         assert_eq!(
             picture["squares"],
             json!([{ "color": "blue", "square": "a1" }])
@@ -1444,7 +1489,7 @@ mod tests {
     #[test]
     fn the_empty_game_shows_only_text_in_its_start_comments() -> io::Result<()> {
         let editor = import(b"{[%csl Gd4]} {Plan [%cal Ge2e4]} {[%clk 0:15]} *")?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, &GameSource::New, 0))?;
         assert_eq!(picture["startComments"], json!(["Plan", "[%clk 0:15]"]));
         assert_eq!(
             picture["squares"],
@@ -1466,7 +1511,11 @@ mod tests {
                 imported = Some(GameEditor::new(*game));
             }
         })?;
-        let picture = serde_json::to_value(GamePicture::from_editor(&imported.unwrap(), None, 0))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(
+            &imported.unwrap(),
+            &GameSource::New,
+            0,
+        ))?;
         assert_eq!(
             picture["tags"],
             json!([
@@ -1492,7 +1541,7 @@ mod tests {
         })?;
         let mut editor = GameEditor::new(imported.unwrap());
         editor.go_to(Place(vec![0])).unwrap();
-        let picture = serde_json::to_value(GamePicture::from_editor(&editor, None, 0))?;
+        let picture = serde_json::to_value(GamePicture::from_editor(&editor, &GameSource::New, 0))?;
         assert_eq!(picture["moveSymbol"], "!");
         assert_eq!(picture["positionSymbol"], "=");
         assert_eq!(picture["startComments"], json!([]));

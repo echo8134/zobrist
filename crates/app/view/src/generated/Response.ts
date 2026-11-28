@@ -5,6 +5,7 @@ import type { BoardAppearance } from "./BoardAppearance";
 import type { BoardPicture } from "./BoardPicture";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
+import type { DeletePgnGameAnswer } from "./DeletePgnGameAnswer";
 import type { EarlierState } from "./EarlierState";
 import type { EngineEntry } from "./EngineEntry";
 import type { FileCollection } from "./FileCollection";
@@ -159,6 +160,10 @@ path: string | null, } | { "type": "PickDatabasePath",
 /**
  * The absolute path returned by the system.
  */
+path: string | null, } | { "type": "PickNewDatabasePath", 
+/**
+ * The absolute path returned by the system.
+ */
 path: string | null, } | { "type": "ListDatabases", 
 /**
  * Names and locations of the registered collections.
@@ -171,7 +176,27 @@ entries: Array<DatabaseEntry>,
 /**
  * The verified number of games in the database.
  */
-games: number, } | { "type": "InspectDatabase", 
+games: number, } | { "type": "ImportDatabase", 
+/**
+ * The registered collections after the import.
+ */
+entries: Array<DatabaseEntry>, 
+/**
+ * Where the new collection was saved.
+ */
+path: string, 
+/**
+ * Number of games written, including games with recoverable problems.
+ */
+games: number, 
+/**
+ * Total number of problems in the source.
+ */
+problems: number, 
+/**
+ * The first diagnostic in source order, when present.
+ */
+firstProblem: string | null, } | { "type": "InspectDatabase", 
 /**
  * The verified number of games in the database.
  */
@@ -219,7 +244,11 @@ answer: PgnFileAnswer, } | { "type": "CreatePgnFile",
 /**
  * What the page Files shows next.
  */
-answer: PgnFileAnswer, } | { "type": "OpenGame", 
+answer: PgnFileAnswer, } | { "type": "DeletePgnGame", 
+/**
+ * The result of confirming deletion.
+ */
+answer: DeletePgnGameAnswer, } | { "type": "OpenGame", 
 /**
  * The game and its picture, or why there is none.
  */
