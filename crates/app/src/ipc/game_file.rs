@@ -40,7 +40,7 @@ pub(super) struct OpenGame {
 }
 
 /// Where an open game came from, with the game as that file holds it.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub(super) struct InFile {
     /// The file with every symbolic link followed, so that two paths to one file are equal.
     pub(super) path: PathBuf,

@@ -15,12 +15,19 @@ use zobrist_core::game::Game;
 
 use super::{GamePicture, Games, InFile, OpenGame, Response, SharedGames};
 
-/// An operation on the board tabs kept across normal quits.
+/// An operation on the board tabs kept across app restarts.
 #[derive(Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum SessionRequest {
     /// Load the board session at startup.
     RestoreBoards,
+    /// Keep the settled boards for the next start.
+    CheckpointBoards {
+        /// Open game numbers in tab order.
+        boards: Vec<usize>,
+        /// The selected open game, when a board is shown.
+        selected: Option<usize>,
+    },
     /// Save the boards before closing the window.
     QuitWithBoards {
         /// Open game numbers in tab order.
@@ -37,18 +44,34 @@ pub struct BoardPicture {
     picture: GamePicture,
 }
 
-#[derive(Serialize)]
+#[derive(PartialEq, Eq, Serialize)]
 struct BoardSession {
     boards: Vec<SavedBoard>,
     selected: Option<usize>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(PartialEq, Eq, Deserialize, Serialize)]
 struct SavedBoard {
     #[serde(with = "game_pgn")]
     game: Game,
     place: Vec<usize>,
     origin: Option<InFile>,
+}
+
+impl From<&OpenGame> for SavedBoard {
+    fn from(open: &OpenGame) -> Self {
+        Self {
+            game: open.editor.game().clone(),
+            place: open.editor.place().0.clone(),
+            origin: open.file.clone(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct SessionFile {
+    published: Option<BoardSession>,
+    pending_backup: Option<PathBuf>,
 }
 
 impl SharedGames {
@@ -65,7 +88,8 @@ impl SharedGames {
         directory: PathBuf,
     ) -> io::Result<Response> {
         // A board snapshot needs the origin installed by any preceding Save.
-        let mut pending_backup = self.one_save.lock().await;
+        let mut file = self.one_save.lock().await;
+        let quitting = matches!(request, SessionRequest::QuitWithBoards { .. });
         match request {
             SessionRequest::RestoreBoards => {
                 if let Some(&selected) = self.restored_selection.get() {
@@ -74,7 +98,7 @@ impl SharedGames {
                 let restored = spawn_blocking(move || ReopenedBoards::read(&directory))
                     .await
                     .map_err(io::Error::other)?;
-                *pending_backup = restored.pending_backup;
+                *file = restored.file;
                 let mut games = self.games.lock().await;
                 let mut selected_game = None;
                 // A game opened or closed while the session was loading belongs to this run.
@@ -89,9 +113,22 @@ impl SharedGames {
                 self.restored_selection.get_or_init(|| selected_game);
                 Ok(games.board_pictures(selected_game, restored.warning))
             }
-            SessionRequest::QuitWithBoards { boards, selected } => {
+            SessionRequest::CheckpointBoards { boards, selected }
+            | SessionRequest::QuitWithBoards { boards, selected } => {
                 let snapshot = self.games.lock().await.snapshot(&boards, selected)?;
-                if let Some(path) = pending_backup.clone() {
+                let response = if quitting {
+                    Response::QuitWithBoards
+                } else {
+                    Response::CheckpointBoards
+                };
+                let unchanged = file.published.as_ref().map_or_else(
+                    || !quitting && snapshot.boards.is_empty(),
+                    |saved| *saved == snapshot,
+                );
+                if unchanged && file.pending_backup.is_none() {
+                    return Ok(response);
+                }
+                if let Some(path) = file.pending_backup.clone() {
                     let result = spawn_blocking(move || preserve_original(&path))
                         .await
                         .map_err(io::Error::other)?;
@@ -100,12 +137,14 @@ impl SharedGames {
                         Err(error) if error.kind() == ErrorKind::NotFound => (),
                         Err(error) => return Err(error),
                     }
-                    *pending_backup = None;
+                    file.pending_backup = None;
                 }
-                spawn_blocking(move || snapshot.write(&directory))
-                    .await
-                    .map_err(io::Error::other)??;
-                Ok(Response::QuitWithBoards)
+                file.published = Some(
+                    spawn_blocking(move || snapshot.write(&directory))
+                        .await
+                        .map_err(io::Error::other)??,
+                );
+                Ok(response)
             }
         }
     }
@@ -158,11 +197,7 @@ impl Games {
                             "The tab list must name each open board once.",
                         )
                     })?;
-                Ok(SavedBoard {
-                    game: open.editor.game().clone(),
-                    place: open.editor.place().0.clone(),
-                    origin: open.file.clone(),
-                })
+                Ok(SavedBoard::from(open))
             })
             .collect::<io::Result<_>>()?;
         Ok(BoardSession { boards, selected })
@@ -181,7 +216,7 @@ struct ReopenedBoards {
     boards: Vec<(usize, OpenGame)>,
     selected: Option<usize>,
     warning: Option<String>,
-    pending_backup: Option<PathBuf>,
+    file: SessionFile,
 }
 
 impl ReopenedBoards {
@@ -201,20 +236,41 @@ impl ReopenedBoards {
             Some(record) => restored.reopen(record),
             None => Some("Could not read the board session.".to_owned()),
         };
+        let snapshot = BoardSession {
+            boards: restored
+                .boards
+                .iter()
+                .map(|(_, open)| SavedBoard::from(open))
+                .collect(),
+            selected: restored
+                .boards
+                .iter()
+                .position(|(index, _)| Some(*index) == restored.selected),
+        };
         if let Some(problem) = problem {
-            let location = if let Ok(backup) = preserve_original(&path) {
+            let mut location = if let Ok(backup) = preserve_original(&path) {
                 format!("The original file was kept at {}.", backup.display())
             } else {
                 let location = format!(
                     "The original file could not be moved and is still at {}.",
                     path.display()
                 );
-                restored.pending_backup = Some(path);
+                restored.file.pending_backup = Some(path);
                 location
             };
+            if restored.file.pending_backup.is_none() && !snapshot.boards.is_empty() {
+                match snapshot.write(directory) {
+                    Ok(saved) => restored.file.published = Some(saved),
+                    Err(_) => {
+                        location.push_str(" The reopened boards could not be saved for restart.");
+                    }
+                }
+            }
             restored.warning = Some(format!(
                 "{problem} {location} Your PGN files are untouched. You can open a board and keep playing."
             ));
+        } else {
+            restored.file.published = Some(snapshot);
         }
         restored
     }
@@ -281,7 +337,16 @@ fn preserve_original(path: &Path) -> io::Result<PathBuf> {
 }
 
 impl BoardSession {
-    fn write(&self, directory: &Path) -> io::Result<()> {
+    fn write(self, directory: &Path) -> io::Result<Self> {
+        let staged = self.stage(directory)?;
+        if let Err(error) = fs::rename(&staged, directory.join("boards.json")) {
+            let _cleanup = fs::remove_file(staged);
+            return Err(error);
+        }
+        Ok(self)
+    }
+
+    fn stage(&self, directory: &Path) -> io::Result<PathBuf> {
         fs::create_dir_all(directory)?;
         let contents = serde_json::to_vec(self)?;
         // Another process may be quitting, or a crash may have left its stage behind.
@@ -296,12 +361,11 @@ impl BoardSession {
         };
         let written = io::Write::write_all(&mut file, &contents).and_then(|()| file.sync_all());
         drop(file);
-        let published = written.and_then(|()| fs::rename(&staged, directory.join("boards.json")));
-        if published.is_err() {
-            // Preserve the write or rename error even if the stage cannot be removed.
+        if let Err(error) = written {
             let _cleanup = fs::remove_file(staged);
+            return Err(error);
         }
-        published
+        Ok(staged)
     }
 }
 
