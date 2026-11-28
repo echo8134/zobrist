@@ -113,6 +113,8 @@ Revisit if a scan cannot answer a kind of query fast enough. The first answer is
 
 The Files page keeps references to PGN files and folders. A player can keep a repertoire in one folder and tournament games in another, close the app, and find both again on the next start. Opening a PGN keeps it in place. Saving an edit writes to that same file. The app stores the paths in files.json in its local data directory, which Tauri resolves with `app_local_data_dir()` for `io.github.echo8134.zobrist`.
 
+The app keeps a verified copy of that list in files.last-good.json. If the live list becomes unreadable, the player can recover it from Files. Recovery preserves the damaged bytes under a fresh name before replacing the list. It only changes collection metadata.
+
 When creating a PGN, the native save dialog starts in the selected folder. Without a selected folder, it suggests a folder named `zobrist` inside the personal Documents directory reported by the operating system. When the system has no Documents directory, the player chooses the destination in the dialog. The player can change the suggested location before saving.
 
 A single managed folder would require players to move or copy existing collections. Resolving a new name against the app's launch directory made its location depend on how the player started the app. The desktop shell uses `tauri-plugin-dialog` to offer the system's file, folder and save dialogs. Revisit the storage choice if players need a collection that travels between computers.

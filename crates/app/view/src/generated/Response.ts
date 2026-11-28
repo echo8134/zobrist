@@ -5,6 +5,7 @@ import type { BoardAppearance } from "./BoardAppearance";
 import type { CollectionEntry } from "./CollectionEntry";
 import type { DatabaseEntry } from "./DatabaseEntry";
 import type { EngineEntry } from "./EngineEntry";
+import type { FileCollection } from "./FileCollection";
 import type { GamePicture } from "./GamePicture";
 import type { OpenGameAnswer } from "./OpenGameAnswer";
 import type { OpenGameLinkAnswer } from "./OpenGameLinkAnswer";
@@ -161,9 +162,13 @@ games: number, } | { "type": "RemoveDatabase",
  */
 entries: Array<DatabaseEntry>, } | { "type": "GetFileCollection", 
 /**
- * The root entries of the collection.
+ * The list or the available recovery action.
  */
-entries: Array<CollectionEntry>, } | { "type": "AddPgnPath", 
+collection: FileCollection, } | { "type": "RecoverFileCollection", 
+/**
+ * The recovered entries or the reason recovery could not complete.
+ */
+collection: FileCollection, } | { "type": "AddPgnPath", 
 /**
  * The new selection or the reason the file operation was refused.
  */

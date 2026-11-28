@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
-import { openEngines } from "./engine-session";
+import { visitPage } from "./desktop-session";
 import { pick } from "./file-picker";
 
 const target = fileURLToPath(new URL("../../../../target", import.meta.url));
@@ -47,7 +47,7 @@ describe("the page Engines", () => {
           mode: 0o700,
         });
       }
-      await openEngines(work, async (session) => {
+      await visitPage(work, "Engines", async (session) => {
         await expect(session.$("main p")).toHaveText(empty);
         await pick("Engine", null, session);
         await expect(session.$("main p")).toHaveText(empty);
@@ -66,7 +66,7 @@ describe("the page Engines", () => {
           1280, 800,
         ]);
       });
-      await openEngines(work, async (session) => {
+      await visitPage(work, "Engines", async (session) => {
         await checkRows(session, work, ["sample-b", "sample-a"]);
         await pick("Engine", join(work, "missing"), session);
         await expect(session.$('main [role="alert"]')).toHaveText(
