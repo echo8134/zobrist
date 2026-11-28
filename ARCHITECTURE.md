@@ -32,7 +32,7 @@ The first user interface and the agents' test bed.
 
 ### `crates/app` (zobrist-app)
 
-Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify, count and browse a selected collection. Opening a native game puts a copy in a board tab with no PGN save target.
+Tauri shell with a React view. The view lives in `crates/app/view` and reaches Rust through one command that takes a typed request and returns a typed response. The view is built from components, which `crates/app/view/src/components/list.ts` lists. The shell depends on `core` for games, `store` for PGN files, `engine` for board analysis, and `online` for games opened from links. It holds the lock on its open games only for the steps that touch them. File, network, and engine I/O run outside that lock. The Databases page keeps references to native files in the app's data directory and asks `store` to verify, count and browse a selected collection. Opening a native game puts a copy in a board tab with no PGN save target.
 
 Before starting the window toolkit, the shell takes an exclusive OS lock on app.lock in its local data directory. It resolves this folder with `dirs` and the identifier from Tauri's app configuration. It holds the lock until exit so only one process can use the boards and file collection in that directory.
 
@@ -93,6 +93,20 @@ Rust owns every open game. Opening, playing, and navigating return the whole pic
 The view is styled with plain CSS and builds its own controls. It uses no component library and no utility-class framework. The design is hairlines, text, and a few controls, and a library brings a look of its own that zobrist would have to undo. `crates/app/view/src/design.css` holds the design values, and each component has a stylesheet of its own. The cost is that zobrist builds and tests every control itself, also the hard ones that come later, such as the long game list and the tiles. A later switch touches every component. Revisit this choice when a control costs more to build than a library costs to restyle.
 
 Revisit if the notation panel or the large game list cannot be made acceptable, or if the webview fails on Linux, the development platform. The fallback is egui in `app`, which leaves `core`, `store`, and `engine` unchanged.
+
+### Components as the unit of the view
+
+The view is built from components. A component is one topic of the app, such as the engine or the databases, in one folder under `crates/app/view/src/components`. It offers a page of its own, a face beside the board, or both. `crates/app/view/src/components/list.ts` is the one list of components, and the icon bar and the page area take their pages from it. A new component is a new folder and one entry in that list, and no other file changes. Before, the page area and the icon bar each named every page, and the board page put the faces together itself.
+
+`crates/app/view/src/component.ts` is the contract and the only way a component reaches the board, the frame, or another component. A need that crosses components becomes a notice in the contract, never an import. The frame imports the board, and both import the contract, the IPC module, the generated types and the shared controls. A component imports only its own folder and those four. Only the list imports a component, and only through its folder. The board and the shared controls import nothing of the frame. The Biome rule noRestrictedImports in `crates/app/view/biome.json` rejects every other import with a message that names the fix, and a unit test fails when a component folder has no entry in the list. The rule matches the import text, so component folders stay flat and the view has no path alias.
+
+The game data, the tool row and Save belong to the board and cannot be switched off, because Save opens the form of the game data for a game without a file. The name of a component is its key, so the engine keeps the one name Engines for its page and its face.
+
+The faces beside the board and the notices between components are planned.
+
+Rejected options: folders without a contract leave the frame and the board naming every page and face. One method per edit on the handle moves the callbacks instead of removing them. A place in the entry of each component makes a layout change edit every component. A shared store that components write gives one state two writers. Events open to every component hide who reacts. TypeScript project references need one configuration per component.
+
+Revisit if a need between components cannot be told as a notice, or if a component needs the state of another component.
 
 ### Local engine analysis on the board
 
