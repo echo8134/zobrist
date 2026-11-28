@@ -199,6 +199,9 @@ describe("the default engine on the board", () => {
           const newBoard = session.$("header").$("aria/New board");
           await newBoard.click();
           await newBoard.click();
+          await expect(session.$$("header [role=tab]")).toBeElementsArrayOfSize(
+            2,
+          );
           const analysis = session.$('section[aria-label="Engine analysis"]');
           await analysis.$("aria/Start engine").click();
           await expect(analysis.$("li span")).toHaveText("1. e4 e5");
