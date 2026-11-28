@@ -5,7 +5,7 @@ use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use zobrist_core::editor::GameEditor;
 use zobrist_core::game::{Game, MainLine};
@@ -40,15 +40,26 @@ pub(super) struct OpenGame {
 }
 
 /// Where an open game came from, with the game as that file holds it.
+#[derive(Clone, Deserialize, Serialize)]
 pub(super) struct InFile {
     /// The file with every symbolic link followed, so that two paths to one file are equal.
-    path: PathBuf,
+    pub(super) path: PathBuf,
     number: NonZeroU64,
     /// The game as it was read from the file, or as it was last written into it.
+    #[serde(with = "super::session::game_pgn")]
     held: Game,
 }
 
 impl OpenGame {
+    pub(super) fn new(editor: GameEditor, file: Option<InFile>) -> Self {
+        Self {
+            position: super::analysis::BoardPosition::new(&editor),
+            analysis: Arc::default(),
+            editor,
+            file,
+        }
+    }
+
     pub(super) fn picture(&self) -> GamePicture {
         GamePicture::from_editor(&self.editor, self.file.as_ref(), self.position.revision)
     }

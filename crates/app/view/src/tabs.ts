@@ -6,6 +6,7 @@ import type { MoveSymbol } from "./generated/MoveSymbol";
 import type { NotationMove } from "./generated/NotationMove";
 import type { PositionSymbol } from "./generated/PositionSymbol";
 import type { Promotion } from "./generated/Promotion";
+import type { Response } from "./generated/Response";
 import type { SaveGameAnswer } from "./generated/SaveGameAnswer";
 import type { Side } from "./generated/Side";
 import { answersOnTheirWay, ask } from "./ipc";
@@ -67,6 +68,7 @@ export type Move = { from: string; to: string; promotion: Promotion | null };
 export type Shapes = Pick<GamePicture, "squares" | "arrows">;
 
 export type Change =
+  | Extract<Response, { type: "RestoreBoards" }>
   | {
       type: "openTab";
       game: number;
@@ -91,6 +93,10 @@ export type Change =
   | { type: "closeTab"; game: number }
   | { type: "showPage"; page: Page };
 
+function newTab({ game, picture }: Pick<Tab, "game" | "picture">): Tab {
+  return { game, picture, bottomSide: "white", gameData: "closed" };
+}
+
 function withChangedTab(
   shown: Shown,
   game: number,
@@ -113,6 +119,12 @@ function withoutQuestionOf(shown: Shown, game: number | undefined): Shown {
 
 export function apply(shown: Shown, change: Change): Shown {
   switch (change.type) {
+    case "RestoreBoards":
+      return {
+        tabs: change.boards.map(newTab),
+        shownTab: change.selected ?? undefined,
+        page: "Home",
+      };
     case "openTab":
       return {
         ...shown,
@@ -123,11 +135,8 @@ export function apply(shown: Shown, change: Change): Shown {
           : [
               ...shown.tabs,
               {
-                game: change.game,
-                picture: change.picture,
-                bottomSide: "white",
+                ...newTab(change),
                 openingProblem: change.openingProblem,
-                gameData: "closed",
               },
             ],
         shownTab: change.game,

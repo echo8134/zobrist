@@ -11,6 +11,7 @@ mod engines;
 mod file_collection;
 mod game_file;
 mod pgn_file;
+mod session;
 
 pub use accounts::AccountRequest;
 pub use analysis::{AnalysisRequest, AnalysisSnapshot, VariationAnswer};
@@ -24,10 +25,12 @@ pub use file_collection::{
 pub use game_file::{GameFile, GameFileRefusal, OpenGameAnswer, SaveGameAnswer};
 use game_file::{InFile, OpenGame, SaveHistory, SavedState};
 pub use pgn_file::{GameRow, PgnFile, PgnFileAnswer, RefusalReason};
+pub use session::{BoardPicture, SessionRequest};
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use shakmaty::{
@@ -52,6 +55,8 @@ pub use drawing::ShapeEdit;
 pub enum DesktopRequest {
     /// Requests answered by the games and PGN editor.
     Editor(Request),
+    /// Requests to restore or save the open boards.
+    Session(SessionRequest),
     /// Requests about the engine analysing an open game.
     Analysis(AnalysisRequest),
     /// Requests about the player's collection or the system picker.
@@ -482,6 +487,19 @@ wire_symbols! {
 #[serde(tag = "type")]
 #[ts(export)]
 pub enum Response {
+    /// The boards in tab order after restoring the session.
+    RestoreBoards {
+        /// The games and their pictures at the saved places.
+        boards: Vec<BoardPicture>,
+        /// The selected runtime game number, when a board was selected.
+        selected: Option<usize>,
+        /// Where to find the original session if any part could not be restored.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        warning: Option<String>,
+    },
+    /// The session was written and the window can close.
+    QuitWithBoards,
     /// The result of adding the engine row selected on the board.
     AddEngineVariation {
         /// Whether anything changed in the game.
@@ -767,15 +785,18 @@ pub enum PgnExport {
     },
 }
 
+fn pgn_text(game: &Game) -> io::Result<String> {
+    let mut bytes = Vec::new();
+    pgn::write_game(game, &mut bytes)?;
+    String::from_utf8(bytes).map_err(io::Error::other)
+}
+
 impl PgnExport {
     fn from_editor(editor: Option<&GameEditor>) -> Self {
         let Some(editor) = editor else {
             return Self::Text { text: None };
         };
-        let mut bytes = Vec::new();
-        match pgn::write_game(editor.game(), &mut bytes)
-            .and_then(|()| String::from_utf8(bytes).map_err(io::Error::other))
-        {
+        match pgn_text(editor.game()) {
             Ok(text) => Self::Text { text: Some(text) },
             Err(error) => Self::Error {
                 error: error.to_string(),
@@ -1033,14 +1054,14 @@ impl GamePicture {
 
 /// The open games of one run of the app.
 pub struct Games {
-    open_games: HashMap<usize, OpenGame>,
+    open_games: BTreeMap<usize, OpenGame>,
     next_number: usize,
 }
 
 impl Default for Games {
     fn default() -> Self {
         Self {
-            open_games: HashMap::new(),
+            open_games: BTreeMap::new(),
             next_number: 1,
         }
     }
@@ -1048,18 +1069,16 @@ impl Default for Games {
 
 impl Games {
     fn open(&mut self, game: Game, file: Option<InFile>) -> (usize, GamePicture) {
+        let open = OpenGame::new(GameEditor::new(game), file);
+        let picture = open.picture();
+        (self.insert(open), picture)
+    }
+
+    fn insert(&mut self, open: OpenGame) -> usize {
         let number = self.next_number;
         self.next_number = number.strict_add(1);
-        let editor = GameEditor::new(game);
-        let open = OpenGame {
-            position: analysis::BoardPosition::new(&editor),
-            analysis: std::sync::Arc::default(),
-            editor,
-            file,
-        };
-        let picture = open.picture();
         self.open_games.insert(number, open);
-        (number, picture)
+        number
     }
 
     fn open_pgn(&mut self, text: &str) -> Option<OpenedGame> {
@@ -1256,7 +1275,9 @@ impl FirstStep {
 #[derive(Default)]
 pub struct SharedGames {
     games: std::sync::Arc<Mutex<Games>>,
-    one_save: Mutex<()>,
+    // A failed recovery must preserve this original before the next save of the boards.
+    one_save: Mutex<Option<PathBuf>>,
+    restored_selection: OnceLock<Option<usize>>,
     history: SaveHistory,
 }
 

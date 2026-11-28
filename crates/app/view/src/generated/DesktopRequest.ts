@@ -5,8 +5,9 @@ import type { AppearanceRequest } from "./AppearanceRequest";
 import type { CollectionRequest } from "./CollectionRequest";
 import type { DatabaseRequest } from "./DatabaseRequest";
 import type { Request } from "./Request";
+import type { SessionRequest } from "./SessionRequest";
 
 /**
  * The request sent to the desktop command.
  */
-export type DesktopRequest = Request | AnalysisRequest | CollectionRequest | AccountRequest | AppearanceRequest | DatabaseRequest;
+export type DesktopRequest = Request | SessionRequest | AnalysisRequest | CollectionRequest | AccountRequest | AppearanceRequest | DatabaseRequest;
