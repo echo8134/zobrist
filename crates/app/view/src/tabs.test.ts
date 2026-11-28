@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { boardSession } from "./boardSession";
 import type { GamePicture } from "./generated/GamePicture";
 import type { NotationMove } from "./generated/NotationMove";
-import { answersOnTheirWay, ask, finishBoardActions } from "./ipc";
+import { answersOnTheirWay, ask, finishRequests } from "./ipc";
 import {
   annotate,
   apply,
@@ -29,13 +29,13 @@ import {
 vi.mock("./ipc", () => ({
   ask: vi.fn(),
   answersOnTheirWay: vi.fn(),
-  finishBoardActions: vi.fn(),
+  finishRequests: vi.fn(),
 }));
 
 beforeEach(() => {
   vi.mocked(ask).mockReset();
   vi.mocked(answersOnTheirWay).mockReset();
-  vi.mocked(finishBoardActions).mockReset();
+  vi.mocked(finishRequests).mockReset();
 });
 
 // The tab state hands a picture on and reads none of its fields. With one field here, a new
@@ -126,7 +126,7 @@ test("closing waits for a pending board without sending a late checkpoint", asyn
     const actions = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    vi.mocked(finishBoardActions).mockReturnValue(actions);
+    vi.mocked(finishRequests).mockReturnValue(actions);
     change({ type: "showPage", page: "Home" });
     await vi.advanceTimersByTimeAsync(1000);
     const closed = session.quit();

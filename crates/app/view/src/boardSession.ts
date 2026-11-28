@@ -1,4 +1,4 @@
-import { ask, finishBoardActions } from "./ipc";
+import { ask, finishRequests } from "./ipc";
 import type { Change, Shown } from "./tabs";
 
 /** Wait for the player's board actions to settle before sending the current tab order. */
@@ -40,7 +40,7 @@ export function boardSession(
       }
       cancel();
       const turn = setTimeout(async () => {
-        await finishBoardActions();
+        await finishRequests("boards");
         if (timer !== turn) return;
         let problem: string | undefined;
         try {
@@ -57,7 +57,7 @@ export function boardSession(
     },
     async quit() {
       cancel();
-      await finishBoardActions();
+      await finishRequests("all");
       // Finishing an edit can schedule another notification before the quit takes its snapshot.
       cancel();
       await write("QuitWithBoards");

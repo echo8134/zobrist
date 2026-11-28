@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test, vi } from "vitest";
-import { answersOnTheirWay, ask, finishBoardActions } from "./ipc";
+import { answersOnTheirWay, ask, finishRequests } from "./ipc";
 
 // The stand-in for Rust. Only the module under test imports the real function.
 const invoke = vi.hoisted(() => vi.fn());
@@ -91,7 +91,7 @@ test("quitting waits for a new board and a save that was waiting for a field", a
     steps.push("saved");
   });
 
-  const quit = finishBoardActions().then(() => steps.push("quit"));
+  const quit = finishRequests("all").then(() => steps.push("quit"));
   finishTag();
   await answersOnTheirWay(7);
   expect(steps).toEqual([]);
