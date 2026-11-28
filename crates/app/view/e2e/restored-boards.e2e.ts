@@ -164,21 +164,24 @@ describe("boards after quitting and starting zobrist", function () {
       writeFileSync(`${directory}/boards.json`, '{"boards":[');
       writeFileSync(`${directory}/files.json`, "[]");
       const entries = readdirSync(directory).sort();
-      const second = spawnSync(application, {
-        env: {
-          ...process.env,
-          ...profileEnv(work),
-          TAURI_WEBDRIVER_PORT: String(await driverPort()),
-        },
-        encoding: "utf8",
-        timeout: 10_000,
-        killSignal: "SIGKILL",
-      });
-      expect({ status: second.status, signal: second.signal }).toEqual({
-        status: 1,
-        signal: null,
-      });
-      expect(second.stderr).toBe("zobrist is already running.\n");
+      for (const display of [{}, { DISPLAY: "", WAYLAND_DISPLAY: "" }]) {
+        const second = spawnSync(application, {
+          env: {
+            ...process.env,
+            ...profileEnv(work),
+            ...display,
+            TAURI_WEBDRIVER_PORT: String(await driverPort()),
+          },
+          encoding: "utf8",
+          timeout: 10_000,
+          killSignal: "SIGKILL",
+        });
+        expect({ status: second.status, signal: second.signal }).toEqual({
+          status: 1,
+          signal: null,
+        });
+        expect(second.stderr).toBe("zobrist is already running.\n");
+      }
       expect(readdirSync(directory).sort()).toEqual(entries);
       expect(readFileSync(`${directory}/boards.json`, "utf8")).toBe(
         '{"boards":[',
