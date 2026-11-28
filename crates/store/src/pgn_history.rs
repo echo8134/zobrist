@@ -367,24 +367,27 @@ impl SaveTarget {
     }
 
     pub(super) fn publish(self, staged: Staged) -> io::Result<Option<String>> {
-        staged.file.sync_all()?;
-        let Some((time, folder)) = self.history else {
+        let publish_without_history = |staged: Staged| {
+            staged.file.sync_all()?;
             staged.publish()?;
-            return Ok(None);
+            Ok(None)
+        };
+        let Some((time, folder)) = self.history else {
+            return publish_without_history(staged);
         };
         let old = File::open(&self.path);
         if old
             .as_ref()
             .is_err_and(|error| error.kind() == ErrorKind::NotFound)
         {
-            staged.publish()?;
-            return Ok(None);
+            return publish_without_history(staged);
         }
         if let Ok(file) = &old
             && equal_bytes(file, &staged.file).unwrap_or(false)
         {
             return Ok(None);
         }
+        staged.file.sync_all()?;
         let captured = match &folder {
             Ok(folder) => old
                 .and_then(|mut file| folder.capture(&mut file, time, &staged.write))
