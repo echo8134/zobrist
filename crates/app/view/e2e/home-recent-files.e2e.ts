@@ -22,9 +22,15 @@ const choosePage = (app: WebdriverIO.Browser, page: "Home" | "Files") =>
 async function expectRecent(app: WebdriverIO.Browser, paths: string[]) {
   const entries = recent(app).$$("button");
   await expect(entries).toBeElementsArrayOfSize(paths.length);
-  expect(
-    await entries.map((button) => button.getProperty("innerText")),
-  ).toEqual(paths.map((path) => `${basename(path)}\n${path}`));
+  for (const [index, path] of paths.entries()) {
+    const entry = recent(app).$(`li:nth-child(${index + 1}) button`);
+    const nameLabel = entry.$("span:first-child");
+    const pathLabel = entry.$("span:last-child");
+    await expect(nameLabel).toBeDisplayed();
+    await expect(nameLabel).toHaveText(basename(path));
+    await expect(pathLabel).toBeDisplayed();
+    await expect(pathLabel).toHaveText(path);
+  }
 }
 
 describe("recent PGN files on Home", () => {
