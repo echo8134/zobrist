@@ -8,6 +8,8 @@ import {
   readFileSync,
   rmdirSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -255,7 +257,27 @@ describe("boards after quitting and starting zobrist", function () {
       work,
       async (app) => {
         await openGameTwo(app, file, false);
-        await addComment(app);
+        await waitForSession(app, session, {
+          boards: [
+            {
+              game: held,
+              place: [0, 0, 0, 0],
+              origin: { path: file, number: 2, held },
+            },
+          ],
+          selected: 0,
+        });
+        utimesSync(session, 1000, 1000);
+        await comment(app).setValue("Final move");
+        // Leave the field focused through two quiet periods to catch writes from typing.
+        await app.pause(1000);
+        expect(statSync(session).mtimeMs).toBe(1_000_000);
+        await expect(selected(app).$("span:empty")).not.toExist();
+        await app.$("main aside").$("button=Qh4#").click();
+        await expect(selected(app)).toHaveAttribute(
+          "aria-label",
+          "Gamma - Delta, not saved",
+        );
         await openBoardWithVariation(app);
         await waitForSession(app, session, { boards, selected: 1 });
       },
@@ -396,6 +418,11 @@ describe("boards after quitting and starting zobrist", function () {
       const blocked = `${work}/io.github.echo8134.zobrist/boards.json`;
       mkdirSync(blocked);
       await openGameTwo(app, file, false);
+      await expect(app.$('[role="alert"]')).toHaveText(
+        expect.stringContaining(
+          "Could not save your latest board changes for restart.",
+        ),
+      );
       expect(await app.closeWindow()).toEqual(["main"]);
       await expect(app.$('[role="alert"]')).toHaveText(
         expect.stringContaining("Cannot save your boards before quitting."),

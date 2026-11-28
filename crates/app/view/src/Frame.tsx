@@ -1,8 +1,9 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { boardSession } from "./boardSession";
 import { fileOfThePage, readFileAgain } from "./FilesPage";
 import styles from "./Frame.module.css";
 import { IconBar } from "./IconBar";
-import { ask, finishBoardActions } from "./ipc";
+import { ask } from "./ipc";
 import { PageArea } from "./PageArea";
 import { editSetup } from "./positionSetup";
 import { TabArea } from "./TabArea";
@@ -31,13 +32,23 @@ const { frame, startup, problem: problemLine } = styles;
 export function Frame() {
   const [shown, setShown] = useState<Shown>();
   const [problem, setProblem] = useState<string>();
+  const [checkpointProblem, setCheckpointProblem] = useState<string>();
   const [iconBarOpen, setIconBarOpen] = useState(true);
   // A save or a close reads changes that React may not have drawn yet.
   const newest = useRef<Shown>({ tabs: [], page: "Home", shownTab: undefined });
-  const change = useCallback((next: Change) => {
-    newest.current = apply(newest.current, next);
-    setShown(newest.current);
-  }, []);
+  const session = useMemo(
+    () => boardSession(() => newest.current, setCheckpointProblem),
+    [],
+  );
+  const change = useCallback(
+    (next: Change) => {
+      const before = newest.current;
+      newest.current = apply(before, next);
+      setShown(newest.current);
+      session.changed(before, next);
+    },
+    [session],
+  );
   const restoring = useRef<Promise<boolean> | undefined>(undefined);
   const restore = useCallback(() => {
     if (restoring.current !== undefined) return;
@@ -72,13 +83,7 @@ export function Frame() {
       }
       try {
         if (await restoring.current) {
-          await finishBoardActions();
-          const { tabs, shownTab } = newest.current;
-          await ask({
-            type: "QuitWithBoards",
-            boards: tabs.map(({ game }) => game),
-            selected: shownTab ?? null,
-          });
+          await session.quit();
           return;
         }
       } catch (error) {
@@ -89,8 +94,11 @@ export function Frame() {
     };
     window.addEventListener("zobrist-close-requested", close);
     restore();
-    return () => window.removeEventListener("zobrist-close-requested", close);
-  }, [restore]);
+    return () => {
+      window.removeEventListener("zobrist-close-requested", close);
+      session.cancel();
+    };
+  }, [restore, session]);
 
   if (shown === undefined) {
     return (
@@ -121,9 +129,9 @@ export function Frame() {
 
   return (
     <div className={frame}>
-      {problem && (
+      {(problem || checkpointProblem) && (
         <p role="alert" className={problemLine}>
-          {problem}
+          {[problem, checkpointProblem].filter(Boolean).join(" ")}
         </p>
       )}
       <TopBar
