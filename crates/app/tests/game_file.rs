@@ -70,7 +70,7 @@ fn second_game_at_its_start(path: &Path, number: u64) -> Value {
             {"name": "Result", "value": "0-1"},
         ],
         "result": "blackWin", "squares": [], "arrows": [],
-        "startComments": [], "moveSymbol": null, "positionSymbol": null,
+        "comment": "", "startComments": [], "moveSymbol": null, "positionSymbol": null,
         "lastMove": null, "place": [],
         "notation": [
             notation_move(0, "f3", &[]), notation_move(1, "e5", &[]),
@@ -200,6 +200,7 @@ fn second_game_with_comment(path: &Path, unsaved: bool) -> Value {
     picture["hasNextMove"] = json!(false);
     picture["lastMove"] = json!({"from": "d8", "to": "h4"});
     picture["place"] = json!([0, 0, 0, 0]);
+    picture["comment"] = json!("Fool's mate");
     picture["notation"][3] = notation_move(3, "Qh4#", &["Fool's mate"]);
     picture["unsaved"] = json!(unsaved);
     picture

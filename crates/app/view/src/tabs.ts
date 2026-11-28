@@ -327,20 +327,6 @@ export function annotate(
   return drawAnswer(game, ask({ ...annotation, game }), change);
 }
 
-export function commentOfCurrentPlace({
-  place,
-  notation,
-  startComments,
-}: Pick<GamePicture, "place" | "notation" | "startComments">): string {
-  const commentOfStart = notation[0]?.commentsBefore ?? startComments;
-  const currentMove = lineThatHolds(place, notation)?.find(
-    (move) => move.place.join() === place.join(),
-  );
-  const parts =
-    place.length === 0 ? commentOfStart : (currentMove?.commentsAfter ?? []);
-  return parts.join(" ");
-}
-
 /** Sends all shapes that the board shows at the current place and draws the answer. */
 export async function setShapes(
   game: number,

@@ -25,6 +25,7 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 
+pub mod comment;
 pub mod editor;
 pub mod game;
 pub mod pgn;
